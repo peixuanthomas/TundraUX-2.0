@@ -19,13 +19,13 @@
 #include <iomanip>  
 
 #define DEFAULT_USER_TYPE "debug" //Remember set to "guest" for production
-#define DEFAULT_USER_NAME "debug" //Remember set to "(empty)" for production
+#define DEFAULT_USER_NAME "debug" //Remember set to "" for production
 
 std::string guessSimilarCommand(const std::string& input);
 bool isLikelyCmd(const std::string& input);
 
 void task_main() {
-    //colorcout("cyan", "TundraUX 2.0\n\n");
+    clear_screen();
     print_icon();
     std::cout << std::endl;
     USER currentUser = {
@@ -47,7 +47,11 @@ void task_main() {
     const int MAX_HISTORY = 100;
 
     std::vector<CommandEntry> commands = {
-        // Define commands here
+        // Define commands here:
+        // IMPORTANT: For commands that take arguments, set exactMatch to false
+        // so that the prefix match can work correctly.
+        // Format: {prefix, handler, exactMatch, requiredUserType}
+        // Also remember to update help command when adding new commands.
         {"exit", [](const std::string &)
          {
              if (getYN("Make sure to save all changes before exit. Proceed to exit?"))
@@ -183,9 +187,6 @@ void task_main() {
              std::cout << std::endl;
          },
          true, ""},
-        // {"secure",[](const std::string&) {//Test fnction for admin detection
-        //     colorcout("yellow", "Admin detected.\n");
-        // },true,"admin"},
         {"login ", [&currentUser](const std::string &input)
          {
              std::istringstream iss(input);
