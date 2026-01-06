@@ -20,11 +20,6 @@ std::unordered_map<std::string, std::string> colorMap = {
     {"cyan", "\033[36m"},         //For titles/headings
     {"white", "\033[37m"},        //For regular text
     {"reset", "\033[0m"},
-    {"WARNING", "\033[33m"},      //Alias for yellow
-    {"ERROR", "\033[31m"},        //Alias for red
-    {"SUCCESS", "\033[32m"},      //Alias for green
-    {"TITLE", "\033[36m"},        //Alias for cyan
-    {"INFO", "\033[34m"},         //Alias for blue
     {"RED", "\033[31m"},          //For warning/error messages
     {"GREEN", "\033[32m"},        //For success messages
     {"YELLOW", "\033[33m"},       //For prompts/instructions
@@ -36,9 +31,6 @@ std::unordered_map<std::string, std::string> colorMap = {
 };
 
 void colorcout(const std::string& color, const std::string& str) {
-    // auto it = colorMap.find(color);
-    // int colorCode = (it != colorMap.end()) ? it->second : RESET;
-    // std::cout << "\033[" << colorCode << "m" << str << "\033[0m";
     if (color.empty()) {
         std::cout << str;
         return;
@@ -95,8 +87,8 @@ void rollcout(const std::string& color, const std::string& str) {
     vector<bool> done(str.size(), false);
     for (size_t i = 0; i < str.size(); ++i) {
         if (!isPrintable(static_cast<unsigned char>(str[i]))) {
-            done[i] = true;           // 不可见字符不参与滚动
-            curr[i] = ' ';            // 占位为空格，避免输出换行等
+            done[i] = true;           // non-printable, mark as done
+            curr[i] = ' ';            // placeholder space to avoid outputting newlines etc.
             continue;
         }
         curr[i] = printable[dist(rng)];

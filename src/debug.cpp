@@ -15,6 +15,7 @@ void delete_file() {
     }
 }
 
+//List the whole structure of user_data.dat for debugging
 void struct_file() {
     std::ifstream in("user_data.dat", std::ios::binary);
     if (!in) {

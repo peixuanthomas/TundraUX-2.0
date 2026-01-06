@@ -1,3 +1,6 @@
+//The whole module is not safe for production. Change if necessary.
+//This is only a demo.
+
 #include "crypto.h"
 #include <string>
 #include <vector>

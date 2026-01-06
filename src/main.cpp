@@ -20,7 +20,6 @@ int main(int argc, char* argv[]) {
         licenseFile.close();
         colorcout("yellow", "\nPress Enter to accept the license and continue...");
         std::cin.get();
-        //std::filesystem::remove("license");
         clear_screen();
         hello();
         task_main();
