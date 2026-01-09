@@ -32,5 +32,6 @@ class DataManager {
         void SaveUsersToFile();
 };
 void ReadOldFile();
+void listUser();
 
 #endif // !UDATA_H

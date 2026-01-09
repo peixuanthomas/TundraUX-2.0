@@ -399,3 +399,16 @@ void createfile() {
     file.close();
     colorcout("green", "Data file created successfully.\n");
 }
+
+void listUser() {
+    DataManager dataManager("user_data.dat");
+    const auto& users = dataManager.GetAllUsers();
+    if (users.empty()) {
+        colorcout("yellow", "No users found.\n");
+        return;
+    }
+    colorcout("cyan", "Current Users:\n");
+    for (const auto& user : users) {
+        colorcout("white", "Username: " + user.name + "\n");
+    }
+}

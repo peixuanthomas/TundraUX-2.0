@@ -253,6 +253,7 @@ void task_main() {
              };
          },
          true, ""},
+        {"listuser", [](const std::string &){ listUser(); }, true, ""},
         {"TUXfile", [&currentUser](const std::string &){
             file_editor(currentUser.name, currentUser.type);
         }, true, "user,admin,debug"},
@@ -374,7 +375,7 @@ std::string guessSimilarCommand(const std::string& input) {
     if (token.empty()) return "";
     static const std::vector<std::string> known = {
         "exit","help","cls","login","logout","manageuser","modify","TUXfile",
-        "license"
+        "license","listuser","time","importdata"
     };
     int bestDist = 3;  // Max distance to consider
     std::string bestMatch;
