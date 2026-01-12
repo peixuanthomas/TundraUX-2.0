@@ -67,6 +67,7 @@ void task_main() {
              colorcout("white", " - cls: Clear the screen\n");
              colorcout("white", " - login <username>: Log in as specified user\n");
              colorcout("white", " - logout: Log out current user\n");
+             colorcout("white", " - listuser: List all users\n");
              colorcout("white", " - manageuser: Open user management interface\n");
              colorcout("white", " - modify: Modify current user information\n");
              colorcout("white", " - importdata: Import user data from old versions\n");
