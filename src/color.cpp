@@ -1,4 +1,4 @@
-//@attention Windows only code.
+//Attention Windows only code.
 
 #include "color.h"
 #include <iostream>

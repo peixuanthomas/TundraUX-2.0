@@ -1,3 +1,4 @@
+//Attention: windows only code.
 #include "command.h"
 #include "manageusers.h"
 #include "color.h"

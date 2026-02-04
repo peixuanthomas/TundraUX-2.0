@@ -1,3 +1,4 @@
+//Attention: windows only code.
 #include "TUXfile.h"
 #include <fstream>
 #include <stdexcept>
