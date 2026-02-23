@@ -1,3 +1,4 @@
+//Attention: Windows only code.
 #include "command.h"
 #include <string>
 #include <iostream>
