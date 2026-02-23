@@ -18,8 +18,8 @@
 #include <chrono>   
 #include <iomanip>  
 
-#define DEFAULT_USER_TYPE "debug" //Remember set to "guest" for production
-#define DEFAULT_USER_NAME "debug" //Remember set to "" for production
+#define DEFAULT_USER_TYPE "debug" //set to "guest" for production
+#define DEFAULT_USER_NAME "debug" //set to "" for production
 
 std::string guessSimilarCommand(const std::string& input);
 bool isLikelyCmd(const std::string& input);
@@ -54,10 +54,11 @@ void task_main() {
         // Also remember to update help command when adding new commands.
         {"exit", [](const std::string &)
          {
-             if (getYN("Make sure to save all changes before exit. Proceed to exit?"))
-             {
-                 exit(0);
-             }
+            //  if (getYN("Make sure to save all changes before exit. Proceed to exit?"))
+            //  {
+            //      exit(0);
+            //  }
+            exit(0);
          },
          true, ""},
         {"help", [](const std::string &)
