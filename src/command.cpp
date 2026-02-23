@@ -76,6 +76,7 @@ void task_main() {
              colorcout("white", " - time: Display current system time and timestamp\n");
              colorcout("white", " - license: Show terms of use license\n");
              colorcout("white", " - displaytest: Run display test\n");
+             colorcout("white", " - info: Show program information\n");
              colorcout("white", " - help: Show this help message\n");
          },
          true, ""},
@@ -259,6 +260,10 @@ void task_main() {
         {"TUXfile", [&currentUser](const std::string &){
             file_editor(currentUser.name, currentUser.type);
         }, true, "user,admin,debug"},
+        {"info", [](const std::string &){
+            constexpr const char* BUILD = "Build: " __TIMESTAMP__;
+            colorcout("cyan", "TundraUX 2.0 " + std::string(BUILD) + "\n");
+        }, true, ""},
         {"license", [](const std::string &){ license(); }, true, ""},
         {"manageuser", [](const std::string &){ manage_users(); }, true, "admin,debug"},
         {"createfile", [](const std::string &){ createfile(); }, true, "debug"},
@@ -377,7 +382,7 @@ std::string guessSimilarCommand(const std::string& input) {
     if (token.empty()) return "";
     static const std::vector<std::string> known = {
         "exit","help","cls","login","logout","manageuser","modify","TUXfile",
-        "license","listuser","time","importdata"
+        "license","listuser","time","importdata","info","displaytest"
     };
     int bestDist = 3;  // Max distance to consider
     std::string bestMatch;
