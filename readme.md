@@ -1,110 +1,152 @@
 # TundraUX 2.0
 
-A secure, modular file management system with encrypted storage, multi-user access control, and an advanced console-based editor.
+A secure, modular file management system with encrypted storage, multi-user access control, and a console-based text editor.
 
 ## Overview
 
-TundraUX 2.0 is a complete rewrite of TundraUX 1.0, featuring a refactored architecture with separated concerns, enhanced security, and a sophisticated inline text editor. It provides encrypted binary file storage (.TUX format) with comprehensive metadata tracking and permission-based access control.
+TundraUX 2.0 is a Windows console application built around a two-layer design: an interactive shell for user and session management, and a dedicated TUX File Manager for working with encrypted files. It is a complete rewrite of the original TundraUX, featuring a modular C++ architecture, role-based permissions, and a persistent user account system.
 
-## Key Improvements from 1.0
+All files managed by the TUX File Manager are stored in the proprietary `.TUX` binary format with XOR encryption, embedded metadata, and creator-based access control.
 
-### Architecture
-- **Modularized Design**: Separated functionality into distinct modules for maintainability
-- **Better Code Organization**: Clear separation of concerns with dedicated utility functions
-- **Improved Error Handling**: Comprehensive validation and error checking throughout
+## Key Features
 
-### Editor & UI
-- **Advanced Inline Editor**: Multi-line text editing with real-time rendering
-- **Text Wrapping**: Automatic line wrapping that adapts to console width
-- **Integrated Command Mode**: Tab-accessible command interface within editor
-- **Console Resizing Support**: Editor dynamically adapts to terminal size changes
-- **Command History**: Navigation through previously entered commands with arrow keys
-- **Colored Output**: Enhanced user experience with syntax-highlighted messages
+- **Encrypted File Storage** - All files use the `.TUX` binary format with XOR encryption
+- **Advanced Text Editor** - Multi-line inline editor with dynamic text wrapping and real-time rendering
+- **Multi-User System** - Persistent user accounts with password authentication and lockout protection
+- **Access Control** - Role-based permissions (Guest, Regular User, Admin, Debug) with creator-based file editing
+- **Metadata Tracking** - Full creation and modification history with timestamps and user attribution
+- **Colored Output** - Enhanced console experience with color-coded messages
+- **Command History** - Navigate previous commands with arrow keys
+- **Import/Export** - Convert between encrypted `.TUX` and plain text `.txt` formats
+- **Shell Passthrough** - Run CMD commands directly from the shell using the `/` prefix
+- **Fuzzy Command Suggestions** - Typo-tolerant command matching using Levenshtein distance
 
-### File Management
-- **Robust I/O**: Improved read/write operations with extensive validation
-- **Atomic Saves**: File write operations that prevent data corruption
-- **Filename Validation**: Strict validation rules for safe file naming
-- **Import/Export**: Seamless conversion between encrypted (.TUX) and plain text (.txt) formats
+## Getting Started
 
-### Security & Access Control
-- **Multi-user Support**: Track file creators and editors with timestamp metadata
-- **Permission System**: Role-based access control (admin, debug, regular users)
-- **Creator-based Access**: Only file creators or privileged users can edit files
-- **Encrypted Storage**: XOR-based encryption for all sensitive data
+### Requirements
 
-## Features
+- **OS**: Windows (uses Windows Console API)
+- **Compiler**: C++17 or later
+- **Build System**: CMake
+
+### Building
+
+```bash
+cmake -B build
+cmake --build build
+```
+
+### First Run
+
+On first launch, the program displays the license agreement. After accepting, a `user_data.dat` file is created to store user accounts. Subsequent launches skip the license screen and go directly to the shell.
+
+## Shell Command Reference
+
+These commands are available at the main `>>` prompt.
+
+| Command | Usage | Description |
+|---------|-------|-------------|
+| `help` | `help` | Display available commands |
+| `info` | `info` | Show program build information |
+| `login` | `login <username>` | Log in as a registered user |
+| `logout` | `logout` | Log out the current user |
+| `modify` | `modify` | Change the current user's password or password hint |
+| `listuser` | `listuser` | List all registered user accounts |
+| `manageuser` | `manageuser` | Open the user management interface (Admin/Debug) |
+| `TUXfile` | `TUXfile` | Open the TUX File Manager |
+| `importdata` | `importdata` | Import user data from older versions (Admin/Debug) |
+| `time` | `time` | Display current system time and Unix timestamp |
+| `license` | `license` | Show the terms of use license |
+| `displaytest` | `displaytest` | Run a console display test |
+| `cls` | `cls` | Clear the screen |
+| `exit` | `exit` | Exit the program |
+| `/<cmd>` | `/<cmd>` | Pass a command directly to the Windows shell |
+
+## TUX File Manager Command Reference
+
+These commands are available inside the `TUXfile` interface. Requires an active logged-in user (Admin or higher).
 
 ### File Operations
-- **Create**: Initialize new encrypted files with metadata
-- **View**: Display file contents with safety checks
-- **Edit**: Advanced inline editor with full text manipulation
-- **Delete**: Safe file deletion with confirmation
-- **Rename**: Rename files with validation
-- **List**: Tree-view display of files and directories
-- **Export**: Convert .TUX files to plain text .txt format (privileged)
-- **Import**: Convert .txt files to encrypted .TUX format (privileged)
-- **Metadata**: View file creation/modification history (privileged)
 
-### Editor Features
-- Full multi-line text editing
-- Dynamic text wrapping based on console width
-- Arrow key navigation (left, right, up, down)
-- Line break insertion and deletion
-- Character insertion and removal
-- Command mode for save/quit operations
-- Real-time cursor positioning
-- Automatic line clearing to prevent artifacts
+| Command | Usage | Description |
+|---------|-------|-------------|
+| `ls`, `list` | `ls` | List all files and directories |
+| `c`, `create` | `c <filename>` | Create a new encrypted file |
+| `v`, `view` | `v <filename>` | View file contents |
+| `e`, `edit` | `e <filename>` | Open file in the inline editor |
+| `d`, `delete` | `d <filename>` | Delete a file (with confirmation) |
+| `rn`, `rename` | `rn <old> <new>` | Rename a file |
+| `h`, `help` | `h` | Display the help menu |
+| `i`, `info` | `i` | Show program information |
+| `q`, `quit` | `q` | Exit the file manager |
 
-### Access Control
-| User Type | Permissions |
-|-----------|-------------|
-| **Regular User** | Create, view, edit own files, delete own files |
-| **Admin User** | All operations including export, import, metadata |
-| **Debug User** | All operations |
+### Privileged Commands (Admin/Debug Only)
 
-## Command Reference
-
-### Basic Commands
-```
-ls, list              List all files and directories
-c, create <name>      Create new file
-v, view <name>        View file contents
-e, edit <name>        Edit file in inline editor
-d, delete <name>      Delete file (with confirmation)
-rn, rename <old> <new> Rename file
-h, help               Display help menu
-q, quit               Exit program
-```
-
-### Privileged Commands (Admin/Debug only)
-```
-ex, export <name>     Export to .txt format
-im, import <name>     Import from .txt format
-m, metadata <name>    View file metadata
-```
+| Command | Usage | Description |
+|---------|-------|-------------|
+| `ex`, `export` | `ex <filename>` | Export a `.TUX` file to plain text (`.txt`) |
+| `im`, `import` | `im <filename>` | Import a plain text `.txt` file as `.TUX` |
+| `m`, `metadata` | `m <filename>` | View a file's creation and modification history |
 
 ## Editor Controls
 
-| Control | Action |
-|---------|--------|
-| **Arrow Keys** | Move cursor (left, right, up, down) |
-| **Enter** | Insert line break at cursor |
-| **Backspace** | Delete character or merge lines |
-| **Character Keys** | Insert character at cursor position |
-| **Tab** | Enter command mode |
-| **ESC** | Exit command mode |
+The inline editor is opened via the `edit` command in the TUX File Manager.
+
+### Navigation & Editing
+
+| Key | Action |
+|-----|--------|
+| Arrow Keys | Move cursor (left, right, up, down) |
+| Enter | Insert line break at cursor position |
+| Backspace | Delete character or merge lines |
+| Character Keys | Insert character at cursor |
+| Tab | Enter command mode |
 
 ### Command Mode
-Activated by pressing **Tab** while editing:
+
+Press **Tab** while editing to access quick commands:
+
 - `/s` - Save file and exit editor
 - `/q` - Discard changes and exit editor
 
-## Technical Specification
+## Access Control
 
-### File Format (.TUX)
+### User Roles & Permissions
 
-Binary format with XOR encryption:
+**Guest**
+- Log in to an existing account
+
+**Regular User**
+- Create new files
+- View files
+- Edit own files
+- Delete own files
+
+**Admin**
+- All regular user permissions
+- Manage users
+- Export files to plain text
+- Import plain text as encrypted files
+- View file metadata
+
+**Debug**
+- All operations without restrictions
+
+### Account Lockout
+
+After 8 failed login attempts, an account is locked out and cannot be used until re-enabled by an admin. A password hint is displayed after each failed attempt if one is configured.
+
+### Password Requirements
+
+- Minimum 6 characters
+- At least one uppercase letter
+- At least one lowercase letter
+- At least one digit
+- Cannot be the same as the password hint
+
+## File Format Specification
+
+### .TUX Binary Format
 
 ```
 [Version (4 bytes)]
@@ -116,70 +158,62 @@ Binary format with XOR encryption:
 ```
 
 ### Constraints
+
 - **Version**: Currently 1
-- **Max String Length**: 1024 bytes
-- **Max Content Size**: 16 MB per file
+- **Max String Length**: 1024 bytes per field
+- **Max File Size**: 16 MB per file
 - **Command History**: 100 entries
 
 ### Filename Rules
-- Allowed characters: A-Z, a-z, 0-9, hyphens (-), underscores (_)
+
+- Allowed characters: A–Z, a–z, 0–9, hyphens (`-`), underscores (`_`)
 - Must not be empty
 - Case-sensitive
 
 ### Timestamps
+
 - Stored as Unix timestamps (seconds since epoch)
-- Local time display format: `YYYY-MM-DD HH:MM:SS`
+- Displayed in local time as `YYYY-MM-DD HH:MM:SS`
 - Automatically updated on file modification
 
-## Requirements
+## Architecture
 
-### System
-- **OS**: Windows (uses Windows Console API)
-- **Compiler**: C++17 or later
-- **Libraries**: Standard C++ library with filesystem support
+TundraUX 2.0 follows a modular design with clear separation of concerns:
 
-### Dependencies
-- `<filesystem>` - File operations
-- `<chrono>` - Time handling
-- `<iostream>` - Console I/O
-- `<windows.h>` - Console API (Windows-specific)
+| File | Responsibility |
+|------|---------------|
+| `main.cpp` | Entry point, license check, first-run setup |
+| `command.cpp` | Main shell loop, command dispatch, fuzzy matching |
+| `TUXfile.cpp` | TUX File Manager and `.TUX` format I/O |
+| `editor_win.cpp` | Inline text editor (Windows Console API) |
+| `crypto.cpp` | XOR encryption and decryption |
+| `udata.cpp` | User data management and persistence |
+| `manageusers.cpp` | User creation and administration interface |
+| `color.cpp` | Colored console output utilities |
+| `hello.cpp` | Startup messages and display helpers |
+| `debug.cpp` | Debug utilities and file structure inspection |
 
-## Building
+## Security Notice
 
-Use Cmake to build the project
+**Important**: The current encryption uses a simple XOR cipher with a fixed key. This is **not cryptographically secure** and should not be used to protect sensitive data.
 
-## IMPORTANT
-
-Current encryption and decryption use a simple fixed key for pseudo-random number generation. This is NOT secure for production use. Please consider replacung it with better alogrithms. Add your own methods in crypto.cpp replacing the encrypt and decrypt function. Be aware that changing encryption methods will break compatibility with existing files.
+To use stronger encryption, replace the implementation in `crypto.cpp`. Note that changing the encryption algorithm will break compatibility with existing `.TUX` files.
 
 ## Version History
 
 ### 2.0 (Current)
-- Complete architecture redesign
-- Modularized codebase
-- Advanced inline editor with dynamic wrapping
-- Command history system
-- Multi-user access control
-- Comprehensive error handling
-- Atomic file operations
-- Colored output system
+- Complete architecture redesign with modular codebase
+- Two-layer design: interactive shell + TUX File Manager
+- Persistent multi-user account system with role-based permissions
+- Account lockout after excessive failed login attempts
+- Advanced inline text editor with dynamic wrapping
+- Command history with arrow key navigation
+- Fuzzy command suggestion using Levenshtein distance
+- Windows shell passthrough via `/` prefix
+- Metadata tracking and file import/export
+- Colored console output
 
 ### 1.0 (Legacy)
-- Basic file management
+- Basic file management system
 - Simple text editor
 - Single-user support
-
-## Future Enhancements
-
-Potential improvements for future versions:
-- [ ] File compression
-- [ ] Undo/redo in editor
-- [ ] Search and replace functionality
-- [ ] File permissions matrix
-- [ ] Backup system
-- [ ] File versioning
-- [ ] Multi-level folder structure
-
-## Changelog
-
-See commit history for detailed changes.
