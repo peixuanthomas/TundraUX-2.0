@@ -18,6 +18,8 @@
 #include <unordered_map>
 #include "udata.h"
 #include <conio.h>
+#include <random>
+#include "editor_win.h"
 // Simple XOR encryption/decryption 
 void writeEncryptedString(std::ofstream& out, const std::string& data) {
     std::string enc = encryptDecrypt(data);
@@ -62,10 +64,26 @@ static bool isValidFilename(const std::string& name) {
     });
 }
 
+// Verify path validity (components separated by '/')
+static bool isValidPath(const std::string& p) {
+    if (p.empty()) return false;
+    std::string comp;
+    for (char c : p) {
+        if (c == '/') {
+            if (!isValidFilename(comp)) return false;
+            comp.clear();
+        } else {
+            comp += c;
+        }
+    }
+    return isValidFilename(comp);
+}
+
 // ---------- Paths & Directories ----------
 std::string getTuxPath(const std::string& filename) {
     std::string full = filename;
     if (full.find(".TUX") == std::string::npos) full += ".TUX";
+    for (char& c : full) if (c == '/') c = '\\';
     return "Files\\" + full;
 }
 void initFilesDir() {
@@ -155,7 +173,6 @@ void writeTuxFile(const std::string& path, const std::string& content, const Fil
 
 // ---------- List ----------
 void listTuxFiles() {
-    colorcout("CYAN", "=== TUX File List ===\n");
     const std::string root = "Files";
     if (!std::filesystem::exists(root)) {
         colorcout("YELLOW", "(Files directory does not exist)\n\n"); return;
@@ -164,38 +181,56 @@ void listTuxFiles() {
     std::function<void(const std::filesystem::path&, const std::string&)> walk;
     walk = [&](const std::filesystem::path& dir, const std::string& pre) {
         std::vector<std::filesystem::directory_entry> es;
-        for (auto &e: std::filesystem::directory_iterator(dir)) {
-            if (e.is_directory() || (e.is_regular_file() && e.path().extension()==".TUX")) es.push_back(e);
+        for (auto& e : std::filesystem::directory_iterator(dir)) {
+            // Skip the temp directory
+            if (e.is_directory() && e.path().filename() == "temp") continue;
+            if (e.is_directory() || (e.is_regular_file() && e.path().extension() == ".TUX")) es.push_back(e);
         }
-        std::sort(es.begin(), es.end(), [](auto&a, auto&b){return a.path().filename().string()<b.path().filename().string();});
-        for (size_t i=0;i<es.size();++i){
-            bool last = (i+1==es.size());
-            std::string conn = last?"`- ":"|- ";
-            std::string next = pre + (last?"   ":"|  ");
+        std::sort(es.begin(), es.end(), [](auto& a, auto& b) {
+            // Directories first, then files; within each group sort alphabetically
+            if (a.is_directory() != b.is_directory()) return a.is_directory() > b.is_directory();
+            return a.path().filename().string() < b.path().filename().string();
+        });
+        for (size_t i = 0; i < es.size(); ++i) {
+            bool last = (i + 1 == es.size());
+            std::string conn = last ? "`- " : "|- ";
+            std::string next = pre + (last ? "   " : "|  ");
             if (es[i].is_directory()) {
-                colorcout("white", pre+conn+es[i].path().filename().string()+"\n");
+                colorcout("CYAN", pre + conn + es[i].path().filename().string() + "/\n");
                 walk(es[i].path(), next);
             } else {
                 ++count;
-                colorcout("white", pre+conn+es[i].path().filename().string()+"\n");
+                // Strip .TUX extension for display
+                std::string name = es[i].path().stem().string();
+                colorcout("white", pre + conn + name + "\n");
             }
         }
     };
-    colorcout("CYAN","Files\n");
-    walk(root,"");
-    if (count==0) colorcout("YELLOW","\n(Empty directory)\n");
+    colorcout("CYAN", "Files/\n");
+    walk(root, "");
+    if (count == 0) colorcout("YELLOW", "\n(No files)\n");
     std::cout << "\n";
 }
 
 // ---------- Create ----------
 void createTuxFile(const std::string& filename) {
     if (filename.empty()) { colorcout("RED","Usage: create <filename>\n"); return; }
+    if (!isValidPath(filename)) {
+        colorcout("YELLOW","Invalid filename. Use alphanumeric, '-', '_', and '/' for subfolders.\n"); return;
+    }
     std::string path = getTuxPath(filename);
     if (std::filesystem::exists(path)) {
         if (!getYN("File already exists, overwrite?")) {
             colorcout("YELLOW","Cancelled\n");
             return;
         }
+    }
+    // Create parent directories if needed
+    std::filesystem::path fp(path);
+    if (fp.has_parent_path()) {
+        std::error_code ec;
+        std::filesystem::create_directories(fp.parent_path(), ec);
+        if (ec) { colorcout("RED","Failed to create directory: "+ec.message()+"\n"); return; }
     }
     auto now = std::chrono::system_clock::to_time_t(std::chrono::system_clock::now());
     FileMetadata meta{currentUser.name,currentUser.name,now,now};
@@ -215,249 +250,88 @@ void viewTuxFile(const std::string& filename) {
 }
 
 // ---------- Edit ----------
-static std::vector<std::string> splitLines(const std::string& text) {
-    std::vector<std::string> lines; std::stringstream ss(text); std::string l;
-    while (std::getline(ss,l)) lines.push_back(l);
-    if (text.empty() || text.back()=='\n') lines.push_back("");
-    if (lines.empty()) lines.push_back("");
-    return lines;
-}
-
-static void renderEditorInit(const std::vector<std::string>& lines) {
-    system("cls");
-    colorcout("CYAN","=== TUX Inline Editor ===\n");
-    colorcout("YELLOW","[press tab to enter commands]\n\n");
-    for (size_t i=0;i<lines.size();++i) {
-        std::cout << lines[i] << "\n";
-    }
-    std::cout << "\nCommand: (/s to save and quit, /q to quit without saving)" << std::flush;
-}
-
-static int getWrapWidth(HANDLE h) {
-    CONSOLE_SCREEN_BUFFER_INFO csbi;
-    GetConsoleScreenBufferInfo(h, &csbi);
-    // Reserve 1 column to avoid automatic console line wrapping
-    return std::max<SHORT>(1, csbi.dwSize.X - 1);
-}
-
-static int rowCount(const std::string& line, int wrapWidth) {
-    return std::max<int>(1, static_cast<int>((line.size() + wrapWidth - 1) / wrapWidth));
-}
-
-static void clearRow(HANDLE h, SHORT y) {
-    CONSOLE_SCREEN_BUFFER_INFO csbi;
-    GetConsoleScreenBufferInfo(h, &csbi);
-    COORD pos = {0, y};
-    DWORD written;
-    FillConsoleOutputCharacter(h, ' ', csbi.dwSize.X, pos, &written);
-}
-
-// Unified handling of bottom area rendering (blank lines + command line + clearing old remnants)
-static void renderBottomArea(HANDLE h, int displayRows, const std::string& text, int wrapWidth, int& prevBottom) {
-    const SHORT headerRows = 3;
-    SHORT blankY = headerRows + static_cast<SHORT>(displayRows);
-    
-    // 1. Clear blank lines between content and command line (to prevent old command line remnants when content moves down)
-    clearRow(h, blankY);
-
-    // 2. Calculate new command line position
-    SHORT cmdStartY = blankY + 1;
-    std::string full = "Command: " + text;
-    int totalLen = static_cast<int>(full.size());
-    int needRows = std::max(1, (totalLen + wrapWidth - 1) / wrapWidth);
-    SHORT cmdEndY = cmdStartY + static_cast<SHORT>(needRows) - 1;
-
-    // 3. render command line with wrapping
-    SHORT yPos = cmdStartY;
-    for (size_t i = 0; i < full.size(); i += wrapWidth) {
-        clearRow(h, yPos); // Clear the line before rendering
-        SetConsoleCursorPosition(h, {0, yPos});
-        std::cout << full.substr(i, wrapWidth) << std::flush;
-        yPos++;
-    }
-
-    // 4. Clear remnants below (if content moves up or command line shortens)
-    if (prevBottom > cmdEndY) {
-        for (int y = cmdEndY + 1; y <= prevBottom; ++y) {
-            clearRow(h, static_cast<SHORT>(y));
-        }
-    }
-
-    // 5. Update bottom area record
-    prevBottom = cmdEndY;
-}
-
-static int renderAllLines(HANDLE h, const std::vector<std::string>& lines, int wrapWidth, int& prevRows) {
-    const SHORT headerRows = 3; // title + hint + blank
-    SHORT y = headerRows;
-    int usedRows = 0;
-    for (const auto& line : lines) {
-        if (line.empty()) {
-            clearRow(h, y);
-            SetConsoleCursorPosition(h, {0, y});
-            std::cout << std::flush;
-            ++y; ++usedRows;
-            continue;
-        }
-        for (size_t start = 0; start < line.size(); start += wrapWidth) {
-            clearRow(h, y);
-            SetConsoleCursorPosition(h, {0, y});
-            std::cout << line.substr(start, wrapWidth) << std::flush;
-            ++y; ++usedRows;
-        }
-    }
-    // clean up remaining old lines
-    for (int r = usedRows; r < prevRows; ++r, ++y) {
-        clearRow(h, y);
-    }
-    prevRows = usedRows;
-    return usedRows;
-}
-
-static void setCursorPosition(HANDLE h, int cx, int cy, int displayRows, bool cmdMode, const std::string& cmd, const std::vector<std::string>& lines) {
-    const SHORT headerRows = 3;
-    int wrapWidth = getWrapWidth(h);
-    COORD pos;
-    if (cmdMode) {
-        pos.X = 9 + static_cast<SHORT>(cmd.size()); // "Command: "
-        pos.Y = headerRows + static_cast<SHORT>(displayRows) + 1;
-    } else {
-        int rowsBefore = 0;
-        for (int i = 0; i < cy; ++i) rowsBefore += rowCount(lines[i], wrapWidth);
-        pos.X = static_cast<SHORT>(cx % wrapWidth);
-        pos.Y = headerRows + static_cast<SHORT>(rowsBefore + (cx / wrapWidth));
-    }
-    SetConsoleCursorPosition(h, pos);
-}
-
-// ---------- Edit ----------
 void editTuxFile(const std::string& filename) {
     if (filename.empty()) { colorcout("RED","Usage: edit <filename>\n"); return; }
     std::string path = getTuxPath(filename);
     if (!std::filesystem::exists(path)) { colorcout("RED","Not found: "+filename+"\n"); return; }
     auto [oldContent, meta] = readFullTuxFile(path);
     if (!g_lastTuxReadOk) { colorcout("RED","File corrupted, abort editing\n\n"); return; }
-    // Security check: only creator, admin, or debug can edit
     if (meta.creator != currentUser.name && !hasPrivilege()) {
-        colorcout("RED", "Access denied: You are not the creator of this file\n");
+        colorcout("RED","Access denied: You are not the creator of this file\n");
         return;
     }
 
-    std::vector<std::string> lines = splitLines(oldContent);
-    int cx=0, cy=0;
-    bool cmdMode=false; std::string cmd;
-    bool editing=true; bool saved=false;
-    
-    HANDLE h = GetStdHandle(STD_OUTPUT_HANDLE);
-    int wrapWidth = getWrapWidth(h);
-    int displayRows = 0;
-    int prevDisplayRows = 0;
-    int prevBottom = 0; // Record the bottom line of the command area
+    // Use Files\temp directory
+    std::string tempDir = "Files\\temp";
+    { std::error_code ec; std::filesystem::create_directories(tempDir, ec); }
 
-    // Initial render
-    renderEditorInit(lines);
-    displayRows = renderAllLines(h, lines, wrapWidth, prevDisplayRows);
-    renderBottomArea(h, displayRows, "(/s to save and quit, /q to quit without saving)", wrapWidth, prevBottom);
-    setCursorPosition(h, cx, cy, displayRows, cmdMode, cmd, lines);
+    // Seeded RNG
+    static std::mt19937 rng(
+        static_cast<unsigned>(std::chrono::steady_clock::now().time_since_epoch().count()));
+    std::uniform_int_distribution<int> hexDist(0, 15);
+    std::uniform_int_distribution<int> realIdxDist(0, 4);
+    std::uniform_int_distribution<int> charDist(32, 126);
+    std::uniform_int_distribution<int> lenDist(80, 320);
 
-    while (editing) {
-        int ch=_getch();
-        if (cmdMode) {
-            if (ch==13) { // Enter
-                if (cmd=="/s") {
-                    std::string newContent;
-                    for (size_t i=0;i<lines.size();++i) {
-                        newContent += lines[i];
-                        if (i+1<lines.size()) newContent += "\n";
-                    }
-                    auto now = std::chrono::system_clock::to_time_t(std::chrono::system_clock::now());
-                    meta.lastEditor = currentUser.name;
-                    meta.modifyTime = now;
-                    writeTuxFile(path,newContent,meta);
-                    
-                    // Clear screen for message
-                    system("cls");
-                    colorcout("GREEN","Saved\n\n");
-                    saved=true; editing=false;
-                } else if (cmd=="/q") {
-                    system("cls");
-                    colorcout("YELLOW","Edit cancelled\n\n");
-                    editing=false;
-                }
-                cmdMode=false; cmd.clear();
-                if (editing) {
-                    displayRows = renderAllLines(h, lines, wrapWidth, prevDisplayRows);
-                    renderBottomArea(h, displayRows, "(/s to save and quit, /q to quit without saving)", wrapWidth, prevBottom);
-                    setCursorPosition(h, cx, cy, displayRows, cmdMode, cmd, lines);
-                }
-            } else if (ch==27) { // ESC
-                cmdMode=false; cmd.clear();
-                renderBottomArea(h, displayRows, "(/s to save and quit, /q to quit without saving)", wrapWidth, prevBottom);
-                setCursorPosition(h, cx, cy, displayRows, cmdMode, cmd, lines);
-            }
-            else if (ch==8) { // Backspace in command mode
-                if(!cmd.empty()) {
-                    cmd.pop_back();
-                    renderBottomArea(h, displayRows, cmd, wrapWidth, prevBottom);
-                    setCursorPosition(h, cx, cy, displayRows, cmdMode, cmd, lines);
-                }
-            }
-            else if (isprint(ch)) {
-                cmd.push_back((char)ch);
-                renderBottomArea(h, displayRows, cmd, wrapWidth, prevBottom);
-                setCursorPosition(h, cx, cy, displayRows, cmdMode, cmd, lines);
-            }
-            continue;
-        }
+    auto genHexName = [&]() -> std::string {
+        std::string name(16, '0');
+        for (auto& c : name) { int v = hexDist(rng); c = v < 10 ? ('0'+v) : ('a'+v-10); }
+        return tempDir + "\\" + name;
+    };
 
-        if (ch==9) { // Tab
-            cmdMode=true; cmd.clear();
-            renderBottomArea(h, displayRows, cmd, wrapWidth, prevBottom);
-            setCursorPosition(h, cx, cy, displayRows, cmdMode, cmd, lines);
-            continue;
-        }
-        
-        if (ch==0 || ch==224) {
-            int k=_getch();
-            switch (k) {
-                case 75: if (cx>0) --cx; break; // left
-                case 77: if (cx<(int)lines[cy].size()) ++cx; break; // right
-                case 72: if (cy>0){ --cy; cx=std::min<int>(cx, lines[cy].size()); } break; // up
-                case 80: if (cy+1<(int)lines.size()){ ++cy; cx=std::min<int>(cx, lines[cy].size()); } break; // down
+    // Generate 5 unique random temp paths (no extension)
+    std::vector<std::string> tempPaths;
+    for (int i = 0; i < 5; ++i) {
+        std::string p;
+        do { p = genHexName(); } while (std::filesystem::exists(p));
+        tempPaths.push_back(p);
+    }
+
+    // Choose which file holds the real content
+    int realIdx = realIdxDist(rng);
+
+    // Write all 5 files: one real, four decoys with random printable text
+    for (int i = 0; i < 5; ++i) {
+        std::ofstream tf(tempPaths[i]);
+        if (i == realIdx) {
+            tf << oldContent;
+        } else {
+            int len = lenDist(rng);
+            for (int j = 0; j < len; ++j) {
+                tf << static_cast<char>(charDist(rng));
+                if (j % 40 == 39) tf << '\n';
             }
-            setCursorPosition(h, cx, cy, displayRows, cmdMode, cmd, lines);
-        } else if (ch==8) { // backspace
-            if (cx>0) {
-                lines[cy].erase(cx-1,1);
-                --cx;
-            }
-            else if (cy>0) {
-                cx = (int)lines[cy-1].size();
-                lines[cy-1] += lines[cy];
-                lines.erase(lines.begin()+cy);
-                --cy;
-            }
-            displayRows = renderAllLines(h, lines, wrapWidth, prevDisplayRows);
-            renderBottomArea(h, displayRows, "(/s to save and quit, /q to quit without saving)", wrapWidth, prevBottom);
-            setCursorPosition(h, cx, cy, displayRows, cmdMode, cmd, lines);
-        } else if (ch==13) { // enter
-            std::string rest = lines[cy].substr(cx);
-            lines[cy].erase(cx);
-            lines.insert(lines.begin()+cy+1, rest);
-            ++cy; cx=0;
-            displayRows = renderAllLines(h, lines, wrapWidth, prevDisplayRows);
-            renderBottomArea(h, displayRows, "(/s to save and quit, /q to quit without saving)", wrapWidth, prevBottom);
-            setCursorPosition(h, cx, cy, displayRows, cmdMode, cmd, lines);
-        } else if (isprint(ch)) {
-            lines[cy].insert(lines[cy].begin()+cx,(char)ch);
-            ++cx;
-            displayRows = renderAllLines(h, lines, wrapWidth, prevDisplayRows);
-            renderBottomArea(h, displayRows, "(/s to save and quit, /q to quit without saving)", wrapWidth, prevBottom);
-            setCursorPosition(h, cx, cy, displayRows, cmdMode, cmd, lines);
         }
     }
 
-    if (!saved) colorcout("YELLOW","No changes saved\n\n");
+    // Open the real temp file in the full editor, showing the original filename
+    run_editor(tempPaths[realIdx], filename);
+
+    // Read back the (possibly edited) content
+    std::string newContent;
+    {
+        std::ifstream tf(tempPaths[realIdx]);
+        if (tf) {
+            std::ostringstream oss;
+            oss << tf.rdbuf();
+            newContent = oss.str();
+        } else {
+            colorcout("RED","Failed to read temp file\n\n");
+            for (auto& p : tempPaths) { std::error_code ec; std::filesystem::remove(p, ec); }
+            return;
+        }
+    }
+
+    // Write back to TUX only if content changed
+    if (newContent != oldContent) {
+        auto now = std::chrono::system_clock::to_time_t(std::chrono::system_clock::now());
+        meta.lastEditor = currentUser.name;
+        meta.modifyTime = now;
+        writeTuxFile(path, newContent, meta);
+    }
+
+    // Delete all temp files
+    for (auto& p : tempPaths) { std::error_code ec; std::filesystem::remove(p, ec); }
 }
 
 // ---------- Delete ----------
@@ -474,15 +348,173 @@ void deleteTuxFile(const std::string& filename) {
 // ---------- Rename ----------
 void renameTuxFile(const std::string& oldname, const std::string& newname) {
     if (oldname.empty()||newname.empty()) { colorcout("RED","Usage: rename <old> <new>\n"); return; }
-    if (!isValidFilename(oldname) || !isValidFilename(newname)) {
-        colorcout("YELLOW","Invalid filename. Only letters, digits, and '-' are allowed.\n");
+    if (!isValidPath(oldname) || !isValidPath(newname)) {
+        colorcout("YELLOW","Invalid filename. Use alphanumeric, '-', '_', and '/' for subfolders.\n");
         return;
     }
     std::string op = getTuxPath(oldname), np = getTuxPath(newname);
     if (!std::filesystem::exists(op)) { colorcout("RED","Not found: "+oldname+"\n"); return; }
     if (std::filesystem::exists(np)) { colorcout("RED","Target already exists: "+newname+"\n"); return; }
+    // Create target parent directories if needed
+    std::filesystem::path nfp(np);
+    if (nfp.has_parent_path()) {
+        std::error_code ec;
+        std::filesystem::create_directories(nfp.parent_path(), ec);
+        if (ec) { colorcout("RED","Failed to create directory: "+ec.message()+"\n"); return; }
+    }
     std::filesystem::rename(op,np);
     colorcout("GREEN","Renamed: "+oldname+" -> "+newname+"\n\n");
+}
+
+// ---------- Make Directory ----------
+void makeTuxDir(const std::string& dirname) {
+    if (dirname.empty()) { colorcout("RED","Usage: mkdir <dirname>\n"); return; }
+    if (!isValidPath(dirname)) {
+        colorcout("YELLOW","Invalid name. Use alphanumeric, '-', '_', and '/' for nested dirs.\n"); return;
+    }
+    std::string normalized = dirname;
+    for (char& c : normalized) if (c == '/') c = '\\';
+    std::string path = "Files\\" + normalized;
+    if (std::filesystem::exists(path)) { colorcout("YELLOW","Already exists: "+dirname+"\n"); return; }
+    std::error_code ec;
+    std::filesystem::create_directories(path, ec);
+    if (ec) colorcout("RED","Failed to create directory: "+ec.message()+"\n");
+    else colorcout("GREEN","Created directory: "+dirname+"\n\n");
+}
+
+// ---------- Remove Directory ----------
+void removeTuxDir(const std::string& dirname) {
+    if (dirname.empty()) { colorcout("RED","Usage: rmdir <dirname>\n"); return; }
+    if (!isValidPath(dirname)) {
+        colorcout("YELLOW","Invalid name. Use alphanumeric, '-', '_', and '/' for nested dirs.\n"); return;
+    }
+    std::string normalized = dirname;
+    for (char& c : normalized) if (c == '/') c = '\\';
+    std::string path = "Files\\" + normalized;
+    if (!std::filesystem::exists(path)) { colorcout("RED","Not found: "+dirname+"\n"); return; }
+    if (!std::filesystem::is_directory(path)) { colorcout("RED","Not a directory: "+dirname+"\n"); return; }
+    if (!std::filesystem::is_empty(path)) {
+        if (!getYN("Directory is not empty, remove all contents?")) {
+            colorcout("YELLOW","Cancelled\n\n"); return;
+        }
+    }
+    std::error_code ec;
+    std::filesystem::remove_all(path, ec);
+    if (ec) colorcout("RED","Failed to remove: "+ec.message()+"\n");
+    else colorcout("GREEN","Removed directory: "+dirname+"\n\n");
+}
+
+// ---------- Copy ----------
+void copyTuxFile(const std::string& src, const std::string& dst) {
+    if (src.empty() || dst.empty()) { colorcout("RED","Usage: cp <src> <dst>\n"); return; }
+    if (!isValidPath(src)) { colorcout("YELLOW","Invalid source path.\n"); return; }
+    std::string srcPath = getTuxPath(src);
+    if (!std::filesystem::exists(srcPath)) { colorcout("RED","Not found: "+src+"\n"); return; }
+    auto [content, meta] = readFullTuxFile(srcPath);
+    if (!g_lastTuxReadOk) { colorcout("RED","File corrupted, copy aborted\n\n"); return; }
+
+    // If dst is an existing directory, copy into it with same filename
+    std::string dstNorm = dst;
+    for (char& c : dstNorm) if (c == '/') c = '\\';
+    std::string dstAsDir = "Files\\" + dstNorm;
+    std::string dstPath, displayDst;
+    if (std::filesystem::is_directory(dstAsDir)) {
+        std::string stem = std::filesystem::path(srcPath).stem().string();
+        dstPath = dstAsDir + "\\" + stem + ".TUX";
+        displayDst = dst + "/" + stem;
+    } else {
+        if (!isValidPath(dst)) { colorcout("YELLOW","Invalid destination path.\n"); return; }
+        dstPath = getTuxPath(dst);
+        displayDst = dst;
+    }
+
+    if (std::filesystem::exists(dstPath)) {
+        if (!getYN("File already exists, overwrite?")) { colorcout("YELLOW","Cancelled\n\n"); return; }
+    }
+    std::filesystem::path fp(dstPath);
+    if (fp.has_parent_path()) {
+        std::error_code ec;
+        std::filesystem::create_directories(fp.parent_path(), ec);
+        if (ec) { colorcout("RED","Failed to create directory: "+ec.message()+"\n"); return; }
+    }
+    auto now = std::chrono::system_clock::to_time_t(std::chrono::system_clock::now());
+    meta.creator = currentUser.name;
+    meta.lastEditor = currentUser.name;
+    meta.createTime = now;
+    meta.modifyTime = now;
+    writeTuxFile(dstPath, content, meta);
+    colorcout("GREEN","Copied: "+src+" -> "+displayDst+"\n\n");
+}
+
+// ---------- Move ----------
+void moveTuxFile(const std::string& src, const std::string& dst) {
+    if (src.empty() || dst.empty()) { colorcout("RED","Usage: mv <src> <dst>\n"); return; }
+    if (!isValidPath(src)) { colorcout("YELLOW","Invalid source path.\n"); return; }
+    std::string srcPath = getTuxPath(src);
+    if (!std::filesystem::exists(srcPath)) { colorcout("RED","Not found: "+src+"\n"); return; }
+
+    // If dst is an existing directory, move into it with same filename
+    std::string dstNorm = dst;
+    for (char& c : dstNorm) if (c == '/') c = '\\';
+    std::string dstAsDir = "Files\\" + dstNorm;
+    std::string dstPath, displayDst;
+    if (std::filesystem::is_directory(dstAsDir)) {
+        std::string basename = std::filesystem::path(srcPath).filename().string();
+        dstPath = dstAsDir + "\\" + basename;
+        displayDst = dst + "/" + std::filesystem::path(srcPath).stem().string();
+    } else {
+        if (!isValidPath(dst)) { colorcout("YELLOW","Invalid destination path.\n"); return; }
+        dstPath = getTuxPath(dst);
+        displayDst = dst;
+    }
+
+    if (std::filesystem::exists(dstPath)) { colorcout("RED","Target already exists: "+dst+"\n"); return; }
+    std::filesystem::path nfp(dstPath);
+    if (nfp.has_parent_path()) {
+        std::error_code ec;
+        std::filesystem::create_directories(nfp.parent_path(), ec);
+        if (ec) { colorcout("RED","Failed to create directory: "+ec.message()+"\n"); return; }
+    }
+    std::error_code ec;
+    std::filesystem::rename(srcPath, dstPath, ec);
+    if (ec) { colorcout("RED","Move failed: "+ec.message()+"\n"); return; }
+    colorcout("GREEN","Moved: "+src+" -> "+displayDst+"\n\n");
+}
+
+// ---------- Find ----------
+void findTuxFiles(const std::string& pattern) {
+    if (pattern.empty()) { colorcout("RED","Usage: find <pattern>\n"); return; }
+    const std::string root = "Files";
+    if (!std::filesystem::exists(root)) { colorcout("YELLOW","(Files directory does not exist)\n\n"); return; }
+
+    std::string lowerPat = pattern;
+    std::transform(lowerPat.begin(), lowerPat.end(), lowerPat.begin(), ::tolower);
+
+    std::vector<std::string> results;
+    std::function<void(const std::filesystem::path&, const std::string&)> walk;
+    walk = [&](const std::filesystem::path& dir, const std::string& prefix) {
+        for (auto& e : std::filesystem::directory_iterator(dir)) {
+            if (e.is_directory() && e.path().filename() == "temp") continue;
+            if (e.is_directory()) {
+                walk(e.path(), prefix + e.path().filename().string() + "/");
+            } else if (e.is_regular_file() && e.path().extension() == ".TUX") {
+                std::string stem = e.path().stem().string();
+                std::string lowerStem = stem;
+                std::transform(lowerStem.begin(), lowerStem.end(), lowerStem.begin(), ::tolower);
+                if (lowerStem.find(lowerPat) != std::string::npos)
+                    results.push_back(prefix + stem);
+            }
+        }
+    };
+    walk(root, "");
+
+    if (results.empty()) {
+        colorcout("YELLOW","No files found matching: "+pattern+"\n\n");
+    } else {
+        colorcout("CYAN","Found "+std::to_string(results.size())+" file(s):\n");
+        for (auto& r : results) colorcout("white","  "+r+"\n");
+        std::cout << "\n";
+    }
 }
 
 // ---------- Export ----------
@@ -593,18 +625,29 @@ void viewMetadata(const std::string& filename) {
 
 // ---------- Simple CLI Entry ----------
 void showHelp() {
-    colorcout("CYAN","=== Help List ===\n\n");
-    colorcout("white","ls             - list files\n");
-    colorcout("white","c  <f>         - create file\n");
-    colorcout("white","e  <f>         - edit file\n");
-    colorcout("white","v  <f>         - view file\n");
-    colorcout("white","d  <f>         - delete file\n");
-    colorcout("white","rn <o> <n>     - rename file\n");
-    colorcout("white","m  <f>         - view metadata\n");
-    colorcout("white","ex <f>         - export file\n");
-    colorcout("white","im <f>         - import file\n");
-    colorcout("white","h              - show help\n");
-    colorcout("white","q              - quit\n\n");
+    colorcout("CYAN","=== Help ===\n\n");
+    colorcout("CYAN","File Operations:\n");
+    colorcout("white","  ls                    - list files\n");
+    colorcout("white","  touch/new <f>         - create file\n");
+    colorcout("white","  edit/open <f>         - edit file\n");
+    colorcout("white","  cat/view <f>          - view file content\n");
+    colorcout("white","  rm/del <f>            - delete file\n");
+    colorcout("white","  cp <src> <dst>        - copy file\n");
+    colorcout("white","  cp <f1> [f2..] <dir>  - copy multiple files to directory\n");
+    colorcout("white","  mv <src> <dst>        - move / rename file\n");
+    colorcout("white","  mv <f1> [f2..] <dir>  - move multiple files to directory\n");
+    colorcout("white","  find <pattern>        - search files by name\n\n");
+    colorcout("CYAN","Directory Operations:\n");
+    colorcout("white","  mkdir <d>             - create directory\n");
+    colorcout("white","  rmdir <d>             - remove directory\n\n");
+    colorcout("CYAN","Privileged Operations:\n");
+    colorcout("white","  meta <f>              - view file metadata\n");
+    colorcout("white","  export <f>            - export file to .txt\n");
+    colorcout("white","  import <f>            - import .txt as TUX file\n\n");
+    colorcout("CYAN","General:\n");
+    colorcout("white","  help / h / ?          - show this help\n");
+    colorcout("white","  quit / q              - quit\n\n");
+    colorcout("YELLOW","Tip: Use '/' for subdirectories, e.g. 'touch docs/readme'\n\n");
 }
 
 void file_editor(const std::string& currentUsername, const std::string& currentUsertype) {
@@ -633,14 +676,41 @@ void file_editor(const std::string& currentUsername, const std::string& currentU
         historyIndex = -1;
         std::istringstream iss(input);
         std::string cmd; iss >> cmd;
-        if (cmd=="q" || cmd=="exit") break;
-        else if (cmd=="h" || cmd=="help") showHelp();
-        else if (cmd=="ls" || cmd=="list") listTuxFiles();
-        else if (cmd=="c" || cmd=="create") { std::string f; std::getline(iss>>std::ws, f); createTuxFile(f); }
-        else if (cmd=="e" || cmd=="edit") { std::string f; std::getline(iss>>std::ws, f); editTuxFile(f); }
-        else if (cmd=="v" || cmd=="view") { std::string f; std::getline(iss>>std::ws, f); viewTuxFile(f); }
-        else if (cmd=="d" || cmd=="delete") { std::string f; std::getline(iss>>std::ws, f); deleteTuxFile(f); }
+        if (cmd=="q" || cmd=="quit" || cmd=="exit") break;
+        else if (cmd=="h" || cmd=="help" || cmd=="?") showHelp();
+        else if (cmd=="ls" || cmd=="list" || cmd=="ll") listTuxFiles();
+        else if (cmd=="c" || cmd=="create" || cmd=="touch" || cmd=="new") { std::string f; std::getline(iss>>std::ws, f); createTuxFile(f); }
+        else if (cmd=="e" || cmd=="edit" || cmd=="open") { std::string f; std::getline(iss>>std::ws, f); editTuxFile(f); }
+        else if (cmd=="v" || cmd=="view" || cmd=="cat" || cmd=="read") { std::string f; std::getline(iss>>std::ws, f); viewTuxFile(f); }
+        else if (cmd=="rm" || cmd=="del" || cmd=="d" || cmd=="delete" || cmd=="remove") { std::string f; std::getline(iss>>std::ws, f); deleteTuxFile(f); }
+        else if (cmd=="mv" || cmd=="move") {
+            std::vector<std::string> args;
+            std::string a; while (iss >> a) args.push_back(a);
+            if (args.size() < 2) { colorcout("RED","Usage: mv <src> [src2..] <dst>\n"); }
+            else if (args.size() == 2) { moveTuxFile(args[0], args[1]); }
+            else {
+                const std::string& dstDir = args.back();
+                std::string dn = dstDir; for (char& c : dn) if (c=='/') c='\\';
+                if (!std::filesystem::is_directory("Files\\"+dn)) { colorcout("RED","Destination must be an existing directory for batch move: "+dstDir+"\n"); }
+                else { for (size_t i = 0; i+1 < args.size(); ++i) moveTuxFile(args[i], dstDir); }
+            }
+        }
+        else if (cmd=="cp" || cmd=="copy") {
+            std::vector<std::string> args;
+            std::string a; while (iss >> a) args.push_back(a);
+            if (args.size() < 2) { colorcout("RED","Usage: cp <src> [src2..] <dst>\n"); }
+            else if (args.size() == 2) { copyTuxFile(args[0], args[1]); }
+            else {
+                const std::string& dstDir = args.back();
+                std::string dn = dstDir; for (char& c : dn) if (c=='/') c='\\';
+                if (!std::filesystem::is_directory("Files\\"+dn)) { colorcout("RED","Destination must be an existing directory for batch copy: "+dstDir+"\n"); }
+                else { for (size_t i = 0; i+1 < args.size(); ++i) copyTuxFile(args[i], dstDir); }
+            }
+        }
         else if (cmd=="rn" || cmd=="rename") { std::string a,b; iss>>a>>b; renameTuxFile(a,b); }
+        else if (cmd=="find" || cmd=="search") { std::string p; std::getline(iss>>std::ws, p); findTuxFiles(p); }
+        else if (cmd=="mkdir" || cmd=="md") { std::string d; std::getline(iss>>std::ws, d); makeTuxDir(d); }
+        else if (cmd=="rmdir" || cmd=="rd") { std::string d; std::getline(iss>>std::ws, d); removeTuxDir(d); }
         else if (cmd=="ex" || cmd=="export") {
             if (!hasPrivilege()) { colorcout("RED","Access denied: You don't have the required privileges\n"); continue; }
             std::string f; std::getline(iss>>std::ws, f); exportTuxFile(f);
@@ -649,11 +719,11 @@ void file_editor(const std::string& currentUsername, const std::string& currentU
             if (!hasPrivilege()) { colorcout("RED","Access denied: You don't have the required privileges\n"); continue; }
             std::string f; std::getline(iss>>std::ws, f); importTxtFile(f);
         }
-        else if (cmd=="m" || cmd=="metadata") {
+        else if (cmd=="m" || cmd=="meta" || cmd=="metadata" || cmd=="info") {
             if (!hasPrivilege()) { colorcout("RED","Access denied: You don't have the required privileges\n"); continue; }
             std::string f; std::getline(iss>>std::ws, f); viewMetadata(f);
         }
-        else { colorcout("RED","Unknown command\n"); }
+        else { colorcout("RED","Unknown command: "+cmd+"\n"); }
     }
     colorcout("green", "Program exited\n");
 }
