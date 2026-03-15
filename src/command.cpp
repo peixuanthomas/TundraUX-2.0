@@ -267,11 +267,31 @@ void task_main() {
         }, true, ""},
         {"license", [](const std::string &){ license(); }, true, ""},
         {"manageuser", [](const std::string &){ manage_users(); }, true, "admin,debug"},
-        {"createfile", [](const std::string &){ createfile(); }, true, "debug"},
-        {"hello", [](const std::string &){ hello(); }, true, "debug"},
-        {"deletefile", [](const std::string &){ delete_file(); }, true, "debug"},
-        {"structfile", [](const std::string &){ struct_file();}, true, "debug"},
-        {"displaytest", [](const std::string &){ display_test(); }, true, ""}
+
+        // ── debug-only, not listed in help ──────────────────────────────────
+        
+        {"dbg:createfile", [](const std::string &){ createfile(); }, true, "debug"},
+        {"dbg:hello()", [](const std::string &){ hello(); }, true, "debug"},
+        {"dbg:deletefile", [](const std::string &){ delete_file(); }, true, "debug"},
+        {"dbg:structfile", [](const std::string &){ struct_file();}, true, "debug"},
+        {"displaytest", [](const std::string &){ display_test(); }, true, ""},
+        {"dbg:env", [](const std::string &){ dbg_env(); }, true, "debug"},
+        {"dbg:forcelogin ", [&currentUser](const std::string &input){
+            std::istringstream iss(input);
+            std::string cmd, username;
+            iss >> cmd >> username;
+            if (username.empty()) { colorcout("red", "Usage: dbg:forcelogin <username>\n"); return; }
+            DataManager dm("user_data.dat");
+            const auto& users = dm.GetAllUsers();
+            auto it = std::find_if(users.begin(), users.end(),
+                [&](const USER& u){ return u.name == username; });
+            if (it == users.end()) {
+                colorcout("red", "[DBG] User not found: " + username + "\n");
+                return;
+            }
+            currentUser = *it;
+            colorcout("green", "[DBG] Force-logged in as: " + currentUser.name + " (" + currentUser.type + ")\n");
+        }, false, "debug"}
     };
 
     while (true) {

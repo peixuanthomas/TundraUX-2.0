@@ -42,6 +42,20 @@ static std::vector<std::string> splitTokens(const std::string& line) {
     return tokens;
 }
 
+// Collects tokens[startIdx..] that have no '=' as the username (joined with spaces).
+// If optStartIdx is provided, sets it to the index of the first key=value token.
+static std::string extractUsername(const std::vector<std::string>& tokens, size_t startIdx, size_t* optStartIdx = nullptr) {
+    std::string name;
+    size_t i = startIdx;
+    while (i < tokens.size() && tokens[i].find('=') == std::string::npos) {
+        if (!name.empty()) name += ' ';
+        name += tokens[i];
+        ++i;
+    }
+    if (optStartIdx) *optStartIdx = i;
+    return name;
+}
+
 static std::map<std::string, std::string> parseOptions(const std::vector<std::string>& tokens, size_t startIdx) {
     std::map<std::string, std::string> opts;
     for (size_t i = startIdx; i < tokens.size(); ++i) {
@@ -100,8 +114,9 @@ void manage_users() {
             }
         } 
         else if ((cmd == "show" || cmd == "s") && tokens.size() >= 2) {
+            std::string username = extractUsername(tokens, 1);
             auto users = dataManager.GetAllUsers();
-            auto it = std::find_if(users.begin(), users.end(), [&](const USER& u){ return u.name == tokens[1]; });
+            auto it = std::find_if(users.begin(), users.end(), [&](const USER& u){ return u.name == username; });
             
             if (it != users.end()) {
                 displayUserDetails(*it);
@@ -110,9 +125,10 @@ void manage_users() {
             }
         } 
         else if ((cmd == "add" || cmd == "a") && tokens.size() >= 2) {
-            USER newUser; 
-            newUser.name = tokens[1];
-            
+            USER newUser;
+            size_t optStart;
+            newUser.name = extractUsername(tokens, 1, &optStart);
+
             // Check if user already exists
             auto usernames = dataManager.GetAllUsernames();
             auto it = std::find(usernames.begin(), usernames.end(), newUser.name);
@@ -120,8 +136,8 @@ void manage_users() {
                 colorcout("red", "Error: Username '" + newUser.name + "' already exists.\n");
                 continue;
             }
-            
-            auto opts = parseOptions(tokens, 2);
+
+            auto opts = parseOptions(tokens, optStart);
 
             if (!opts.count("type") || !opts.count("password")) {
                 colorcout("yellow", "Missing required parameters: type and password.\n");
@@ -149,23 +165,25 @@ void manage_users() {
             }
         } 
         else if ((cmd == "set" || cmd == "u") && tokens.size() >= 2) {
+            size_t optStart;
+            std::string username = extractUsername(tokens, 1, &optStart);
             auto users = dataManager.GetAllUsers();
-            auto it = std::find_if(users.begin(), users.end(), [&](const USER& u){ return u.name == tokens[1]; });
-            
-            if (it == users.end()) { 
-                colorcout("yellow", "User not found.\n"); 
-                continue; 
+            auto it = std::find_if(users.begin(), users.end(), [&](const USER& u){ return u.name == username; });
+
+            if (it == users.end()) {
+                colorcout("yellow", "User not found.\n");
+                continue;
             }
 
             USER updated = *it;
-            auto opts = parseOptions(tokens, 2);
+            auto opts = parseOptions(tokens, optStart);
             
             for (const auto& kv : opts) {
                 if (kv.first == "type") {
-                    if (kv.second == "debug") { 
-                        colorcout("red", "Access Denied.\n"); 
-                        continue; 
-                    }
+                    // if (kv.second == "debug") { 
+                    //     colorcout("red", "Access Denied.\n"); 
+                    //     continue; 
+                    // }
                     if (kv.second != "admin" && kv.second != "user") {
                         colorcout("yellow", "Invalid user type. Allowed types: admin, user.\n");
                         continue;
@@ -184,27 +202,28 @@ void manage_users() {
                 }
             }
 
-            if (dataManager.UpdateUser(tokens[1], updated)) {
+            if (dataManager.UpdateUser(username, updated)) {
                 colorcout("green", "User updated successfully.\n");
             } else {
                 colorcout("red", "Failed to update user.\n");
             }
         } 
         else if ((cmd == "delete" || cmd == "del" || cmd == "rm" || cmd == "d") && tokens.size() >= 2) {
+            std::string username = extractUsername(tokens, 1);
             auto users = dataManager.GetAllUsers();
-            auto it = std::find_if(users.begin(), users.end(), [&](const USER& u){ return u.name == tokens[1]; });
-            
-            if (it == users.end()) { 
-                colorcout("yellow", "User not found.\n"); 
-                continue; 
+            auto it = std::find_if(users.begin(), users.end(), [&](const USER& u){ return u.name == username; });
+
+            if (it == users.end()) {
+                colorcout("yellow", "User not found.\n");
+                continue;
             }
-            
+
             if (it->type == "admin") {
                 colorcout("yellow", "Warning: deleting admin user.\n");
             }
 
-            if (getYN("Are you sure you want to delete user '" + tokens[1] + "'?")) {
-                if (dataManager.RemoveUser(tokens[1])) {
+            if (getYN("Are you sure you want to delete user '" + username + "'?")) {
+                if (dataManager.RemoveUser(username)) {
                     colorcout("green", "User deleted successfully.\n");
                 } else {
                     colorcout("red", "Failed to delete user.\n");

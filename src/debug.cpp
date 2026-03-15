@@ -6,6 +6,10 @@
 #include <cstdio>
 #include <fstream>
 #include <iostream>
+#include <iomanip>
+#include <sstream>
+#include <vector>
+#include <algorithm>
 
 void delete_file() {
     if(std::remove("user_data.dat") == 0) {
@@ -82,4 +86,25 @@ void license() {
         std::cout << line << std::endl;
     }
     licenseFile.close();
+}
+
+void dbg_env() {
+    constexpr const char* BUILD_TIME = __TIMESTAMP__;
+    colorcout("cyan", "[DBG] Build timestamp : " + std::string(BUILD_TIME) + "\n");
+#if defined(_MSC_VER)
+    colorcout("cyan", "[DBG] Compiler        : MSVC " + std::to_string(_MSC_VER) + "\n");
+#elif defined(__GNUC__)
+    colorcout("cyan", "[DBG] Compiler        : GCC " + std::to_string(__GNUC__) + "." + std::to_string(__GNUC_MINOR__) + "\n");
+#else
+    colorcout("cyan", "[DBG] Compiler        : Unknown\n");
+#endif
+#if defined(_WIN64)
+    colorcout("cyan", "[DBG] Platform        : Windows 64-bit\n");
+#elif defined(_WIN32)
+    colorcout("cyan", "[DBG] Platform        : Windows 32-bit\n");
+#else
+    colorcout("cyan", "[DBG] Platform        : Unknown\n");
+#endif
+    colorcout("cyan", "[DBG] sizeof(USER)    : " + std::to_string(sizeof(USER)) + " bytes\n");
+    colorcout("cyan", "[DBG] sizeof(size_t)  : " + std::to_string(sizeof(size_t)) + " bytes\n");
 }
