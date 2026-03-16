@@ -118,10 +118,10 @@ static bool ensureDirectoryExists(const std::string& dirPath) {
 static std::string normalizePath(const std::string& input) {
     std::string path = unifySlashes(input);
     while (!path.empty() && path.front() == '/') path = path.substr(1);
-    if (path.size() >= 2 && path.substr(0, 2) == "~/") {
+    if (path.size() >= 6 && path.substr(0, 6) == "Files/") {
         return path;
     }
-    return "~/" + path;
+    return "Files/" + path;
 }
 
 // ---- End of path utilities ----

@@ -17,7 +17,9 @@
 #include "debug.h"
 #include "TUXfile.h"
 #include <chrono>   
-#include <iomanip>  
+#include <iomanip>
+#include "editor_win.h"
+#include <sys/stat.h>
 
 #define DEFAULT_USER_TYPE "debug" //set to "guest" for production
 #define DEFAULT_USER_NAME "debug" //set to "" for production
@@ -267,7 +269,31 @@ void task_main() {
         }, true, ""},
         {"license", [](const std::string &){ license(); }, true, ""},
         {"manageuser", [](const std::string &){ manage_users(); }, true, "admin,debug"},
-
+        {"edit ", [](const std::string &input){
+            std::istringstream iss(input);
+            std::string cmd, filename;
+            iss >> cmd >> filename;
+            if (filename.empty()) {
+                run_editor("", "");
+                return;
+            }
+            // Check for .TUX extension
+            if (filename.size() >= 4 &&
+                filename.substr(filename.size() - 4) == ".TUX") {
+                colorcout("yellow", "Use TUXfile to open .TUX files.\n");
+                return;
+            }
+            std::string path = "Files/" + filename;
+            struct stat st;
+            if (stat(path.c_str(), &st) != 0) {
+                colorcout("red", "Error: File not found: " + path + "\n");
+                return;
+            }
+            run_editor(path, filename);
+        }, false, "admin,user,debug"},
+        {"edit", [](const std::string &){
+            run_editor("", "");
+        }, true, "admin,user,debug"},
         // ── debug-only, not listed in help ──────────────────────────────────
         
         {"dbg:createfile", [](const std::string &){ createfile(); }, true, "debug"},
