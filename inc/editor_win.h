@@ -3,9 +3,7 @@
 
 #include <string>
 
-// Run the standalone text editor with the specified file.
-// displayName overrides the filename shown in the editor UI.
-// Returns 0 on success.
-int run_editor(const std::string& filepath, const std::string& displayName = "");
+int run_editor_windows(const std::string& filepath, const std::string& displayName = "");
+int run_editor_portable(const std::string& filepath, const std::string& displayName = "");
 
 #endif // EDITOR_WIN_H

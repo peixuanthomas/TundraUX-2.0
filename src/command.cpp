@@ -18,7 +18,7 @@
 #include "TUXfile.h"
 #include <chrono>   
 #include <iomanip>
-#include "editor_win.h"
+#include "editor.h"
 #include <sys/stat.h>
 
 #define DEFAULT_USER_TYPE "debug" //set to "guest" for production
@@ -296,6 +296,22 @@ void task_main() {
         }, true, "admin,user,debug"},
         // ── debug-only, not listed in help ──────────────────────────────────
         
+        {"dbg:editor", [](const std::string &input){
+            std::istringstream iss(input);
+            std::string commandToken, backend;
+            iss >> commandToken >> backend;
+            if (backend.empty()) {
+                colorcout("cyan", "Editor backend: " + get_editor_backend_name() + "\n");
+                colorcout("white", "Available backends: " + describe_editor_backend_options() + "\n");
+                return;
+            }
+            if (!set_editor_backend_by_name(backend)) {
+                colorcout("red", "Unknown or unavailable backend: " + backend + "\n");
+                colorcout("white", "Available backends: " + describe_editor_backend_options() + "\n");
+                return;
+            }
+            colorcout("green", "Editor backend set to: " + get_editor_backend_name() + "\n");
+        }, false, "debug"},
         {"dbg:createfile", [](const std::string &){ createfile(); }, true, "debug"},
         {"dbg:hello()", [](const std::string &){ hello(); }, true, "debug"},
         {"dbg:deletefile", [](const std::string &){ delete_file(); }, true, "debug"},

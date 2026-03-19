@@ -19,7 +19,7 @@
 #include "udata.h"
 #include <conio.h>
 #include <random>
-#include "editor_win.h"
+#include "editor.h"
 // Simple XOR encryption/decryption 
 void writeEncryptedString(std::ofstream& out, const std::string& data) {
     std::string enc = encryptDecrypt(data);

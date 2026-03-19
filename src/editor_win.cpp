@@ -1,3 +1,5 @@
+#ifdef _WIN32
+
 #include <windows.h>
 #include <vector>
 #include <string>
@@ -1543,7 +1545,7 @@ public:
 /**
  * Editor entry point. Opens filepath (if non-empty) and runs the editor.
  */
-int run_editor(const std::string& filepath, const std::string& displayName) {
+int run_editor_windows(const std::string& filepath, const std::string& displayName) {
     TerminalEditor editor;
 
     editor.init();
@@ -1557,3 +1559,13 @@ int run_editor(const std::string& filepath, const std::string& displayName) {
 
     return 0;
 }
+
+#else
+
+#include "editor_win.h"
+
+int run_editor_windows(const std::string& filepath, const std::string& displayName) {
+    return run_editor_portable(filepath, displayName);
+}
+
+#endif
