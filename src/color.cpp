@@ -1,6 +1,6 @@
 //Attention Windows only code.
 
-#include "color.h"
+#include "color.hpp"
 #include <iostream>
 #include <string>
 #include <unordered_map>

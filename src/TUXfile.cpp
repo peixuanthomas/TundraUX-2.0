@@ -1,10 +1,10 @@
 //Attention: windows only code.
-#include "TUXfile.h"
+#include "TUXfile.hpp"
 #include <fstream>
 #include <stdexcept>
 #include <string>
 #include <iostream>
-#include "color.h"
+#include "color.hpp"
 #include <vector>
 #include <windows.h>
 #include <ctime>
@@ -16,10 +16,10 @@
 #include <cctype>
 #include <functional>
 #include <unordered_map>
-#include "udata.h"
+#include "udata.hpp"
 #include <conio.h>
 #include <random>
-#include "editor.h"
+#include "editor.hpp"
 // Simple XOR encryption/decryption 
 void writeEncryptedString(std::ofstream& out, const std::string& data) {
     std::string enc = encryptDecrypt(data);

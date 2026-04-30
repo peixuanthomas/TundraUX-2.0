@@ -14,7 +14,7 @@
 #include <chrono>
 #include <direct.h>
 #include <cerrno>
-#include "editor_win.h"
+#include "editor_win.hpp"
 
 // Editor version info
 #define EDITOR_VERSION "1.0.0"
@@ -1562,7 +1562,7 @@ int run_editor_windows(const std::string& filepath, const std::string& displayNa
 
 #else
 
-#include "editor_win.h"
+#include "editor_win.hpp"
 
 int run_editor_windows(const std::string& filepath, const std::string& displayName) {
     return run_editor_portable(filepath, displayName);

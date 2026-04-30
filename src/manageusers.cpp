@@ -1,12 +1,12 @@
 //Attention: windows only code.
-#include "command.h"
-#include "manageusers.h"
-#include "color.h"
-#include "udata.h"
+#include "command.hpp"
+#include "manageusers.hpp"
+#include "color.hpp"
+#include "udata.hpp"
 #include <string>
 #include <iostream>
 #include <vector>
-#include "crypto.h"
+#include "crypto.hpp"
 #include <fstream>
 #include <algorithm>
 #include <sstream>

@@ -1,9 +1,9 @@
 //Attention: Windows only code.
-#include "command.h"
+#include "command.hpp"
 #include <string>
 #include <iostream>
-#include "color.h"
-#include "udata.h"
+#include "color.hpp"
+#include "udata.hpp"
 #include <vector>
 #include <conio.h>
 #include <functional>
@@ -11,14 +11,14 @@
 #include <unordered_set>
 #include <algorithm>
 #include <cctype>
-#include "crypto.h"
-#include "manageusers.h"
-#include "hello.h"
-#include "debug.h"
-#include "TUXfile.h"
+#include "crypto.hpp"
+#include "manageusers.hpp"
+#include "hello.hpp"
+#include "debug.hpp"
+#include "TUXfile.hpp"
 #include <chrono>   
 #include <iomanip>
-#include "editor.h"
+#include "editor.hpp"
 #include <sys/stat.h>
 
 #define DEFAULT_USER_TYPE "debug" //set to "guest" for production

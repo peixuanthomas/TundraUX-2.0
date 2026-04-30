@@ -1,8 +1,8 @@
-#include "udata.h"
+#include "udata.hpp"
 #include <fstream>
-#include "color.h"
+#include "color.hpp"
 #include <string>
-#include "crypto.h" //offers encrypt/decrypt functions
+#include "crypto.hpp" //offers encrypt/decrypt functions
 #include <algorithm>
 #include <filesystem>
 

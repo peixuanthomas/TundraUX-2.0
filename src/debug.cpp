@@ -1,8 +1,8 @@
-#include "debug.h"
-#include "color.h"
-#include "udata.h"
+#include "debug.hpp"
+#include "color.hpp"
+#include "udata.hpp"
 #include <string>
-#include "crypto.h"
+#include "crypto.hpp"
 #include <cstdio>
 #include <fstream>
 #include <iostream>

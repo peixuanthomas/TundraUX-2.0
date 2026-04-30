@@ -1,9 +1,9 @@
-#include "editor.h"
+#include "editor.hpp"
 
 #include <algorithm>
 #include <cctype>
 
-#include "editor_win.h"
+#include "editor_win.hpp"
 
 namespace {
 EditorBackend g_editorBackend = EditorBackend::Auto;

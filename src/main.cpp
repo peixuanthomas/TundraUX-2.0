@@ -1,9 +1,9 @@
 #include <iostream>
-#include "hello.h"
-#include "color.h"
-#include "udata.h"
-#include "command.h"
-#include "TUXfile.h"
+#include "hello.hpp"
+#include "color.hpp"
+#include "udata.hpp"
+#include "command.hpp"
+#include "TUXfile.hpp"
 #include <filesystem>
 #include <string>
 #include <fstream>

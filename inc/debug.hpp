@@ -1,5 +1,4 @@
-#ifndef DEBUG_H
-#define DEBUG_H
+#pragma once
 
 #include <string>
 
@@ -12,5 +11,3 @@ void license();
 void dbg_env();
 void dbg_hexdump();
 void dbg_resetfail(const std::string& username);
-
-#endif // !DEBUG_H

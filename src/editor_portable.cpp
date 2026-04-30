@@ -1,4 +1,4 @@
-#include "editor_win.h"
+#include "editor_win.hpp"
 
 #ifdef _WIN32
 

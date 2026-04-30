@@ -1,9 +1,7 @@
-#ifndef UDATA_H
-#define UDATA_H
+#pragma once
 
 #include <string>
 #include <vector>
-
 
 struct USER {
     std::string type;
@@ -33,5 +31,3 @@ class DataManager {
 };
 void ReadOldFile();
 void listUser();
-
-#endif // !UDATA_H

@@ -1,5 +1,4 @@
-#ifndef COLOR_H
-#define COLOR_H
+#pragma once
 
 #include <string>
 #include <vector>
@@ -14,5 +13,3 @@ void pause();
 std::string getHiddenInput(const std::string& prompt, char symbol);
 void print_icon();
 std::string readLineWithHistory(std::vector<std::string> &history, int &historyIndex);
-
-#endif // !COLOR_H

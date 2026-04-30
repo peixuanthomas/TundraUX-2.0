@@ -1,11 +1,11 @@
-#include "hello.h"
+#include "hello.hpp"
 #include <iostream>
-#include "color.h"
+#include "color.hpp"
 #include <fstream>
-#include "udata.h"
+#include "udata.hpp"
 #include <string>
 #include <cctype>
-#include "crypto.h"
+#include "crypto.hpp"
 
 void hello() {
 START:
