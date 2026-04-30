@@ -186,7 +186,7 @@ void handleLogoutCommand(const std::string&, USER& currentUser) {
     colorcout("green", "User " + currentUser.name + " logged out successfully.\n");
     currentUser = {
         "guest",
-        "guest",
+        "",
         "",
         "",
         0
