@@ -9,7 +9,7 @@ if(NOT WIN32)
     message(FATAL_ERROR "TundraUX2 currently requires Windows-specific console APIs.")
 endif()
 
-option(TUNDRAUX_DEBUG_STARTUP "Start TundraUX2 in debug mode without logging in." OFF)
+option(TUNDRAUX_DEBUG_STARTUP "Start TundraUX2 in debug mode without logging in." ON)
 
 add_executable(${PROJECT_NAME})
 
