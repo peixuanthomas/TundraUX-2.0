@@ -2,6 +2,7 @@
 #include "command.hpp"
 #include "manageusers.hpp"
 #include "color.hpp"
+#include "console_screen.hpp"
 #include "udata.hpp"
 #include <string>
 #include <iostream>
@@ -68,6 +69,7 @@ static std::map<std::string, std::string> parseOptions(const std::vector<std::st
 }
 
 void manage_users() {
+    ConsoleScreenGuard screenGuard;
     colorcout("cyan", "User management application v1.0\n");
     set_title("User Management");
     std::ifstream check("user_data.dat");

@@ -13,8 +13,13 @@
 #include "commandReg.hpp"
 #include "udata.hpp"
 
-#define DEFAULT_USER_TYPE "debug" //set to "guest" for production
-#define DEFAULT_USER_NAME "debug" //set to "" for production
+#ifndef TUNDRAUX_DEFAULT_USER_TYPE
+#define TUNDRAUX_DEFAULT_USER_TYPE "guest"
+#endif
+
+#ifndef TUNDRAUX_DEFAULT_USER_NAME
+#define TUNDRAUX_DEFAULT_USER_NAME ""
+#endif
 
 std::string guessSimilarCommand(
     const std::string& input,
@@ -29,8 +34,8 @@ void task_main() {
     std::cout << std::endl;
 
     USER currentUser = {
-        DEFAULT_USER_TYPE,
-        DEFAULT_USER_NAME,
+        TUNDRAUX_DEFAULT_USER_TYPE,
+        TUNDRAUX_DEFAULT_USER_NAME,
         "",
         "",
         0

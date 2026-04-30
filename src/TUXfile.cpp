@@ -5,6 +5,7 @@
 #include <string>
 #include <iostream>
 #include "color.hpp"
+#include "console_screen.hpp"
 #include <vector>
 #include <windows.h>
 #include <ctime>
@@ -651,6 +652,7 @@ void showHelp() {
 }
 
 void file_editor(const std::string& currentUsername, const std::string& currentUsertype) {
+    ConsoleScreenGuard screenGuard;
     set_title("TUX File Manager");
     currentUser.name = currentUsername;
     currentUser.type = currentUsertype;
