@@ -1,9 +1,45 @@
 #include "commandReg.hpp"
 
 #include <algorithm>
+#include <cctype>
 #include <sstream>
 
 #include "color.hpp"
+
+namespace {
+std::string toLowerCopy(const std::string& value) {
+    std::string lowered = value;
+    std::transform(lowered.begin(), lowered.end(), lowered.begin(), [](unsigned char ch) {
+        return static_cast<char>(std::tolower(ch));
+    });
+    return lowered;
+}
+
+std::vector<const RegisteredCommand*> sortedCommandsForHelp(
+    const std::vector<RegisteredCommand>& commands
+) {
+    std::vector<const RegisteredCommand*> sortedCommands;
+    sortedCommands.reserve(commands.size());
+    for (const auto& command : commands) {
+        sortedCommands.push_back(&command);
+    }
+
+    std::stable_sort(
+        sortedCommands.begin(),
+        sortedCommands.end(),
+        [](const RegisteredCommand* lhs, const RegisteredCommand* rhs) {
+            const std::string lhsName = toLowerCopy(lhs->name);
+            const std::string rhsName = toLowerCopy(rhs->name);
+            if (lhsName != rhsName) {
+                return lhsName < rhsName;
+            }
+            return lhs->name < rhs->name;
+        }
+    );
+
+    return sortedCommands;
+}
+}
 
 bool hasCommandPermission(const std::string& requiredUserType, const std::string& currentUserType) {
     if (requiredUserType.empty()) {
@@ -52,21 +88,23 @@ bool tryExecuteRegisteredCommand(
             colorcout("red", "Access Denied.\n");
         } else if (cmd.name == "help") {
             colorcout("cyan", "Available commands:\n");
-            for (const auto& helpCmd : commands) {
-                if (helpCmd.hidden ||
-                    !hasCommandPermission(helpCmd.requiredUserType, currentUser.type)) {
+            const auto sortedCommands = sortedCommandsForHelp(commands);
+            for (const auto* helpCmd : sortedCommands) {
+                if (helpCmd->hidden ||
+                    !hasCommandPermission(helpCmd->requiredUserType, currentUser.type)) {
                     continue;
                 }
-                colorcout("white", " - " + helpCmd.usage + ": " + helpCmd.description + "\n");
+                colorcout("white", " - " + helpCmd->usage + ": " + helpCmd->description + "\n");
             }
         } else if (cmd.name == "dbg:help") {
             colorcout("cyan", "Available debug commands:\n");
-            for (const auto& helpCmd : commands) {
-                if (helpCmd.name.rfind("dbg:", 0) != 0 ||
-                    !hasCommandPermission(helpCmd.requiredUserType, currentUser.type)) {
+            const auto sortedCommands = sortedCommandsForHelp(commands);
+            for (const auto* helpCmd : sortedCommands) {
+                if (helpCmd->name.rfind("dbg:", 0) != 0 ||
+                    !hasCommandPermission(helpCmd->requiredUserType, currentUser.type)) {
                     continue;
                 }
-                colorcout("white", " - " + helpCmd.usage + ": " + helpCmd.description + "\n");
+                colorcout("white", " - " + helpCmd->usage + ": " + helpCmd->description + "\n");
             }
         } else {
             cmd.handler(input);
