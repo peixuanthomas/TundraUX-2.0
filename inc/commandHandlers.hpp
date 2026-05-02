@@ -17,6 +17,7 @@ void handleInfoCommand(const std::string& input);
 void handleLicenseCommand(const std::string& input);
 void handleManageUsersCommand(const std::string& input);
 void handleEditCommand(const std::string& input);
+void handleExplorerCommand(const std::string& input, USER& currentUser);
 void handleDebugEditorCommand(const std::string& input);
 void handleDebugCreateFileCommand(const std::string& input);
 void handleDebugHelloCommand(const std::string& input);

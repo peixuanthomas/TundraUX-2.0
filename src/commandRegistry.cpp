@@ -17,7 +17,7 @@ std::vector<RegisteredCommand> buildNewCommandRegistry(USER& currentUser) {
             "exit",
             "exit",
             "Exit the program",
-            {},
+            {"quit", "q"},
             handleExitCommand,
             "",
             false
@@ -26,7 +26,7 @@ std::vector<RegisteredCommand> buildNewCommandRegistry(USER& currentUser) {
             "cls",
             "cls",
             "Clear the screen",
-            {},
+            {"clear"},
             handleClearScreenCommand,
             "",
             false
@@ -90,7 +90,7 @@ std::vector<RegisteredCommand> buildNewCommandRegistry(USER& currentUser) {
             "TUXfile",
             "TUXfile",
             "Open TUX File Manager",
-            {},
+            {"tuxfile"},
             [&currentUser](const std::string& input) { handleTuxFileCommand(input, currentUser); },
             "user,admin,debug",
             false
@@ -140,6 +140,15 @@ std::vector<RegisteredCommand> buildNewCommandRegistry(USER& currentUser) {
             "admin,user,debug",
             false,
             true
+        },
+        {
+            "explorer",
+            "explorer",
+            "Open the file explorer",
+            {},
+            [&currentUser](const std::string &input) { handleExplorerCommand(input, currentUser); },
+            "admin,user,debug",
+            false
         },
         {
             "dbg:help",

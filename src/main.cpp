@@ -33,7 +33,7 @@ int main(int argc, char* argv[]) {
         pause();
         return 1;
     }
-    std::cerr << "Program has run into an unexpected place.\n";
+    std::cerr << "Program has run into an unexpected place. You may need to contact developer for assistance.\n";
     pause();
     return 1;
 }

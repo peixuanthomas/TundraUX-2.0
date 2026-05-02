@@ -9,7 +9,7 @@ if(NOT WIN32)
     message(FATAL_ERROR "TundraUX2 currently requires Windows-specific console APIs.")
 endif()
 
-option(TUNDRAUX_DEBUG_STARTUP "Start TundraUX2 in debug mode without logging in." ON)
+option(TUNDRAUX_DEBUG_STARTUP "Start TundraUX2 in debug mode without logging in." ON) #Switch to OFF for guest mode by default
 
 add_executable(${PROJECT_NAME})
 
@@ -31,6 +31,7 @@ target_sources(${PROJECT_NAME}
         src/main.cpp
         src/manageusers.cpp
         src/udata.cpp
+        src/explorer.cpp
 )
 
 target_include_directories(${PROJECT_NAME}

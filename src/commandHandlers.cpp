@@ -16,6 +16,7 @@
 #include "hello.hpp"
 #include "manageusers.hpp"
 #include "TUXfile.hpp"
+#include "explorer.hpp"
 
 void handleLoginCommand(const std::string& input, USER& currentUser) {
     std::istringstream iss(input);
@@ -234,6 +235,10 @@ void handleEditCommand(const std::string& input) {
         return;
     }
     run_editor(path, filename);
+}
+
+void handleExplorerCommand(const std::string&, USER& currentUser) {
+    open_explorer(currentUser.name, currentUser.type);
 }
 
 void handleDebugEditorCommand(const std::string& input) {
