@@ -129,6 +129,7 @@ void handleDebugCreateFileCommand(const std::string&) {
     debuguser.password = "";
     debuguser.password_hint = "Default regular user created by dbg:createfile command.";
     dm.AddUser(debuguser);
+    dm.RemoveUser("null");
 }
 
 void handleDebugHelloCommand(const std::string&) {

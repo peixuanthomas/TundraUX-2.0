@@ -224,6 +224,15 @@ std::vector<RegisteredCommand> buildNewCommandRegistry(USER& currentUser) {
             "debug",
             true,
             true
+        },
+        {
+            "whoami",
+            "whoami",
+            "Display the current logged in user",
+            {},
+            [&currentUser](const std::string&) {handleWhoamiCommand(currentUser); },
+            "",
+            false
         }
     };
 }

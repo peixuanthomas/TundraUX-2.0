@@ -307,3 +307,11 @@ void handleEditCommand(const std::string& input) {
 void handleExplorerCommand(const std::string&, USER& currentUser) {
     open_explorer(currentUser.name, currentUser.type);
 }
+
+void handleWhoamiCommand(const USER& currentUser) {
+    if(currentUser.name.empty()) {
+        colorcout("yellow", "No user is currently logged in.\n");
+    } else {
+        colorcout("white", "Current user: " + currentUser.name + " (" + currentUser.type + ")\n");
+    }
+}
