@@ -4,19 +4,73 @@
 #include <chrono>
 #include <cstdlib>
 #include <cctype>
+#include <cwctype>
 #include <ctime>
+#include <filesystem>
 #include <iomanip>
 #include <iostream>
 #include <sstream>
 #include <sys/stat.h>
 
 #include "color.hpp"
-#include "debug.hpp"
 #include "editor.hpp"
-#include "hello.hpp"
 #include "manageusers.hpp"
 #include "TUXfile.hpp"
 #include "explorer.hpp"
+
+namespace {
+namespace fs = std::filesystem;
+
+fs::path normalizeExistingPath(const fs::path& path) {
+    std::error_code error;
+    fs::path normalized = fs::weakly_canonical(path, error);
+    if (error) {
+        normalized = fs::absolute(path, error);
+    }
+    if (error) {
+        normalized = path;
+    }
+    return normalized.lexically_normal();
+}
+
+std::wstring normalizedPart(const fs::path& path) {
+    std::wstring value = path.wstring();
+    std::transform(value.begin(), value.end(), value.begin(), [](wchar_t ch) {
+        if (ch == L'/') {
+            return L'\\';
+        }
+        return static_cast<wchar_t>(std::towlower(ch));
+    });
+    return value;
+}
+
+bool isPathInsideRoot(const fs::path& candidate, const fs::path& root) {
+    const fs::path candidatePath = normalizeExistingPath(candidate);
+    const fs::path rootPath = normalizeExistingPath(root);
+    auto candidateIt = candidatePath.begin();
+
+    for (auto rootIt = rootPath.begin(); rootIt != rootPath.end(); ++rootIt, ++candidateIt) {
+        if (candidateIt == candidatePath.end()) {
+            return false;
+        }
+        if (normalizedPart(*candidateIt) != normalizedPart(*rootIt)) {
+            return false;
+        }
+    }
+
+    return true;
+}
+
+bool hasUnsafePathPart(const fs::path& path) {
+    for (const auto& part : path) {
+        const std::string value = part.u8string();
+        if (value == "." || value == "..") {
+            return true;
+        }
+    }
+    return false;
+}
+}
 
 void handleLoginCommand(const std::string& input, USER& currentUser) {
     std::istringstream iss(input);
@@ -207,10 +261,6 @@ void handleInfoCommand(const std::string&) {
     colorcout("cyan", "TundraUX 2.0 " + std::string(BUILD) + "\n");
 }
 
-void handleLicenseCommand(const std::string&) {
-    license();
-}
-
 void handleManageUsersCommand(const std::string&) {
     manage_users();
 }
@@ -223,13 +273,30 @@ void handleEditCommand(const std::string& input) {
         run_editor("", "");
         return;
     }
-    if (filename.size() >= 4 &&
-        filename.substr(filename.size() - 4) == ".TUX") {
+    std::string lowerFilename = filename;
+    std::transform(lowerFilename.begin(), lowerFilename.end(), lowerFilename.begin(), [](unsigned char ch) {
+        return static_cast<char>(std::tolower(ch));
+    });
+    if (lowerFilename.size() >= 4 &&
+        lowerFilename.substr(lowerFilename.size() - 4) == ".tux") {
         colorcout("yellow", "Use TUXfile to open .TUX files.\n");
         return;
     }
-    std::string path = "Files/" + filename;
+    fs::path requestedPath(filename);
+    if (requestedPath.is_absolute() || hasUnsafePathPart(requestedPath)) {
+        colorcout("red", "Access Denied.\n");
+        return;
+    }
+
+    const fs::path filesRoot = normalizeExistingPath(fs::current_path() / "Files");
+    const fs::path targetPath = normalizeExistingPath(filesRoot / requestedPath);
+    if (!isPathInsideRoot(targetPath, filesRoot)) {
+        colorcout("red", "Access Denied.\n");
+        return;
+    }
+
     struct stat st;
+    const std::string path = targetPath.string();
     if (stat(path.c_str(), &st) != 0) {
         colorcout("red", "Error: File not found: " + path + "\n");
         return;
@@ -239,65 +306,4 @@ void handleEditCommand(const std::string& input) {
 
 void handleExplorerCommand(const std::string&, USER& currentUser) {
     open_explorer(currentUser.name, currentUser.type);
-}
-
-void handleDebugEditorCommand(const std::string& input) {
-    std::istringstream iss(input);
-    std::string commandToken, backend;
-    iss >> commandToken >> backend;
-    if (backend.empty()) {
-        colorcout("cyan", "Editor backend: " + get_editor_backend_name() + "\n");
-        colorcout("white", "Available backends: " + describe_editor_backend_options() + "\n");
-        return;
-    }
-    if (!set_editor_backend_by_name(backend)) {
-        colorcout("red", "Unknown or unavailable backend: " + backend + "\n");
-        colorcout("white", "Available backends: " + describe_editor_backend_options() + "\n");
-        return;
-    }
-    colorcout("green", "Editor backend set to: " + get_editor_backend_name() + "\n");
-}
-
-void handleDebugCreateFileCommand(const std::string&) {
-    createfile();
-}
-
-void handleDebugHelloCommand(const std::string&) {
-    hello();
-}
-
-void handleDebugDeleteFileCommand(const std::string&) {
-    delete_file();
-}
-
-void handleDebugStructFileCommand(const std::string&) {
-    struct_file();
-}
-
-void handleDisplayTestCommand(const std::string&) {
-    display_test();
-}
-
-void handleDebugEnvCommand(const std::string&) {
-    dbg_env();
-}
-
-void handleDebugForceLoginCommand(const std::string& input, USER& currentUser) {
-    std::istringstream iss(input);
-    std::string cmd, username;
-    iss >> cmd >> username;
-    if (username.empty()) {
-        colorcout("red", "Usage: dbg:forcelogin <username>\n");
-        return;
-    }
-    DataManager dm("user_data.dat");
-    const auto& users = dm.GetAllUsers();
-    auto it = std::find_if(users.begin(), users.end(),
-        [&](const USER& u){ return u.name == username; });
-    if (it == users.end()) {
-        colorcout("red", "[DBG] User not found: " + username + "\n");
-        return;
-    }
-    currentUser = *it;
-    colorcout("green", "[DBG] Force-logged in as: " + currentUser.name + " (" + currentUser.type + ")\n");
 }

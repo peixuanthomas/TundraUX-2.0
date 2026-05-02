@@ -106,6 +106,10 @@ bool isPrivilegedUser(const std::string& usertype) {
     return normalized == "admin" || normalized == "debug";
 }
 
+bool isDebugUser(const std::string& usertype) {
+    return toLowerCopy(usertype) == "debug";
+}
+
 std::string redMessage(const std::string& message) {
     return "\x1b[31m" + message + "\x1b[0m";
 }
@@ -700,10 +704,18 @@ fs::path uniquePasteTarget(const fs::path& requestedTarget) {
     return requestedTarget;
 }
 
+std::string deletePermissionError(const ExplorerState& state, const FileEntry& entry);
+
 void markClipboard(ExplorerState& state, ClipboardMode mode) {
     const FileEntry* entry = selectedEntry(state);
     if (entry == nullptr) {
         state.message = "Nothing selected";
+        return;
+    }
+
+    const std::string permissionError = deletePermissionError(state, *entry);
+    if (!permissionError.empty()) {
+        state.message = redMessage(permissionError);
         return;
     }
 
@@ -736,6 +748,20 @@ void pasteClipboard(ExplorerState& state) {
     if (!fs::exists(state.clipboard.path, error)) {
         state.message = redMessage("Clipboard source no longer exists.");
         state.clipboard = {};
+        return;
+    }
+
+    FileEntry sourceEntry;
+    sourceEntry.name = state.clipboard.name;
+    sourceEntry.path = state.clipboard.path;
+    sourceEntry.isDirectory = fs::is_directory(state.clipboard.path, error);
+    if (error) {
+        state.message = redMessage("Clipboard source check failed: " + error.message());
+        return;
+    }
+    const std::string permissionError = deletePermissionError(state, sourceEntry);
+    if (!permissionError.empty()) {
+        state.message = redMessage(permissionError);
         return;
     }
 
@@ -852,20 +878,22 @@ void handleCreateFolderInput(ExplorerState& state, const KeyPress& key) {
 
 std::string deletePermissionError(const ExplorerState& state, const FileEntry& entry) {
     const std::string extension = extensionOf(entry.path);
-    if (!entry.isDirectory && extension == ".dat") {
-        return "User data files cannot be deleted.";
-    }
-    if (entry.isDirectory && directoryContainsExtension(entry.path, ".dat")) {
-        return "Folders containing .dat files cannot be deleted.";
+    if (!isDebugUser(state.usertype)) {
+        if (!entry.isDirectory && extension == ".dat") {
+            return "User data files are debug-only.";
+        }
+        if (entry.isDirectory && directoryContainsExtension(entry.path, ".dat")) {
+            return "Folders containing user data files are debug-only.";
+        }
     }
 
-    if (!isPrivilegedUser(state.usertype)) {
-        if (!entry.isDirectory && extension == ".tux") {
-            return "Users cannot delete .tux files.";
-        }
-        if (entry.isDirectory && directoryContainsExtension(entry.path, ".tux")) {
-            return "Users cannot delete folders containing .tux files.";
-        }
+    if (!entry.isDirectory && extension == ".tux" &&
+        !can_modify_tux_file(pathToDisplayString(entry.path), state.username, state.usertype)) {
+        return "You can only modify TUX files you created.";
+    }
+    if (entry.isDirectory &&
+        directory_has_protected_tux_files(pathToDisplayString(entry.path), state.username, state.usertype)) {
+        return "Folder contains TUX files you cannot modify.";
     }
 
     return "";
@@ -977,7 +1005,8 @@ void openSelected(ExplorerState& state) {
             pathToDisplayString(selected.path),
             selected.name,
             state.username,
-            state.usertype
+            state.usertype,
+            true
         );
         std::cout << "\x1b[?25l" << std::flush;
         if (result == 0) {
@@ -987,6 +1016,8 @@ void openSelected(ExplorerState& state) {
             state.message = redMessage("TUX file is corrupted or invalid.");
         } else if (result == 3) {
             state.message = redMessage("Access denied: only the creator, admin, or debug can edit this TUX file.");
+        } else if (result == 7) {
+            state.message = "Viewed read-only " + selected.name;
         } else {
             state.message = redMessage("Failed to decrypt and open TUX file.");
         }

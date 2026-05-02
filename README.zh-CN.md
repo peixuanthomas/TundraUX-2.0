@@ -35,12 +35,12 @@ cmake --build build
 
 ### 启动模式
 
-默认情况下，CMake 选项 `TUNDRAUX_DEBUG_STARTUP` 是开启的。程序会以内置 `debug` 用户进入 Shell，方便开发和调试。
+默认情况下，CMake 选项 `TUNDRAUX_DEBUG_STARTUP` 是关闭的。程序会以 guest 模式启动，需要登录后才能使用 user、admin 或 debug 权限。
 
-如果需要以普通访客模式启动：
+如果需要为本地开发启用 debug 启动：
 
 ```powershell
-cmake -B build -DTUNDRAUX_DEBUG_STARTUP=OFF
+cmake -B build -DTUNDRAUX_DEBUG_STARTUP=ON
 cmake --build build
 ```
 
@@ -80,7 +80,7 @@ cmake --build build
 | `info` | 显示构建信息 |
 | `cls` | 清屏 |
 | `exit` | 退出程序 |
-| `/<cmd>` | 执行 Windows CMD 命令 |
+| `/<cmd>` | 执行 Windows CMD 命令，仅 admin/debug 可用 |
 
 调试命令不会出现在普通帮助中，包括编辑器后端检查、强制登录和诊断工具等。
 

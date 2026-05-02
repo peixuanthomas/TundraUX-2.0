@@ -35,12 +35,12 @@ The generated executable is named `TundraUX2`.
 
 ### Startup Mode
 
-By default, the CMake option `TUNDRAUX_DEBUG_STARTUP` is enabled. This starts the shell as the built-in `debug` user, which is convenient for development.
+By default, the CMake option `TUNDRAUX_DEBUG_STARTUP` is disabled. The program starts in guest mode and requires login before user, admin, or debug capabilities are available.
 
-To build with normal guest startup:
+To build with debug startup for local development:
 
 ```powershell
-cmake -B build -DTUNDRAUX_DEBUG_STARTUP=OFF
+cmake -B build -DTUNDRAUX_DEBUG_STARTUP=ON
 cmake --build build
 ```
 
@@ -80,7 +80,7 @@ The main shell prompt changes according to the current session:
 | `info` | Show build information |
 | `cls` | Clear the screen |
 | `exit` | Exit the program |
-| `/<cmd>` | Run a Windows CMD command |
+| `/<cmd>` | Run a Windows CMD command; admin/debug only |
 
 Debug-only commands are hidden from normal help output and include editor backend inspection, forced login, and diagnostic utilities.
 

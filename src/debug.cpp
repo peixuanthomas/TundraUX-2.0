@@ -1,6 +1,7 @@
 #include "debug.hpp"
 #include "color.hpp"
-#include "udata.hpp"
+#include "editor.hpp"
+#include "hello.hpp"
 #include <string>
 #include "crypto.hpp"
 #include <cstdio>
@@ -86,6 +87,84 @@ void license() {
         std::cout << line << std::endl;
     }
     licenseFile.close();
+}
+
+void handleLicenseCommand(const std::string&) {
+    license();
+}
+
+void handleDisplayTestCommand(const std::string&) {
+    display_test();
+}
+
+void handleDebugEditorCommand(const std::string& input) {
+    std::istringstream iss(input);
+    std::string commandToken, backend;
+    iss >> commandToken >> backend;
+    if (backend.empty()) {
+        colorcout("cyan", "Editor backend: " + get_editor_backend_name() + "\n");
+        colorcout("white", "Available backends: " + describe_editor_backend_options() + "\n");
+        return;
+    }
+    if (!set_editor_backend_by_name(backend)) {
+        colorcout("red", "Unknown or unavailable backend: " + backend + "\n");
+        colorcout("white", "Available backends: " + describe_editor_backend_options() + "\n");
+        return;
+    }
+    colorcout("green", "Editor backend set to: " + get_editor_backend_name() + "\n");
+}
+
+void handleDebugCreateFileCommand(const std::string&) {
+    createfile();
+    USER debuguser;
+    debuguser.type = "admin";
+    debuguser.name = "Admin";
+    debuguser.password = "";
+    debuguser.password_hint = "Default admin user created by dbg:createfile command.";
+    debuguser.count = 0;
+    DataManager dm("user_data.dat");
+    dm.AddUser(debuguser);
+    debuguser.type = "user";
+    debuguser.name = "User";
+    debuguser.password = "";
+    debuguser.password_hint = "Default regular user created by dbg:createfile command.";
+    dm.AddUser(debuguser);
+}
+
+void handleDebugHelloCommand(const std::string&) {
+    hello();
+}
+
+void handleDebugDeleteFileCommand(const std::string&) {
+    delete_file();
+}
+
+void handleDebugStructFileCommand(const std::string&) {
+    struct_file();
+}
+
+void handleDebugEnvCommand(const std::string&) {
+    dbg_env();
+}
+
+void handleDebugForceLoginCommand(const std::string& input, USER& currentUser) {
+    std::istringstream iss(input);
+    std::string cmd, username;
+    iss >> cmd >> username;
+    if (username.empty()) {
+        colorcout("red", "Usage: dbg:forcelogin <username>\n");
+        return;
+    }
+    DataManager dm("user_data.dat");
+    const auto& users = dm.GetAllUsers();
+    auto it = std::find_if(users.begin(), users.end(),
+        [&](const USER& u){ return u.name == username; });
+    if (it == users.end()) {
+        colorcout("red", "[DBG] User not found: " + username + "\n");
+        return;
+    }
+    currentUser = *it;
+    colorcout("green", "[DBG] Force-logged in as: " + currentUser.name + " (" + currentUser.type + ")\n");
 }
 
 void dbg_env() {

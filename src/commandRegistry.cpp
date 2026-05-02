@@ -1,6 +1,7 @@
 #include "commandReg.hpp"
 
 #include "commandHandlers.hpp"
+#include "debug.hpp"
 
 std::vector<RegisteredCommand> buildNewCommandRegistry(USER& currentUser) {
     return {

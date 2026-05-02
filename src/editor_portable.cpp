@@ -14,6 +14,7 @@ int run_editor_portable(const std::string& filepath, const std::string& displayN
 #include <filesystem>
 #include <fstream>
 #include <iostream>
+#include <sstream>
 #include <string>
 #include <sys/ioctl.h>
 #include <sys/select.h>
@@ -81,7 +82,7 @@ static std::string unifySlashes(const std::string& path) {
 
 static bool isValidPath(const std::string& path) {
     if (path.empty()) return false;
-    const std::string illegal = "<>\"*|?";
+    const std::string illegal = "<>:\"*|?";
     for (char c : illegal) {
         if (path.find(c) != std::string::npos) return false;
     }
@@ -91,6 +92,14 @@ static bool isValidPath(const std::string& path) {
     if (last == std::string::npos) return false;
     trimmed.erase(last + 1);
     if (trimmed.empty() || trimmed == "/" || trimmed == "\\") return false;
+
+    const std::string normalized = unifySlashes(trimmed);
+    std::istringstream parts(normalized);
+    std::string part;
+    while (std::getline(parts, part, '/')) {
+        if (part == "." || part == "..") return false;
+    }
+
     return true;
 }
 

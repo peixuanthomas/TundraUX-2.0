@@ -28,6 +28,10 @@ std::string guessSimilarCommand(
 );
 bool isLikelyCmd(const std::string& input);
 
+bool canRunSystemCommand(const USER& currentUser) {
+    return currentUser.type == "admin" || currentUser.type == "debug";
+}
+
 void task_main() {
     clear_screen();
     print_icon();
@@ -73,6 +77,10 @@ void task_main() {
         historyIndex = -1;
 
         if (input.length() > 1 && input[0] == '/') {
+            if (!canRunSystemCommand(currentUser)) {
+                colorcout("red", "Access Denied.\n");
+                continue;
+            }
             std::string command = input.substr(1);
             colorcout("yellow", "=== Executing: " + command + " ===\n");
             int result = system(command.c_str());
@@ -93,7 +101,7 @@ void task_main() {
 
         colorcout("yellow", "Unknown command: " + input + "\n");
         std::string suggestion = guessSimilarCommand(input, registeredCommands, currentUser);
-        if (isLikelyCmd(input)) {
+        if (canRunSystemCommand(currentUser) && isLikelyCmd(input)) {
             colorcout("yellow", "Hint: Use \"/\" prefix for CMD commands\n");
         } else if (!suggestion.empty()) {
             colorcout("yellow", "Did you mean: " + suggestion + "?\n");

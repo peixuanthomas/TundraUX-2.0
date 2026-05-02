@@ -58,6 +58,26 @@ static bool hasPrivilege() {
     return t == "debug" || t == "admin";
 }
 
+static bool isPrivilegedType(std::string usertype) {
+    std::transform(usertype.begin(), usertype.end(), usertype.begin(), ::tolower);
+    return usertype == "debug" || usertype == "admin";
+}
+
+static bool canModifyTuxMetadata(
+    const FileMetadata& meta,
+    const std::string& username,
+    const std::string& usertype
+) {
+    return isPrivilegedType(usertype) || (!username.empty() && meta.creator == username);
+}
+
+static std::string lowerCopy(std::string value) {
+    std::transform(value.begin(), value.end(), value.begin(), [](unsigned char ch) {
+        return static_cast<char>(std::tolower(ch));
+    });
+    return value;
+}
+
 // Verify filename validity
 static bool isValidFilename(const std::string& name) {
     return !name.empty() && std::all_of(name.begin(), name.end(), [](unsigned char c) {
@@ -135,6 +155,51 @@ FileMetadata readMetadata(const std::string& path) {
     if (!r.readExact(&meta.createTime, sizeof(meta.createTime))) return {};
     if (!r.readExact(&meta.modifyTime, sizeof(meta.modifyTime))) return {};
     return meta;
+}
+
+bool can_modify_tux_file(
+    const std::string& tuxPath,
+    const std::string& currentUsername,
+    const std::string& currentUsertype
+) {
+    if (isPrivilegedType(currentUsertype)) {
+        return true;
+    }
+    FileMetadata meta = readMetadata(tuxPath);
+    if (meta.creator.empty() && meta.lastEditor.empty()) {
+        return false;
+    }
+    return canModifyTuxMetadata(meta, currentUsername, currentUsertype);
+}
+
+bool directory_has_protected_tux_files(
+    const std::string& directoryPath,
+    const std::string& currentUsername,
+    const std::string& currentUsertype
+) {
+    if (isPrivilegedType(currentUsertype)) {
+        return false;
+    }
+
+    std::error_code error;
+    for (const auto& item : std::filesystem::recursive_directory_iterator(
+             directoryPath,
+             std::filesystem::directory_options::skip_permission_denied,
+             error
+         )) {
+        if (error) {
+            error.clear();
+            continue;
+        }
+        std::error_code statusError;
+        if (!item.is_directory(statusError) &&
+            lowerCopy(item.path().extension().string()) == ".tux" &&
+            !can_modify_tux_file(item.path().string(), currentUsername, currentUsertype)) {
+            return true;
+        }
+        statusError.clear();
+    }
+    return false;
 }
 
 // ---------- Full Read ----------
@@ -221,6 +286,10 @@ void createTuxFile(const std::string& filename) {
     }
     std::string path = getTuxPath(filename);
     if (std::filesystem::exists(path)) {
+        if (!can_modify_tux_file(path, currentUser.name, currentUser.type)) {
+            colorcout("RED","Access denied: You cannot overwrite this file\n");
+            return;
+        }
         if (!getYN("File already exists, overwrite?")) {
             colorcout("YELLOW","Cancelled\n");
             return;
@@ -255,7 +324,8 @@ int open_tux_file_in_editor(
     const std::string& tuxPath,
     const std::string& displayName,
     const std::string& currentUsername,
-    const std::string& currentUsertype
+    const std::string& currentUsertype,
+    bool allowReadOnly
 ) {
     currentUser.name = currentUsername;
     currentUser.type = currentUsertype;
@@ -268,7 +338,8 @@ int open_tux_file_in_editor(
     if (!g_lastTuxReadOk) {
         return 2;
     }
-    if (meta.creator != currentUser.name && !hasPrivilege()) {
+    const bool canModify = canModifyTuxMetadata(meta, currentUser.name, currentUser.type);
+    if (!canModify && !allowReadOnly) {
         return 3;
     }
 
@@ -319,7 +390,7 @@ int open_tux_file_in_editor(
         newContent = buffer.str();
     }
 
-    if (newContent != oldContent) {
+    if (canModify && newContent != oldContent) {
         const auto now = std::chrono::system_clock::to_time_t(std::chrono::system_clock::now());
         meta.lastEditor = currentUser.name;
         meta.modifyTime = now;
@@ -327,7 +398,7 @@ int open_tux_file_in_editor(
     }
 
     std::filesystem::remove(tempPath, ec);
-    return editorResult;
+    return canModify ? editorResult : 7;
 }
 
 void editTuxFile(const std::string& filename) {
@@ -336,7 +407,7 @@ void editTuxFile(const std::string& filename) {
     if (!std::filesystem::exists(path)) { colorcout("RED","Not found: "+filename+"\n"); return; }
     auto [oldContent, meta] = readFullTuxFile(path);
     if (!g_lastTuxReadOk) { colorcout("RED","File corrupted, abort editing\n\n"); return; }
-    if (meta.creator != currentUser.name && !hasPrivilege()) {
+    if (!canModifyTuxMetadata(meta, currentUser.name, currentUser.type)) {
         colorcout("RED","Access denied: You are not the creator of this file\n");
         return;
     }
@@ -419,6 +490,10 @@ void deleteTuxFile(const std::string& filename) {
     if (filename.empty()) { colorcout("RED","Usage: delete <filename>\n"); return; }
     std::string path = getTuxPath(filename);
     if (!std::filesystem::exists(path)) { colorcout("RED","Not found: "+filename+"\n"); return; }
+    if (!can_modify_tux_file(path, currentUser.name, currentUser.type)) {
+        colorcout("RED","Access denied: You cannot delete this file\n");
+        return;
+    }
     if (getYN("Confirm delete "+filename)) {
         if (std::filesystem::remove(path)) colorcout("GREEN","Deleted\n\n");
         else colorcout("RED","Delete failed\n\n");
@@ -435,6 +510,10 @@ void renameTuxFile(const std::string& oldname, const std::string& newname) {
     std::string op = getTuxPath(oldname), np = getTuxPath(newname);
     if (!std::filesystem::exists(op)) { colorcout("RED","Not found: "+oldname+"\n"); return; }
     if (std::filesystem::exists(np)) { colorcout("RED","Target already exists: "+newname+"\n"); return; }
+    if (!can_modify_tux_file(op, currentUser.name, currentUser.type)) {
+        colorcout("RED","Access denied: You cannot rename this file\n");
+        return;
+    }
     // Create target parent directories if needed
     std::filesystem::path nfp(np);
     if (nfp.has_parent_path()) {
@@ -473,6 +552,10 @@ void removeTuxDir(const std::string& dirname) {
     std::string path = "Files\\" + normalized;
     if (!std::filesystem::exists(path)) { colorcout("RED","Not found: "+dirname+"\n"); return; }
     if (!std::filesystem::is_directory(path)) { colorcout("RED","Not a directory: "+dirname+"\n"); return; }
+    if (directory_has_protected_tux_files(path, currentUser.name, currentUser.type)) {
+        colorcout("RED","Access denied: Directory contains files you cannot modify\n");
+        return;
+    }
     if (!std::filesystem::is_empty(path)) {
         if (!getYN("Directory is not empty, remove all contents?")) {
             colorcout("YELLOW","Cancelled\n\n"); return;
@@ -492,6 +575,10 @@ void copyTuxFile(const std::string& src, const std::string& dst) {
     if (!std::filesystem::exists(srcPath)) { colorcout("RED","Not found: "+src+"\n"); return; }
     auto [content, meta] = readFullTuxFile(srcPath);
     if (!g_lastTuxReadOk) { colorcout("RED","File corrupted, copy aborted\n\n"); return; }
+    if (!canModifyTuxMetadata(meta, currentUser.name, currentUser.type)) {
+        colorcout("RED","Access denied: You cannot copy this file\n");
+        return;
+    }
 
     // If dst is an existing directory, copy into it with same filename
     std::string dstNorm = dst;
@@ -509,6 +596,10 @@ void copyTuxFile(const std::string& src, const std::string& dst) {
     }
 
     if (std::filesystem::exists(dstPath)) {
+        if (!can_modify_tux_file(dstPath, currentUser.name, currentUser.type)) {
+            colorcout("RED","Access denied: You cannot overwrite the destination file\n");
+            return;
+        }
         if (!getYN("File already exists, overwrite?")) { colorcout("YELLOW","Cancelled\n\n"); return; }
     }
     std::filesystem::path fp(dstPath);
@@ -532,6 +623,10 @@ void moveTuxFile(const std::string& src, const std::string& dst) {
     if (!isValidPath(src)) { colorcout("YELLOW","Invalid source path.\n"); return; }
     std::string srcPath = getTuxPath(src);
     if (!std::filesystem::exists(srcPath)) { colorcout("RED","Not found: "+src+"\n"); return; }
+    if (!can_modify_tux_file(srcPath, currentUser.name, currentUser.type)) {
+        colorcout("RED","Access denied: You cannot move this file\n");
+        return;
+    }
 
     // If dst is an existing directory, move into it with same filename
     std::string dstNorm = dst;
