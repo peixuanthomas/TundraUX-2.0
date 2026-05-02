@@ -2,6 +2,7 @@
 
 #include "console_screen.hpp"
 #include "editor.hpp"
+#include "TUXfile.hpp"
 
 #include <algorithm>
 #include <cctype>
@@ -56,6 +57,7 @@ struct ExplorerState {
     bool showHelp = false;
     bool creatingFolder = false;
     std::string newFolderName;
+    std::string username;
     std::string usertype;
     std::string message = "Ready";
 };
@@ -351,7 +353,7 @@ std::vector<std::string> previewDirectory(const fs::path& path, const fs::path& 
 
 std::vector<std::string> previewFile(const fs::path& path) {
     if (extensionOf(path) == ".tux") {
-        return {"This file needs TUXfile manager to open."};
+        return {"Encrypted TUX file.", "Press Enter to decrypt and edit."};
     }
     if (extensionOf(path) == ".dat") {
         return {"User data file."};
@@ -535,6 +537,10 @@ void renderHelp(const ExplorerState& state, const std::string& username, const s
     std::cout << "  r                    Refresh current directory\n";
     std::cout << "  h                    Toggle this help menu\n";
     std::cout << "  q or Esc             Quit explorer from main view, close help from here\n\n";
+    std::cout << "Special file handling\n";
+    std::cout << "  .md / .txt           Open with Tundra editor\n";
+    std::cout << "  .tux                 Decrypt and open with Tundra editor\n";
+    std::cout << "  .dat                 Preview as user data file; cannot open here\n\n";
     std::cout << "Press h, q, Esc, or Enter to return." << std::flush;
 }
 
@@ -966,7 +972,24 @@ void openSelected(ExplorerState& state) {
     }
 
     if (extensionOf(selected.path) == ".tux") {
-        state.message = redMessage("This file needs TUXfile manager to open.");
+        std::cout << "\x1b[?25h" << std::flush;
+        const int result = open_tux_file_in_editor(
+            pathToDisplayString(selected.path),
+            selected.name,
+            state.username,
+            state.usertype
+        );
+        std::cout << "\x1b[?25l" << std::flush;
+        if (result == 0) {
+            state.message = "Decrypted and edited " + selected.name;
+            refresh(state);
+        } else if (result == 2) {
+            state.message = redMessage("TUX file is corrupted or invalid.");
+        } else if (result == 3) {
+            state.message = redMessage("Access denied: only the creator, admin, or debug can edit this TUX file.");
+        } else {
+            state.message = redMessage("Failed to decrypt and open TUX file.");
+        }
         return;
     }
     if (extensionOf(selected.path) == ".dat") {
@@ -1114,6 +1137,7 @@ void open_explorer(const std::string& username, const std::string& usertype) {
     ExplorerState state;
     state.rootPath = normalizedPath(fs::current_path());
     state.currentPath = state.rootPath;
+    state.username = username;
     state.usertype = usertype;
     refresh(state);
 

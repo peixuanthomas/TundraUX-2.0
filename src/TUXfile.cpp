@@ -251,6 +251,85 @@ void viewTuxFile(const std::string& filename) {
 }
 
 // ---------- Edit ----------
+int open_tux_file_in_editor(
+    const std::string& tuxPath,
+    const std::string& displayName,
+    const std::string& currentUsername,
+    const std::string& currentUsertype
+) {
+    currentUser.name = currentUsername;
+    currentUser.type = currentUsertype;
+
+    if (!std::filesystem::exists(tuxPath)) {
+        return 1;
+    }
+
+    auto [oldContent, meta] = readFullTuxFile(tuxPath);
+    if (!g_lastTuxReadOk) {
+        return 2;
+    }
+    if (meta.creator != currentUser.name && !hasPrivilege()) {
+        return 3;
+    }
+
+    const std::string tempDir = "Files\\temp";
+    std::error_code ec;
+    std::filesystem::create_directories(tempDir, ec);
+    if (ec) {
+        return 4;
+    }
+
+    static std::mt19937 rng(
+        static_cast<unsigned>(std::chrono::steady_clock::now().time_since_epoch().count()));
+    std::uniform_int_distribution<int> hexDist(0, 15);
+
+    auto genTempPath = [&]() -> std::string {
+        std::string name(16, '0');
+        for (auto& c : name) {
+            const int v = hexDist(rng);
+            c = v < 10 ? static_cast<char>('0' + v) : static_cast<char>('a' + v - 10);
+        }
+        return tempDir + "\\" + name + ".txt";
+    };
+
+    std::string tempPath;
+    do {
+        tempPath = genTempPath();
+    } while (std::filesystem::exists(tempPath));
+
+    {
+        std::ofstream tempFile(tempPath, std::ios::binary);
+        if (!tempFile) {
+            return 5;
+        }
+        tempFile << oldContent;
+    }
+
+    const int editorResult = run_editor(tempPath, displayName);
+
+    std::string newContent;
+    {
+        std::ifstream tempFile(tempPath, std::ios::binary);
+        if (!tempFile) {
+            std::filesystem::remove(tempPath, ec);
+            return 6;
+        }
+        std::ostringstream buffer;
+        buffer << tempFile.rdbuf();
+        newContent = buffer.str();
+    }
+
+    if (newContent != oldContent) {
+        const auto now = std::chrono::system_clock::to_time_t(std::chrono::system_clock::now());
+        meta.lastEditor = currentUser.name;
+        meta.modifyTime = now;
+        writeTuxFile(tuxPath, newContent, meta);
+    }
+
+    std::filesystem::remove(tempPath, ec);
+    return editorResult;
+}
+
 void editTuxFile(const std::string& filename) {
     if (filename.empty()) { colorcout("RED","Usage: edit <filename>\n"); return; }
     std::string path = getTuxPath(filename);
