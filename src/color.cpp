@@ -1,6 +1,7 @@
 //Attention Windows only code.
 
 #include "color.hpp"
+#include "console_screen.hpp"
 #include <iostream>
 #include <string>
 #include <unordered_map>
@@ -160,7 +161,7 @@ bool getYN(const std::string& prompt) {
 }
 
 void clear_screen() {
-    std::cout << "\x1B[2J\x1B[H";
+    clearConsoleScreen();
 }
 
 void set_title(const std::string& console_title) {

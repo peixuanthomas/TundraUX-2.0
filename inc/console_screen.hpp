@@ -1,5 +1,7 @@
 #pragma once
 
+void clearConsoleScreen();
+
 class ConsoleScreenGuard {
 public:
     explicit ConsoleScreenGuard(bool clearOnEnter = true);

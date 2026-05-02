@@ -14,6 +14,7 @@
 #include <chrono>
 #include <direct.h>
 #include <cerrno>
+#include "console_screen.hpp"
 #include "editor_win.hpp"
 
 // Editor version info
@@ -133,6 +134,7 @@ static std::string normalizePath(const std::string& input) {
  */
 class WindowsConsole {
 private:
+    ConsoleScreenGuard screenGuard;
     HANDLE hStdout;
     HANDLE hStdin;
     CONSOLE_SCREEN_BUFFER_INFO csbi;
@@ -141,30 +143,14 @@ private:
     bool colorsEnabled;
     DWORD originalOutMode;
     DWORD originalInMode;
-    COORD savedCursorPos;
-    SMALL_RECT savedWindow;
-    SHORT savedWidth;
-    SHORT savedHeight;
-    std::vector<CHAR_INFO> savedBuffer;
 
 public:
-    WindowsConsole() : colorsEnabled(false) {
+    WindowsConsole() : screenGuard(true), colorsEnabled(false) {
         hStdout = GetStdHandle(STD_OUTPUT_HANDLE);
         hStdin = GetStdHandle(STD_INPUT_HANDLE);
         GetConsoleScreenBufferInfo(hStdout, &csbi);
         originalAttributes = csbi.wAttributes;
         currentAttributes = originalAttributes;
-
-        // Save current screen content for restoration on exit
-        savedCursorPos = csbi.dwCursorPosition;
-        savedWindow = csbi.srWindow;
-        savedWidth  = csbi.srWindow.Right  - csbi.srWindow.Left + 1;
-        savedHeight = csbi.srWindow.Bottom - csbi.srWindow.Top  + 1;
-        savedBuffer.resize(savedWidth * savedHeight);
-        COORD bufSize  = {savedWidth, savedHeight};
-        COORD bufCoord = {0, 0};
-        SMALL_RECT readRegion = savedWindow;
-        ReadConsoleOutput(hStdout, savedBuffer.data(), bufSize, bufCoord, &readRegion);
 
         // Enable virtual terminal processing for better control
         DWORD mode;
@@ -188,26 +174,12 @@ public:
         SetConsoleCursorInfo(hStdout, &cci);
         SetConsoleMode(hStdout, originalOutMode);
         SetConsoleMode(hStdin, originalInMode);
-
-        // Restore saved screen content
-        if (!savedBuffer.empty()) {
-            COORD bufSize  = {savedWidth, savedHeight};
-            COORD bufCoord = {0, 0};
-            SMALL_RECT writeRegion = savedWindow;
-            WriteConsoleOutput(hStdout, savedBuffer.data(), bufSize, bufCoord, &writeRegion);
-            SetConsoleCursorPosition(hStdout, savedCursorPos);
-        }
     }
 
     void clear() {
-        COORD coord = {0, 0};
-        DWORD written;
-        CONSOLE_SCREEN_BUFFER_INFO info;
-        GetConsoleScreenBufferInfo(hStdout, &info);
-        DWORD consoleSize = info.dwSize.X * info.dwSize.Y;
-        FillConsoleOutputCharacter(hStdout, ' ', consoleSize, coord, &written);
-        FillConsoleOutputAttribute(hStdout, originalAttributes, consoleSize, coord, &written);
-        SetConsoleCursorPosition(hStdout, coord);
+        SetConsoleTextAttribute(hStdout, originalAttributes);
+        currentAttributes = originalAttributes;
+        clearConsoleScreen();
     }
 
     void refresh() {

@@ -277,10 +277,6 @@ void handleDebugEnvCommand(const std::string&) {
     dbg_env();
 }
 
-void handleDebugNewCommandCommand(const std::string&) {
-    colorcout("green", "[DBG] New command registry is active.\n");
-}
-
 void handleDebugForceLoginCommand(const std::string& input, USER& currentUser) {
     std::istringstream iss(input);
     std::string cmd, username;

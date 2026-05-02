@@ -142,6 +142,15 @@ std::vector<RegisteredCommand> buildNewCommandRegistry(USER& currentUser) {
             true
         },
         {
+            "dbg:help",
+            "dbg:help",
+            "Show debug commands",
+            {},
+            [](const std::string&) {},
+            "debug",
+            true
+        },
+        {
             "dbg:editor",
             "dbg:editor [backend]",
             "Inspect or change editor backend",
@@ -193,15 +202,6 @@ std::vector<RegisteredCommand> buildNewCommandRegistry(USER& currentUser) {
             "Show debug environment information",
             {},
             handleDebugEnvCommand,
-            "debug",
-            true
-        },
-        {
-            "dbg:newcommand",
-            "dbg:newcommand",
-            "Confirm new command registry is active",
-            {},
-            handleDebugNewCommandCommand,
             "debug",
             true
         },

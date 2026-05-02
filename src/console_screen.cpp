@@ -22,10 +22,10 @@ ConsoleScreenGuard::ConsoleScreenGuard(bool clearOnEnter) {
 #endif
 
     std::cout << "\x1b[?1049h";
-    if (clearOnEnter) {
-        std::cout << "\x1b[2J\x1b[H";
-    }
     std::cout.flush();
+    if (clearOnEnter) {
+        clearConsoleScreen();
+    }
     active = true;
 }
 
@@ -40,4 +40,24 @@ ConsoleScreenGuard::~ConsoleScreenGuard() {
         SetConsoleMode(static_cast<HANDLE>(outputHandle), originalOutputMode);
     }
 #endif
+}
+
+void clearConsoleScreen() {
+#ifdef _WIN32
+    HANDLE outputHandle = GetStdHandle(STD_OUTPUT_HANDLE);
+    CONSOLE_SCREEN_BUFFER_INFO info{};
+    if (outputHandle != INVALID_HANDLE_VALUE &&
+        GetConsoleScreenBufferInfo(outputHandle, &info)) {
+        const DWORD consoleSize = static_cast<DWORD>(info.dwSize.X) * static_cast<DWORD>(info.dwSize.Y);
+        const COORD origin{0, 0};
+        DWORD written = 0;
+        FillConsoleOutputCharacter(outputHandle, ' ', consoleSize, origin, &written);
+        FillConsoleOutputAttribute(outputHandle, info.wAttributes, consoleSize, origin, &written);
+        SetConsoleCursorPosition(outputHandle, origin);
+        return;
+    }
+#endif
+
+    std::cout << "\x1b[2J\x1b[H";
+    std::cout.flush();
 }

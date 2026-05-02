@@ -13,7 +13,7 @@
 #include "commandReg.hpp"
 #include "udata.hpp"
 
-#ifndef TUNDRAUX_DEFAULT_USER_TYPE
+#ifndef TUNDRAUX_DEFAULT_USER_TYPE                    //This default type is set in cmakelists.txt.
 #define TUNDRAUX_DEFAULT_USER_TYPE "guest"
 #endif
 

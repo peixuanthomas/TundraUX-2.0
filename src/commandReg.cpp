@@ -59,6 +59,15 @@ bool tryExecuteRegisteredCommand(
                 }
                 colorcout("white", " - " + helpCmd.usage + ": " + helpCmd.description + "\n");
             }
+        } else if (cmd.name == "dbg:help") {
+            colorcout("cyan", "Available debug commands:\n");
+            for (const auto& helpCmd : commands) {
+                if (helpCmd.name.rfind("dbg:", 0) != 0 ||
+                    !hasCommandPermission(helpCmd.requiredUserType, currentUser.type)) {
+                    continue;
+                }
+                colorcout("white", " - " + helpCmd.usage + ": " + helpCmd.description + "\n");
+            }
         } else {
             cmd.handler(input);
         }

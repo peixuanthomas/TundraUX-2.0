@@ -20,6 +20,7 @@ int run_editor_portable(const std::string& filepath, const std::string& displayN
 #include <termios.h>
 #include <unistd.h>
 #include <vector>
+#include "console_screen.hpp"
 
 #define EDITOR_NAME "Tundra Editor"
 
@@ -111,6 +112,7 @@ static std::string normalizePath(const std::string& input) {
 
 class AnsiConsole {
 private:
+    ConsoleScreenGuard screenGuard;
     termios originalTermios{};
     bool termiosSaved = false;
     int cachedWidth = 80;
@@ -138,7 +140,7 @@ private:
     }
 
 public:
-    AnsiConsole() {
+    AnsiConsole() : screenGuard(true) {
         termiosSaved = tcgetattr(STDIN_FILENO, &originalTermios) == 0;
         if (termiosSaved) {
             termios raw = originalTermios;
@@ -151,20 +153,16 @@ public:
             tcsetattr(STDIN_FILENO, TCSAFLUSH, &raw);
         }
 
-        writeAnsi("\x1b[?1049h\x1b[H\x1b[2J\x1b[?25h");
-        std::cout.flush();
         getmaxyx(cachedHeight, cachedWidth);
     }
 
     ~AnsiConsole() {
-        writeAnsi("\x1b[0m\x1b[2J\x1b[H\x1b[?25h\x1b[?1049l");
-        std::cout.flush();
         if (termiosSaved) {
             tcsetattr(STDIN_FILENO, TCSAFLUSH, &originalTermios);
         }
     }
 
-    void clear() { writeAnsi("\x1b[2J\x1b[H"); }
+    void clear() { clearConsoleScreen(); }
     void refresh() { std::cout.flush(); }
 
     void getmaxyx(int& height, int& width) {
