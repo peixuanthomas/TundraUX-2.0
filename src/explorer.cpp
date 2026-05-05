@@ -444,8 +444,26 @@ std::string row(
            "|" + trimToWidth(right, previewWidth) + "|";
 }
 
-std::string formatParentEntry(const FileEntry& entry) {
-    return std::string(entry.isDirectory ? "[D] " : "    ") + entry.name;
+std::size_t findCurrentInParent(const ExplorerState& state) {
+    for (std::size_t index = 0; index < state.parentEntries.size(); ++index) {
+        if (isSamePath(state.parentEntries[index].path, state.currentPath)) {
+            return index;
+        }
+    }
+    return state.parentEntries.size();
+}
+
+std::size_t parentScrollForCurrent(std::size_t currentIndex, std::size_t totalEntries, std::size_t rows) {
+    if (rows == 0 || currentIndex >= totalEntries || currentIndex < rows) {
+        return 0;
+    }
+    return currentIndex - rows + 1;
+}
+
+std::string formatParentEntry(const FileEntry& entry, bool current) {
+    return std::string(current ? "-> " : "   ") +
+           std::string(entry.isDirectory ? "[D] " : "    ") +
+           entry.name;
 }
 
 std::string fitText(const std::string& value, std::size_t width) {
@@ -541,10 +559,6 @@ void renderHelp(const ExplorerState& state, const std::string& username, const s
     std::cout << "  r                    Refresh current directory\n";
     std::cout << "  h                    Toggle this help menu\n";
     std::cout << "  q or Esc             Quit explorer from main view, close help from here\n\n";
-    std::cout << "Special file handling\n";
-    std::cout << "  .md / .txt           Open with Tundra editor\n";
-    std::cout << "  .tux                 Decrypt and open with Tundra editor\n";
-    std::cout << "  .dat                 Preview as user data file; cannot open here\n\n";
     std::cout << "Press h, q, Esc, or Enter to return." << std::flush;
 }
 
@@ -563,6 +577,12 @@ void render(const ExplorerState& state, const std::string& username, const std::
     const std::size_t currentWidth = std::max<std::size_t>(30, usableWidth * 42 / 100);
     const std::size_t previewWidth = usableWidth - parentWidth - currentWidth;
     const auto previewLines = previewSelected(state);
+    const std::size_t parentCurrentIndex = findCurrentInParent(state);
+    const std::size_t parentScroll = parentScrollForCurrent(
+        parentCurrentIndex,
+        state.parentEntries.size(),
+        rows
+    );
 
     std::cout << "\x1b[2J\x1b[H\x1b[?25l";
     std::cout << "TundraUX Explorer - " << usertype << ": " << username << "\n";
@@ -572,8 +592,9 @@ void render(const ExplorerState& state, const std::string& username, const std::
     std::cout << border(parentWidth, currentWidth, previewWidth) << "\n";
 
     for (std::size_t rowIndex = 0; rowIndex < rows; ++rowIndex) {
-        const std::string parentText = rowIndex < state.parentEntries.size()
-            ? formatParentEntry(state.parentEntries[rowIndex])
+        const std::size_t parentIndex = parentScroll + rowIndex;
+        const std::string parentText = parentIndex < state.parentEntries.size()
+            ? formatParentEntry(state.parentEntries[parentIndex], parentIndex == parentCurrentIndex)
             : "";
         const std::size_t entryIndex = state.scroll + rowIndex;
         const FileEntry* currentEntry = entryIndex < state.entries.size()
