@@ -22,7 +22,19 @@ set(TUNDRAUX_APP_SOURCES
     APP/editor/editor.cpp
     APP/editor/editor_portable.cpp
     APP/editor/editor_win.cpp
+    APP/explorer/explorer_clipboard.cpp
     APP/explorer/explorer.cpp
+    APP/explorer/explorer_delete.cpp
+    APP/explorer/explorer_detail_actions.cpp
+    APP/explorer/explorer_details.cpp
+    APP/explorer/explorer_directory.cpp
+    APP/explorer/explorer_folder_ops.cpp
+    APP/explorer/explorer_input.cpp
+    APP/explorer/explorer_navigation.cpp
+    APP/explorer/explorer_open.cpp
+    APP/explorer/explorer_permissions.cpp
+    APP/explorer/explorer_render.cpp
+    APP/explorer/explorer_text.cpp
     APP/file_manager/TUXfile.cpp
     APP/shell/command.cpp
     APP/shell/commandHandlers.cpp
