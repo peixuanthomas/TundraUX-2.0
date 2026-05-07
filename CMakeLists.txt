@@ -35,6 +35,7 @@ set(TUNDRAUX_APP_SOURCES
     APP/explorer/explorer_open.cpp
     APP/explorer/explorer_permissions.cpp
     APP/explorer/explorer_render.cpp
+    APP/explorer/explorer_search.cpp
     APP/explorer/explorer_text.cpp
     APP/file_manager/TUXfile.cpp
     APP/shell/command.cpp

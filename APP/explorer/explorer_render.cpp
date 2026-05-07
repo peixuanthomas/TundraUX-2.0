@@ -2,6 +2,7 @@
 
 #include "explorer_directory.hpp"
 #include "explorer_permissions.hpp"
+#include "explorer_search.hpp"
 #include "explorer_style.hpp"
 #include "explorer_text.hpp"
 
@@ -9,6 +10,7 @@
 #include <iostream>
 #include <sstream>
 #include <string>
+#include <system_error>
 #include <vector>
 
 namespace tundraux::explorer {
@@ -217,7 +219,7 @@ void renderHelp(const ExplorerState& state, const std::string& username, const s
 
     renderHelpSection("File operations");
     renderHelpBinding("c", "Copy selected file or folder, shown in green until paste");
-    renderHelpBinding("x", "Cut selected file or folder, shown in gray until paste");
+    renderHelpBinding("x", "Cut selected file or folder, shown in grey until paste");
     renderHelpBinding("p", "Paste into current directory");
     std::cout << "\n";
     renderHelpBinding("n", "Create a new folder in the current directory");
@@ -226,6 +228,7 @@ void renderHelp(const ExplorerState& state, const std::string& username, const s
     std::cout << "\n";
 
     renderHelpSection("View");
+    renderHelpBinding("s or /", "Search file names from the current directory");
     renderHelpBinding(".", "Show or hide hidden files");
     renderHelpBinding("r", "Refresh current directory");
     renderHelpBinding("i", "Show detailed properties for the selected item");
@@ -315,6 +318,167 @@ void renderDetails(const ExplorerState& state, const std::string& username, cons
               << std::flush;
 }
 
+std::string searchRelativePath(const fs::path& path, const fs::path& rootPath) {
+    std::error_code error;
+    const fs::path relative = fs::relative(path, rootPath, error);
+    return error ? pathToDisplayString(path) : relative.u8string();
+}
+
+std::size_t searchScrollForCursor(std::size_t cursor, std::size_t scroll, std::size_t rows, std::size_t resultCount) {
+    if (rows == 0 || resultCount == 0) {
+        return 0;
+    }
+    cursor = std::min(cursor, resultCount - 1);
+    if (cursor < scroll) {
+        return cursor;
+    }
+    if (cursor >= scroll + rows) {
+        return cursor - rows + 1;
+    }
+    const std::size_t maxScroll = resultCount > rows ? resultCount - rows : 0;
+    return std::min(scroll, maxScroll);
+}
+
+std::string formatSearchResultCell(
+    const ExplorerState& state,
+    const FileEntry* entry,
+    bool selected,
+    std::size_t width
+) {
+    if (entry == nullptr) {
+        return std::string(width, ' ');
+    }
+
+    const std::string marker = selected ? "> " : "  ";
+    const std::string hiddenMarker = entry->isHidden ? ". " : "  ";
+    const std::string suffix = "  " + formatSize(entry->size);
+    const std::string relative = searchRelativePath(entry->path, state.search.rootPath);
+    const std::size_t fixedWidth = marker.size() + hiddenMarker.size() + suffix.size();
+    if (fixedWidth >= width) {
+        return colorCellPart(trimToWidth(marker + relative, width), entryNameStyle(*entry), selected);
+    }
+
+    const std::size_t nameWidth = width - fixedWidth;
+    const std::string name = fitText(relative, nameWidth);
+    const std::size_t visibleWidth = marker.size() + hiddenMarker.size() + name.size() + suffix.size();
+    std::string cell =
+        colorCellPart(marker, selected ? kSelectedMarkStyle : kHintStyle, selected) +
+        colorCellPart(hiddenMarker, entry->isHidden ? kHiddenStyle : kHintStyle, selected) +
+        colorCellPart(name, entryNameStyle(*entry), selected) +
+        colorCellPart(suffix, kSizeStyle, selected);
+
+    if (visibleWidth < width) {
+        cell += colorCellPart(std::string(width - visibleWidth, ' '), kFileStyle, selected);
+    }
+    return cell;
+}
+
+std::string searchStatusLine(const ExplorerState& state) {
+    const SearchState& search = state.search;
+    if (!search.error.empty()) {
+        return colorText(search.error, kWarningStyle);
+    }
+    if (!search.hasRun) {
+        return colorText("Content search: empty for now; matching file names only.", kHintStyle);
+    }
+
+    std::string status = std::to_string(search.results.size()) + " file(s) found";
+    if (search.scanErrors > 0) {
+        status += " | " + std::to_string(search.scanErrors) + " scan error(s)";
+    }
+    return colorText(status, kSectionStyle);
+}
+
+void renderSearch(const ExplorerState& state, const std::string& username, const std::string& usertype) {
+    const COORD size = consoleSize();
+    const std::size_t width = std::max<int>(size.X, 90);
+    const std::size_t height = std::max<int>(size.Y, 18);
+    const std::size_t rows = height > 10 ? height - 10 : 8;
+    const std::size_t usableWidth = width - 3;
+    const std::size_t resultWidth = std::max<std::size_t>(38, usableWidth * 58 / 100);
+    const std::size_t previewWidth = usableWidth - resultWidth;
+    const auto previewLines = previewSearchSelected(state);
+    const std::size_t resultScroll = searchScrollForCursor(
+        state.search.cursor,
+        state.search.scroll,
+        rows,
+        state.search.results.size()
+    );
+    const std::string tableBorder =
+        "+" + std::string(resultWidth, '-') +
+        "+" + std::string(previewWidth, '-') + "+";
+
+    std::cout << "\x1b[0m\x1b[2J\x1b[H\x1b[?25l";
+    std::cout << colorText("TundraUX Explorer Search", kTitleStyle)
+              << colorText(" - ", kHintStyle)
+              << colorText(usertype, kRoleStyle)
+              << colorText(": ", kHintStyle)
+              << colorText(username, kUserStyle)
+              << "\n";
+    std::cout << colorText("Root: ", kSectionStyle)
+              << colorText(pathToDisplayString(state.search.rootPath), kPathStyle)
+              << "\n";
+    const std::string modeText = searchModeLabel(state.search.mode);
+    const std::size_t queryWidth = width > modeText.size() + 16
+        ? width - modeText.size() - 16
+        : width;
+    const std::string queryText = fitText(
+        state.search.query.empty() ? "(empty)" : state.search.query,
+        queryWidth
+    );
+    std::cout << colorText("Mode: ", kSectionStyle)
+              << colorText(modeText, kKeyStyle)
+              << colorText(" | Query: ", kHintStyle)
+              << colorText(queryText, kInputStyle)
+              << "\n";
+    std::cout << colorText(tableBorder, kBorderStyle) << "\n";
+    std::cout << colorText("|", kBorderStyle)
+              << headerCell("Results", resultWidth)
+              << colorText("|", kBorderStyle)
+              << headerCell("Details", previewWidth)
+              << colorText("|", kBorderStyle)
+              << "\n";
+    std::cout << colorText(tableBorder, kBorderStyle) << "\n";
+
+    for (std::size_t rowIndex = 0; rowIndex < rows; ++rowIndex) {
+        const std::size_t resultIndex = resultScroll + rowIndex;
+        const FileEntry* resultEntry = resultIndex < state.search.results.size()
+            ? &state.search.results[resultIndex]
+            : nullptr;
+        const std::string resultText = formatSearchResultCell(
+            state,
+            resultEntry,
+            resultIndex == state.search.cursor,
+            resultWidth
+        );
+        const std::string previewText = rowIndex < previewLines.size() ? previewLines[rowIndex] : "";
+        std::cout << colorText("|", kBorderStyle)
+                  << resultText
+                  << colorText("|", kBorderStyle)
+                  << previewCell(previewText, previewWidth)
+                  << colorText("|", kBorderStyle)
+                  << "\n";
+    }
+
+    std::cout << colorText(tableBorder, kBorderStyle) << "\n";
+    std::cout << colorText("Type", kKeyStyle)
+              << colorText(" query | ", kHintStyle)
+              << colorText("Tab", kKeyStyle)
+              << colorText(" mode | ", kHintStyle)
+              << colorText("Enter", kKeyStyle)
+              << colorText(" search | ", kHintStyle)
+              << colorText("Up/Down", kKeyStyle)
+              << colorText(" results | ", kHintStyle)
+              << colorText("Right", kKeyStyle)
+              << colorText(" open | ", kHintStyle)
+              << colorText("Esc", kKeyStyle)
+              << colorText(" back", kHintStyle)
+              << "\n";
+    std::cout << colorText("Status: ", kSectionStyle)
+              << searchStatusLine(state)
+              << std::flush;
+}
+
 }
 
 COORD consoleSize() {
@@ -334,6 +498,10 @@ std::size_t detailVisibleRows(std::size_t height) {
 }
 
 void render(const ExplorerState& state, const std::string& username, const std::string& usertype) {
+    if (state.search.active) {
+        renderSearch(state, username, usertype);
+        return;
+    }
     if (state.showHelp) {
         renderHelp(state, username, usertype);
         return;
@@ -436,6 +604,8 @@ void render(const ExplorerState& state, const std::string& username, const std::
                   << colorText(" paste | ", kHintStyle)
                   << colorText("d", kKeyStyle)
                   << colorText(" delete | ", kHintStyle)
+                  << colorText("s", kKeyStyle)
+                  << colorText(" search | ", kHintStyle)
                   << colorText("i", kKeyStyle)
                   << colorText(" info | ", kHintStyle)
                   << colorText("h", kKeyStyle)

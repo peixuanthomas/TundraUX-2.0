@@ -25,7 +25,7 @@
 | `magenta` / `MAGENTA` | bright magenta, 213 | Shell 提示符、调试模式提示、强调性标签 |
 | `cyan` / `CYAN` | bright cyan, 51 | 程序标题、页面标题、主分隔标题 |
 | `white` / `WHITE` | white, 254 | 普通正文、默认输出 |
-| `gray` / `grey` / `GRAY` / `GREY` | gray, 245 | 次要提示、禁用感文本、辅助说明 |
+| `grey` / `GREY` | grey, 245 | 次要提示、禁用感文本、辅助说明 |
 
 ## TUI 语义颜色要求
 
@@ -41,17 +41,17 @@
 | 表头 | `kHeaderStyle` | fg 195 + bg 24, bold | 表格列头、详情区块标题 |
 | 区块标题 | `kSectionStyle` | bold cyan-green, 87 | Help 分组、状态标签、输入标签 |
 | 快捷键 | `kKeyStyle` | bold yellow, 220 | `Enter`、`Esc`、`h`、`q` 等按键提示 |
-| 次要提示 | `kHintStyle` | gray, 245 | 分隔符、辅助说明、空值、取消提示 |
-| 帮助正文 | `kHelpTextStyle` | light gray, 252 | Help 描述、详情正文、普通 TUI 文本 |
+| 次要提示 | `kHintStyle` | grey, 245 | 分隔符、辅助说明、空值、取消提示 |
+| 帮助正文 | `kHelpTextStyle` | light grey, 252 | Help 描述、详情正文、普通 TUI 文本 |
 | 目录 | `kDirStyle` | bold cyan-green, 87 | 目录名、`[D]` 标记、`<DIR>` |
 | 普通文件 | `kFileStyle` | white, 254 | 未分类文件、单元格填充 |
 | 文本文档 | `kTextFileStyle` | pale yellow, 229 | `.txt`、`.md` 文件 |
 | TUX 文件 | `kTuxFileStyle` | bold magenta, 213 | `.tux` 文件、TUX 特殊提示 |
 | 数据文件 | `kDataFileStyle` | red, 203 | `.dat` 文件、用户数据文件 |
-| 隐藏项 | `kHiddenStyle` | dark gray, 244 | 隐藏文件、隐藏目录、隐藏标记 |
-| 文件大小 | `kSizeStyle` | gray, 250 | 文件大小、容量信息 |
+| 隐藏项 | `kHiddenStyle` | dark grey, 244 | 隐藏文件、隐藏目录、隐藏标记 |
+| 文件大小 | `kSizeStyle` | grey, 250 | 文件大小、容量信息 |
 | 复制状态 | `kCopyStyle` | bright green, 119 | 已复制项、成功状态、可执行状态 |
-| 剪切状态 | `kCutStyle` | gray, 246 | 已剪切项、待移动项 |
+| 剪切状态 | `kCutStyle` | grey, 246 | 已剪切项、待移动项 |
 | 选中背景 | `kSelectedBgStyle` | bg 24 | 当前行、当前单元格、当前表单字段背景 |
 | 选中标记 | `kSelectedMarkStyle` | bold pale yellow, 229 | `>`、`->`、当前选中指示符 |
 | 输入内容 | `kInputStyle` | bold pale yellow, 230 | 表单输入值、正在输入的新文件夹名 |

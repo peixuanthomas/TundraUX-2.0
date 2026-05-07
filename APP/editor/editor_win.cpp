@@ -54,7 +54,7 @@
 // Syntax highlight color pairs
 #define COLOR_PAIR_KEYWORD  6   // Bright cyan - keywords
 #define COLOR_PAIR_STRING   7   // Bright yellow - strings/chars
-#define COLOR_PAIR_COMMENT  8   // Soft gray - comments
+#define COLOR_PAIR_COMMENT  8   // Soft grey - comments
 #define COLOR_PAIR_NUMBER   9   // Bright magenta - numbers
 #define COLOR_PAIR_PREPROC  10  // Bright yellow - preprocessor
 

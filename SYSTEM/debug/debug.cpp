@@ -12,6 +12,12 @@
 #include <vector>
 #include <algorithm>
 
+namespace {
+void print_display_test_line(const std::string& colorName) {
+    colorcout(colorName, "Display test: " + colorName + "\n");
+}
+}
+
 void delete_file() {
     if(std::remove("user_data.dat") == 0) {
         colorcout("green", "User data file deleted successfully.\n");
@@ -66,14 +72,19 @@ void struct_file() {
     }
 }
 
-void display_test() {
-    colorcout("green", "Green Text\n");
-    colorcout("red", "Red Text (Note: this should make a sound when displayed)\n");
-    colorcout("blue", "Blue Text\n");
-    colorcout("yellow", "Yellow Text\n");
-    colorcout("cyan", "Cyan Text\n");
-    colorcout("magenta", "Magenta Text\n");
-    colorcout("white", "White Text\n");
+void display_test(const std::string& colorName) {
+    if (!colorName.empty()) {
+        if (!hasConsoleColor(colorName)) {
+            colorcout("red", "No such color: " + colorName + "\n");
+            return;
+        }
+        print_display_test_line(colorName);
+        return;
+    }
+
+    for (const auto& color : getDisplayTestColorNames()) {
+        print_display_test_line(color);
+    }
 }
 
 void license() {
@@ -93,8 +104,17 @@ void handleLicenseCommand(const std::string&) {
     license();
 }
 
-void handleDisplayTestCommand(const std::string&) {
-    display_test();
+void handleDisplayTestCommand(const std::string& input) {
+    std::istringstream iss(input);
+    std::string commandToken;
+    std::string colorName;
+    std::string extra;
+    iss >> commandToken >> colorName;
+    if (iss >> extra) {
+        colorcout("red", "Usage: displaytest [color]\n");
+        return;
+    }
+    display_test(colorName);
 }
 
 void handleDebugEditorCommand(const std::string& input) {

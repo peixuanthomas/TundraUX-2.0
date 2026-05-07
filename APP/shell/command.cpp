@@ -10,6 +10,7 @@
 #include <vector>
 
 #include "color.hpp"
+#include "commandHandlers.hpp"
 #include "commandReg.hpp"
 #include "udata.hpp"
 
@@ -32,10 +33,16 @@ bool canRunSystemCommand(const USER& currentUser) {
     return currentUser.type == "admin" || currentUser.type == "debug";
 }
 
+bool redrawsShellHeader(const std::string& input) {
+    std::istringstream iss(input);
+    std::string command;
+    std::string extra;
+    iss >> command;
+    return (command == "cls" || command == "clear") && !(iss >> extra);
+}
+
 void task_main() {
-    clear_screen();
-    print_icon();
-    colorcout("", "\n");
+    renderShellHeader();
 
     USER currentUser = {
         TUNDRAUX_DEFAULT_USER_TYPE,
@@ -49,9 +56,14 @@ void task_main() {
     std::vector<std::string> commandHistory;
     int historyIndex = -1;
     const int MAX_HISTORY = 100;
+    bool shellHeaderWasJustRendered = true;
 
     while (true) {
-        colorcout("", "\n");
+        if (shellHeaderWasJustRendered) {
+            shellHeaderWasJustRendered = false;
+        } else {
+            colorcout("", "\n");
+        }
         if (currentUser.type == "debug") {
             set_title("TundraUX 2.0 [DEBUG MODE]");
             colorcout("magenta", "DEBUG MODE ACTIVE>> ");
@@ -95,7 +107,9 @@ void task_main() {
             continue;
         }
 
+        const bool commandRedrawsShellHeader = redrawsShellHeader(input);
         if (tryExecuteRegisteredCommand(input, registeredCommands, currentUser)) {
+            shellHeaderWasJustRendered = commandRedrawsShellHeader;
             continue;
         }
 

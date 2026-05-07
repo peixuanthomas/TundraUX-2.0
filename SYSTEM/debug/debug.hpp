@@ -6,7 +6,7 @@
 
 void delete_file();
 void struct_file();
-void display_test();
+void display_test(const std::string& colorName = "");
 void license();
 
 void handleLicenseCommand(const std::string& input);

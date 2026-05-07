@@ -76,13 +76,12 @@ The main shell prompt changes according to the current session:
 | `importdata` | Import legacy user data; admin/debug only |
 | `time` | Show local time and Unix timestamp |
 | `license` | Display the license text |
-| `displaytest` | Run a console display test |
 | `info` | Show build information |
 | `cls` | Clear the screen |
 | `exit` | Exit the program |
 | `/<cmd>` | Run a Windows CMD command; admin/debug only |
 
-Debug-only commands are hidden from normal help output and include editor backend inspection, forced login, and diagnostic utilities.
+Debug-only commands are hidden from normal help output and include editor backend inspection, forced login, display color testing, and diagnostic utilities.
 
 ## User Roles
 

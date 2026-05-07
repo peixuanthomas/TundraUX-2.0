@@ -28,6 +28,7 @@ KeyPress readKey() {
         case 13: return {Key::Enter, '\0'};
         case 27: return {Key::Escape, '\0'};
         case 8: return {Key::Backspace, '\0'};
+        case 9: return {Key::Tab, '\0'};
         default:
             if (std::isprint(ch)) {
                 return {Key::Character, static_cast<char>(ch)};
@@ -78,6 +79,11 @@ bool handleDetailsKey(ExplorerState& state, const KeyPress& key) {
 }
 
 bool handleKey(ExplorerState& state, const KeyPress& key) {
+    if (state.search.active) {
+        handleSearchInput(state, key);
+        return true;
+    }
+
     if (state.creatingFolder) {
         handleCreateFolderInput(state, key);
         return true;
@@ -143,6 +149,11 @@ bool handleKey(ExplorerState& state, const KeyPress& key) {
                 case 'h':
                 case 'H':
                     state.showHelp = true;
+                    break;
+                case 's':
+                case 'S':
+                case '/':
+                    beginSearch(state);
                     break;
                 case 'i':
                 case 'I':

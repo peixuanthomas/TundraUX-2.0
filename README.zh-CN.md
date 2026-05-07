@@ -76,13 +76,12 @@ cmake --build build
 | `importdata` | 导入旧版本用户数据，仅 admin/debug 可用 |
 | `time` | 显示本地时间和 Unix 时间戳 |
 | `license` | 显示许可证文本 |
-| `displaytest` | 运行控制台显示测试 |
 | `info` | 显示构建信息 |
 | `cls` | 清屏 |
 | `exit` | 退出程序 |
 | `/<cmd>` | 执行 Windows CMD 命令，仅 admin/debug 可用 |
 
-调试命令不会出现在普通帮助中，包括编辑器后端检查、强制登录和诊断工具等。
+调试命令不会出现在普通帮助中，包括编辑器后端检查、强制登录、显示颜色测试和诊断工具等。
 
 ## 用户角色
 

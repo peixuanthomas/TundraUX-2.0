@@ -10,6 +10,7 @@
 #include <random>
 #include <vector>
 #include <conio.h>
+#include <algorithm>
 
 std::unordered_map<std::string, std::string> colorMap = {
     {"red", "\033[1;38;5;203m"},      // Warning/error messages
@@ -19,7 +20,6 @@ std::unordered_map<std::string, std::string> colorMap = {
     {"magenta", "\033[1;38;5;213m"},  // Highlights/alerts
     {"cyan", "\033[1;38;5;51m"},      // Titles/headings
     {"white", "\033[38;5;254m"},      // Regular text
-    {"gray", "\033[38;5;245m"},
     {"grey", "\033[38;5;245m"},
     {"reset", "\033[0m"},
     {"RED", "\033[1;38;5;203m"},      // Warning/error messages
@@ -29,7 +29,6 @@ std::unordered_map<std::string, std::string> colorMap = {
     {"MAGENTA", "\033[1;38;5;213m"},  // Highlights/alerts
     {"CYAN", "\033[1;38;5;51m"},      // Titles/headings
     {"WHITE", "\033[38;5;254m"},      // Regular text
-    {"GRAY", "\033[38;5;245m"},
     {"GREY", "\033[38;5;245m"},
     {"ERROR", "\033[1;38;5;203m"},
     {"RESET", "\033[0m"}
@@ -40,13 +39,55 @@ void colorcout(const std::string& color, const std::string& str) {
         std::cout << str;
         return;
     }
-    if (color == "red" || color == "ERROR" || color == "RED") std::cout << "\a"; // Beep for red color (warning/error)
     auto it = colorMap.find(color);
     if (it != colorMap.end()) {
         std::cout << it->second << str << "\033[0m";
     } else {
         std::cout << str;
     }
+}
+
+bool hasConsoleColor(const std::string& color) {
+    return colorMap.find(color) != colorMap.end();
+}
+
+std::vector<std::string> getDisplayTestColorNames() {
+    const std::vector<std::string> preferredOrder = {
+        "green",
+        "red",
+        "blue",
+        "yellow",
+        "cyan",
+        "magenta",
+        "white",
+        "grey"
+    };
+
+    std::vector<std::string> colorNames;
+    for (const auto& color : preferredOrder) {
+        if (hasConsoleColor(color)) {
+            colorNames.push_back(color);
+        }
+    }
+
+    std::vector<std::string> extraNames;
+    for (const auto& entry : colorMap) {
+        const std::string& colorName = entry.first;
+        if (colorName == "reset" || colorName == "RESET" || colorName == "ERROR") {
+            continue;
+        }
+        if (!std::all_of(colorName.begin(), colorName.end(), [](char ch) {
+            return ch >= 'a' && ch <= 'z';
+        })) {
+            continue;
+        }
+        if (std::find(colorNames.begin(), colorNames.end(), colorName) == colorNames.end()) {
+            extraNames.push_back(colorName);
+        }
+    }
+    std::sort(extraNames.begin(), extraNames.end());
+    colorNames.insert(colorNames.end(), extraNames.begin(), extraNames.end());
+    return colorNames;
 }
 
 void rollcout(const std::string& color, const std::string& str) {

@@ -6,3 +6,4 @@
 #include "explorer_folder_ops.hpp"
 #include "explorer_navigation.hpp"
 #include "explorer_open.hpp"
+#include "explorer_search.hpp"

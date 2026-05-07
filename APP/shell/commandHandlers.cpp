@@ -143,10 +143,15 @@ void handleModifyCommand(const std::string&, USER& currentUser) {
     open_account_settings(currentUser);
 }
 
-void handleClearScreenCommand(const std::string&) {
+void renderShellHeader() {
     clear_screen();
     print_icon();
     colorcout("", "\n");
+    colorcout("grey", "Tip: type help to view available commands.\n");
+}
+
+void handleClearScreenCommand(const std::string&) {
+    renderShellHeader();
 }
 
 void handleLogoutCommand(const std::string&, USER& currentUser) {

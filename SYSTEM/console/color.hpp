@@ -4,6 +4,8 @@
 #include <vector>
 
 void colorcout(const std::string& color, const std::string& message);
+bool hasConsoleColor(const std::string& color);
+std::vector<std::string> getDisplayTestColorNames();
 void rollcout(const std::string& color, const std::string& str);
 bool getYN(const std::string& prompt);
 void clear_screen();

@@ -9,6 +9,7 @@ void handleExitCommand(const std::string& input);
 void handleImportDataCommand(const std::string& input);
 void handleTimeCommand(const std::string& input);
 void handleModifyCommand(const std::string& input, USER& currentUser);
+void renderShellHeader();
 void handleClearScreenCommand(const std::string& input);
 void handleLogoutCommand(const std::string& input, USER& currentUser);
 void handleListUserCommand(const std::string& input);

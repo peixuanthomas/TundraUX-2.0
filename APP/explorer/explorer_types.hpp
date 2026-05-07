@@ -16,6 +16,25 @@ struct FileEntry {
     std::uintmax_t size = 0;
 };
 
+enum class SearchMode {
+    Exact,
+    Partial,
+    Regex
+};
+
+struct SearchState {
+    bool active = false;
+    bool hasRun = false;
+    SearchMode mode = SearchMode::Partial;
+    fs::path rootPath;
+    std::string query;
+    std::vector<FileEntry> results;
+    std::size_t cursor = 0;
+    std::size_t scroll = 0;
+    std::uintmax_t scanErrors = 0;
+    std::string error;
+};
+
 enum class ClipboardMode {
     None,
     Copy,
@@ -40,6 +59,7 @@ struct ExplorerState {
     fs::path currentPath;
     std::vector<FileEntry> entries;
     std::vector<FileEntry> parentEntries;
+    SearchState search;
     ClipboardState clipboard;
     fs::path pendingDeletePath;
     std::string pendingDeleteName;
@@ -70,7 +90,8 @@ enum class Key {
     Left,
     Right,
     Home,
-    End
+    End,
+    Tab
 };
 
 struct KeyPress {

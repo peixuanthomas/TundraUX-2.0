@@ -115,15 +115,6 @@ std::vector<RegisteredCommand> buildNewCommandRegistry(USER& currentUser) {
             false
         },
         {
-            "displaytest",
-            "displaytest",
-            "Run display test",
-            {},
-            handleDisplayTestCommand,
-            "",
-            false
-        },
-        {
             "info",
             "info",
             "Show program information",
@@ -213,6 +204,16 @@ std::vector<RegisteredCommand> buildNewCommandRegistry(USER& currentUser) {
             {},
             handleDebugEnvCommand,
             "debug",
+            true
+        },
+        {
+            "dbg:displaytest",
+            "dbg:displaytest [color]",
+            "Run display color test",
+            {},
+            handleDisplayTestCommand,
+            "debug",
+            true,
             true
         },
         {
