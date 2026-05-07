@@ -20,7 +20,7 @@ std::unordered_map<std::string, std::string> colorMap = {
     {"magenta", "\033[1;38;5;213m"},  // Highlights/alerts
     {"cyan", "\033[1;38;5;51m"},      // Titles/headings
     {"white", "\033[38;5;254m"},      // Regular text
-    {"grey", "\033[38;5;245m"},
+    {"grey", "\033[38;5;245m"},       //Tips and less important text
     {"reset", "\033[0m"},
     {"RED", "\033[1;38;5;203m"},      // Warning/error messages
     {"GREEN", "\033[1;38;5;119m"},    // Success messages
@@ -29,7 +29,7 @@ std::unordered_map<std::string, std::string> colorMap = {
     {"MAGENTA", "\033[1;38;5;213m"},  // Highlights/alerts
     {"CYAN", "\033[1;38;5;51m"},      // Titles/headings
     {"WHITE", "\033[38;5;254m"},      // Regular text
-    {"GREY", "\033[38;5;245m"},
+    {"GREY", "\033[38;5;245m"},       //Tips and less important text
     {"ERROR", "\033[1;38;5;203m"},
     {"RESET", "\033[0m"}
 };

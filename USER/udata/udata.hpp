@@ -27,7 +27,7 @@ class DataManager {
         std::vector<USER> userDataList;
         std::string filename_;
         void LoadUsersFromFile();
-        void SaveUsersToFile();
+        bool SaveUsersToFile();
 };
 void ReadOldFile();
 void listUser();

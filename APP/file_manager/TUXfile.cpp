@@ -15,6 +15,7 @@
 #include <iomanip>
 #include <algorithm>
 #include <cctype>
+#include <cwctype>
 #include <functional>
 #include <unordered_map>
 #include "udata.hpp"
@@ -100,12 +101,157 @@ static bool isValidPath(const std::string& p) {
     return isValidFilename(comp);
 }
 
+static bool hasCaseInsensitiveSuffix(const std::string& value, const std::string& suffix) {
+    if (value.size() < suffix.size()) return false;
+    return lowerCopy(value.substr(value.size() - suffix.size())) == lowerCopy(suffix);
+}
+
+static std::string stripOptionalExtension(std::string value, const std::string& extension) {
+    if (hasCaseInsensitiveSuffix(value, extension)) {
+        value.resize(value.size() - extension.size());
+    }
+    return value;
+}
+
+static std::filesystem::path normalizeBoundaryPath(const std::filesystem::path& path) {
+    std::error_code error;
+    std::filesystem::path normalized = std::filesystem::weakly_canonical(path, error);
+    if (error) {
+        error.clear();
+        normalized = std::filesystem::absolute(path, error);
+    }
+    if (error) {
+        normalized = path;
+    }
+    return normalized.lexically_normal();
+}
+
+static std::filesystem::path filesRootPath() {
+    std::error_code error;
+    std::filesystem::path current = std::filesystem::current_path(error);
+    if (error) {
+        current = ".";
+        error.clear();
+    }
+    std::filesystem::path root = std::filesystem::absolute(current / "Files", error);
+    if (error) {
+        root = current / "Files";
+    }
+    return root.lexically_normal();
+}
+
+static std::wstring normalizedPathPart(const std::filesystem::path& path) {
+    std::wstring value = path.wstring();
+    std::transform(value.begin(), value.end(), value.begin(), [](wchar_t ch) {
+        if (ch == L'/') return L'\\';
+        return static_cast<wchar_t>(std::towlower(ch));
+    });
+    return value;
+}
+
+static bool isPathInsideRoot(
+    const std::filesystem::path& candidate,
+    const std::filesystem::path& root
+) {
+    const std::filesystem::path candidatePath = normalizeBoundaryPath(candidate);
+    const std::filesystem::path rootPath = root.lexically_normal();
+    auto candidateIt = candidatePath.begin();
+
+    for (auto rootIt = rootPath.begin(); rootIt != rootPath.end(); ++rootIt, ++candidateIt) {
+        if (candidateIt == candidatePath.end()) {
+            return false;
+        }
+        if (normalizedPathPart(*candidateIt) != normalizedPathPart(*rootIt)) {
+            return false;
+        }
+    }
+
+    return true;
+}
+
+static void appendSafePathComponents(std::filesystem::path& target, const std::string& safePath) {
+    std::istringstream parts(safePath);
+    std::string part;
+    while (std::getline(parts, part, '/')) {
+        target /= std::filesystem::u8path(part);
+    }
+}
+
+static bool tryResolveManagedFilePath(
+    const std::string& input,
+    const std::string& extension,
+    std::string& resolvedPath,
+    std::string* safeStem = nullptr
+) {
+    const std::string stem = stripOptionalExtension(input, extension);
+    if (!isValidPath(stem)) {
+        return false;
+    }
+
+    const std::filesystem::path root = filesRootPath();
+    std::filesystem::path target = root;
+    appendSafePathComponents(target, stem);
+    target += extension;
+
+    if (!isPathInsideRoot(target, root)) {
+        return false;
+    }
+
+    resolvedPath = normalizeBoundaryPath(target).string();
+    if (safeStem != nullptr) {
+        *safeStem = stem;
+    }
+    return true;
+}
+
+static bool tryResolveTuxPath(
+    const std::string& input,
+    std::string& resolvedPath,
+    std::string* safeStem = nullptr
+) {
+    return tryResolveManagedFilePath(input, ".TUX", resolvedPath, safeStem);
+}
+
+static bool tryResolveTextPath(
+    const std::string& input,
+    std::string& resolvedPath,
+    std::string* safeStem = nullptr
+) {
+    return tryResolveManagedFilePath(input, ".txt", resolvedPath, safeStem);
+}
+
+static bool tryResolveDirectoryPath(
+    const std::string& input,
+    std::string& resolvedPath,
+    std::string* safeName = nullptr
+) {
+    if (!isValidPath(input)) {
+        return false;
+    }
+
+    const std::filesystem::path root = filesRootPath();
+    std::filesystem::path target = root;
+    appendSafePathComponents(target, input);
+
+    if (!isPathInsideRoot(target, root)) {
+        return false;
+    }
+
+    resolvedPath = normalizeBoundaryPath(target).string();
+    if (safeName != nullptr) {
+        *safeName = input;
+    }
+    return true;
+}
+
+static void printInvalidTuxPath() {
+    colorcout("YELLOW","Invalid filename. Use alphanumeric, '-', '_', and '/' for subfolders.\n");
+}
+
 // ---------- Paths & Directories ----------
 std::string getTuxPath(const std::string& filename) {
-    std::string full = filename;
-    if (full.find(".TUX") == std::string::npos) full += ".TUX";
-    for (char& c : full) if (c == '/') c = '\\';
-    return "Files\\" + full;
+    std::string path;
+    return tryResolveTuxPath(filename, path) ? path : "";
 }
 void initFilesDir() {
     const std::string dir = "Files";
@@ -281,10 +427,11 @@ void listTuxFiles() {
 // ---------- Create ----------
 void createTuxFile(const std::string& filename) {
     if (filename.empty()) { colorcout("RED","Usage: create <filename>\n"); return; }
-    if (!isValidPath(filename)) {
-        colorcout("YELLOW","Invalid filename. Use alphanumeric, '-', '_', and '/' for subfolders.\n"); return;
+    std::string path;
+    if (!tryResolveTuxPath(filename, path)) {
+        printInvalidTuxPath();
+        return;
     }
-    std::string path = getTuxPath(filename);
     if (std::filesystem::exists(path)) {
         if (!can_modify_tux_file(path, currentUser.name, currentUser.type)) {
             colorcout("RED","Access denied: You cannot overwrite this file\n");
@@ -311,7 +458,11 @@ void createTuxFile(const std::string& filename) {
 // ---------- View Content ----------
 void viewTuxFile(const std::string& filename) {
     if (filename.empty()) { colorcout("RED","Usage: view <filename>\n"); return; }
-    std::string path = getTuxPath(filename);
+    std::string path;
+    if (!tryResolveTuxPath(filename, path)) {
+        printInvalidTuxPath();
+        return;
+    }
     if (!std::filesystem::exists(path)) { colorcout("RED","Not found: "+filename+"\n"); return; }
     auto [content, _] = readFullTuxFile(path);
     if (!g_lastTuxReadOk) { colorcout("RED","File corrupted or invalid format\n\n"); return; }
@@ -403,7 +554,11 @@ int open_tux_file_in_editor(
 
 void editTuxFile(const std::string& filename) {
     if (filename.empty()) { colorcout("RED","Usage: edit <filename>\n"); return; }
-    std::string path = getTuxPath(filename);
+    std::string path;
+    if (!tryResolveTuxPath(filename, path)) {
+        printInvalidTuxPath();
+        return;
+    }
     if (!std::filesystem::exists(path)) { colorcout("RED","Not found: "+filename+"\n"); return; }
     auto [oldContent, meta] = readFullTuxFile(path);
     if (!g_lastTuxReadOk) { colorcout("RED","File corrupted, abort editing\n\n"); return; }
@@ -488,7 +643,11 @@ void editTuxFile(const std::string& filename) {
 // ---------- Delete ----------
 void deleteTuxFile(const std::string& filename) {
     if (filename.empty()) { colorcout("RED","Usage: delete <filename>\n"); return; }
-    std::string path = getTuxPath(filename);
+    std::string path;
+    if (!tryResolveTuxPath(filename, path)) {
+        printInvalidTuxPath();
+        return;
+    }
     if (!std::filesystem::exists(path)) { colorcout("RED","Not found: "+filename+"\n"); return; }
     if (!can_modify_tux_file(path, currentUser.name, currentUser.type)) {
         colorcout("RED","Access denied: You cannot delete this file\n");
@@ -503,11 +662,11 @@ void deleteTuxFile(const std::string& filename) {
 // ---------- Rename ----------
 void renameTuxFile(const std::string& oldname, const std::string& newname) {
     if (oldname.empty()||newname.empty()) { colorcout("RED","Usage: rename <old> <new>\n"); return; }
-    if (!isValidPath(oldname) || !isValidPath(newname)) {
-        colorcout("YELLOW","Invalid filename. Use alphanumeric, '-', '_', and '/' for subfolders.\n");
+    std::string op, np;
+    if (!tryResolveTuxPath(oldname, op) || !tryResolveTuxPath(newname, np)) {
+        printInvalidTuxPath();
         return;
     }
-    std::string op = getTuxPath(oldname), np = getTuxPath(newname);
     if (!std::filesystem::exists(op)) { colorcout("RED","Not found: "+oldname+"\n"); return; }
     if (std::filesystem::exists(np)) { colorcout("RED","Target already exists: "+newname+"\n"); return; }
     if (!can_modify_tux_file(op, currentUser.name, currentUser.type)) {
@@ -528,12 +687,11 @@ void renameTuxFile(const std::string& oldname, const std::string& newname) {
 // ---------- Make Directory ----------
 void makeTuxDir(const std::string& dirname) {
     if (dirname.empty()) { colorcout("RED","Usage: mkdir <dirname>\n"); return; }
-    if (!isValidPath(dirname)) {
-        colorcout("YELLOW","Invalid name. Use alphanumeric, '-', '_', and '/' for nested dirs.\n"); return;
+    std::string path;
+    if (!tryResolveDirectoryPath(dirname, path)) {
+        colorcout("YELLOW","Invalid name. Use alphanumeric, '-', '_', and '/' for nested dirs.\n");
+        return;
     }
-    std::string normalized = dirname;
-    for (char& c : normalized) if (c == '/') c = '\\';
-    std::string path = "Files\\" + normalized;
     if (std::filesystem::exists(path)) { colorcout("YELLOW","Already exists: "+dirname+"\n"); return; }
     std::error_code ec;
     std::filesystem::create_directories(path, ec);
@@ -544,12 +702,11 @@ void makeTuxDir(const std::string& dirname) {
 // ---------- Remove Directory ----------
 void removeTuxDir(const std::string& dirname) {
     if (dirname.empty()) { colorcout("RED","Usage: rmdir <dirname>\n"); return; }
-    if (!isValidPath(dirname)) {
-        colorcout("YELLOW","Invalid name. Use alphanumeric, '-', '_', and '/' for nested dirs.\n"); return;
+    std::string path;
+    if (!tryResolveDirectoryPath(dirname, path)) {
+        colorcout("YELLOW","Invalid name. Use alphanumeric, '-', '_', and '/' for nested dirs.\n");
+        return;
     }
-    std::string normalized = dirname;
-    for (char& c : normalized) if (c == '/') c = '\\';
-    std::string path = "Files\\" + normalized;
     if (!std::filesystem::exists(path)) { colorcout("RED","Not found: "+dirname+"\n"); return; }
     if (!std::filesystem::is_directory(path)) { colorcout("RED","Not a directory: "+dirname+"\n"); return; }
     if (directory_has_protected_tux_files(path, currentUser.name, currentUser.type)) {
@@ -570,8 +727,8 @@ void removeTuxDir(const std::string& dirname) {
 // ---------- Copy ----------
 void copyTuxFile(const std::string& src, const std::string& dst) {
     if (src.empty() || dst.empty()) { colorcout("RED","Usage: cp <src> <dst>\n"); return; }
-    if (!isValidPath(src)) { colorcout("YELLOW","Invalid source path.\n"); return; }
-    std::string srcPath = getTuxPath(src);
+    std::string srcPath;
+    if (!tryResolveTuxPath(src, srcPath)) { colorcout("YELLOW","Invalid source path.\n"); return; }
     if (!std::filesystem::exists(srcPath)) { colorcout("RED","Not found: "+src+"\n"); return; }
     auto [content, meta] = readFullTuxFile(srcPath);
     if (!g_lastTuxReadOk) { colorcout("RED","File corrupted, copy aborted\n\n"); return; }
@@ -581,17 +738,18 @@ void copyTuxFile(const std::string& src, const std::string& dst) {
     }
 
     // If dst is an existing directory, copy into it with same filename
-    std::string dstNorm = dst;
-    for (char& c : dstNorm) if (c == '/') c = '\\';
-    std::string dstAsDir = "Files\\" + dstNorm;
+    std::string dstAsDir;
     std::string dstPath, displayDst;
-    if (std::filesystem::is_directory(dstAsDir)) {
+    if (tryResolveDirectoryPath(dst, dstAsDir) && std::filesystem::is_directory(dstAsDir)) {
         std::string stem = std::filesystem::path(srcPath).stem().string();
-        dstPath = dstAsDir + "\\" + stem + ".TUX";
+        dstPath = (std::filesystem::path(dstAsDir) / (stem + ".TUX")).string();
+        if (!isPathInsideRoot(dstPath, filesRootPath())) {
+            colorcout("RED","Access denied: Destination is outside Files\n");
+            return;
+        }
         displayDst = dst + "/" + stem;
     } else {
-        if (!isValidPath(dst)) { colorcout("YELLOW","Invalid destination path.\n"); return; }
-        dstPath = getTuxPath(dst);
+        if (!tryResolveTuxPath(dst, dstPath)) { colorcout("YELLOW","Invalid destination path.\n"); return; }
         displayDst = dst;
     }
 
@@ -620,8 +778,8 @@ void copyTuxFile(const std::string& src, const std::string& dst) {
 // ---------- Move ----------
 void moveTuxFile(const std::string& src, const std::string& dst) {
     if (src.empty() || dst.empty()) { colorcout("RED","Usage: mv <src> <dst>\n"); return; }
-    if (!isValidPath(src)) { colorcout("YELLOW","Invalid source path.\n"); return; }
-    std::string srcPath = getTuxPath(src);
+    std::string srcPath;
+    if (!tryResolveTuxPath(src, srcPath)) { colorcout("YELLOW","Invalid source path.\n"); return; }
     if (!std::filesystem::exists(srcPath)) { colorcout("RED","Not found: "+src+"\n"); return; }
     if (!can_modify_tux_file(srcPath, currentUser.name, currentUser.type)) {
         colorcout("RED","Access denied: You cannot move this file\n");
@@ -629,17 +787,18 @@ void moveTuxFile(const std::string& src, const std::string& dst) {
     }
 
     // If dst is an existing directory, move into it with same filename
-    std::string dstNorm = dst;
-    for (char& c : dstNorm) if (c == '/') c = '\\';
-    std::string dstAsDir = "Files\\" + dstNorm;
+    std::string dstAsDir;
     std::string dstPath, displayDst;
-    if (std::filesystem::is_directory(dstAsDir)) {
+    if (tryResolveDirectoryPath(dst, dstAsDir) && std::filesystem::is_directory(dstAsDir)) {
         std::string basename = std::filesystem::path(srcPath).filename().string();
-        dstPath = dstAsDir + "\\" + basename;
+        dstPath = (std::filesystem::path(dstAsDir) / basename).string();
+        if (!isPathInsideRoot(dstPath, filesRootPath())) {
+            colorcout("RED","Access denied: Destination is outside Files\n");
+            return;
+        }
         displayDst = dst + "/" + std::filesystem::path(srcPath).stem().string();
     } else {
-        if (!isValidPath(dst)) { colorcout("YELLOW","Invalid destination path.\n"); return; }
-        dstPath = getTuxPath(dst);
+        if (!tryResolveTuxPath(dst, dstPath)) { colorcout("YELLOW","Invalid destination path.\n"); return; }
         displayDst = dst;
     }
 
@@ -695,14 +854,21 @@ void findTuxFiles(const std::string& pattern) {
 // ---------- Export ----------
 void exportTuxFile(const std::string& filename) {
     if (filename.empty()) { colorcout("RED","Usage: export <filename>\n"); return; }
-    std::string tuxPath = getTuxPath(filename);
+    std::string tuxPath;
+    std::string safeStem;
+    if (!tryResolveTuxPath(filename, tuxPath, &safeStem)) {
+        printInvalidTuxPath();
+        return;
+    }
     if (!std::filesystem::exists(tuxPath)) { colorcout("RED","Not found: "+filename+"\n"); return; }
     auto [content, meta] = readFullTuxFile(tuxPath);
     if (!g_lastTuxReadOk) { colorcout("RED","File corrupted, export aborted\n\n"); return; }
-    std::string txtName = filename;
-    if (txtName.find(".TUX")!=std::string::npos) txtName = txtName.substr(0, txtName.find(".TUX"));
-    txtName += ".txt";
-    std::string txtPath = "Files\\" + txtName;
+    std::string txtPath;
+    if (!tryResolveTextPath(safeStem, txtPath)) {
+        printInvalidTuxPath();
+        return;
+    }
+    const std::string txtName = safeStem + ".txt";
     if (std::filesystem::exists(txtPath)) {
         if (!getYN("TXT already exists, overwrite?")) {
             colorcout("YELLOW","Cancelled\n\n");
@@ -731,9 +897,13 @@ void exportTuxFile(const std::string& filename) {
 // ---------- Import ----------
 void importTxtFile(const std::string& filename) {
     if (filename.empty()) { colorcout("RED","Usage: import <filename>\n"); return; }
-    std::string txt = filename;
-    if (txt.find(".txt")==std::string::npos) txt += ".txt";
-    std::string txtPath = "Files\\" + txt;
+    std::string txtPath;
+    std::string safeStem;
+    if (!tryResolveTextPath(filename, txtPath, &safeStem)) {
+        colorcout("YELLOW","Invalid TXT path. Use alphanumeric, '-', '_', and '/' for subfolders.\n");
+        return;
+    }
+    const std::string txt = safeStem + ".txt";
     if (!std::filesystem::exists(txtPath)) { colorcout("RED","TXT not found: "+txt+"\n"); return; }
     std::ifstream in(txtPath);
     if (!in) { colorcout("RED","Failed to read TXT\n\n"); return; }
@@ -766,11 +936,12 @@ void importTxtFile(const std::string& filename) {
     if (!header || !ended || meta.creator.empty() || meta.lastEditor.empty() || meta.createTime==0 || meta.modifyTime==0) {
         colorcout("RED","Metadata missing or incomplete\n\n"); return;
     }
-    // Build target name
-    std::string tuxName = txt;
-    if (tuxName.find(".txt")!=std::string::npos) tuxName = tuxName.substr(0,tuxName.find(".txt"));
-    tuxName += ".TUX";
-    std::string tuxPath = getTuxPath(tuxName);
+    std::string tuxPath;
+    if (!tryResolveTuxPath(safeStem, tuxPath)) {
+        printInvalidTuxPath();
+        return;
+    }
+    const std::string tuxName = safeStem + ".TUX";
     if (std::filesystem::exists(tuxPath)) {
         if (!getYN("TUX already exists, overwrite?")) {
             colorcout("YELLOW","Cancelled\n\n");
@@ -786,7 +957,11 @@ void importTxtFile(const std::string& filename) {
 // ---------- View Metadata ----------
 void viewMetadata(const std::string& filename) {
     if (filename.empty()) { colorcout("RED","Usage: metadata <filename>\n"); return; }
-    std::string path = getTuxPath(filename);
+    std::string path;
+    if (!tryResolveTuxPath(filename, path)) {
+        printInvalidTuxPath();
+        return;
+    }
     if (!std::filesystem::exists(path)) { colorcout("RED","Not found: "+filename+"\n"); return; }
     FileMetadata meta = readMetadata(path);
     if (meta.creator.empty() && meta.lastEditor.empty()) { colorcout("RED","Failed to read, file may be corrupted\n\n"); return; }
@@ -866,8 +1041,11 @@ void file_editor(const std::string& currentUsername, const std::string& currentU
             else if (args.size() == 2) { moveTuxFile(args[0], args[1]); }
             else {
                 const std::string& dstDir = args.back();
-                std::string dn = dstDir; for (char& c : dn) if (c=='/') c='\\';
-                if (!std::filesystem::is_directory("Files\\"+dn)) { colorcout("RED","Destination must be an existing directory for batch move: "+dstDir+"\n"); }
+                std::string dstDirPath;
+                if (!tryResolveDirectoryPath(dstDir, dstDirPath) ||
+                    !std::filesystem::is_directory(dstDirPath)) {
+                    colorcout("RED","Destination must be an existing directory for batch move: "+dstDir+"\n");
+                }
                 else { for (size_t i = 0; i+1 < args.size(); ++i) moveTuxFile(args[i], dstDir); }
             }
         }
@@ -878,8 +1056,11 @@ void file_editor(const std::string& currentUsername, const std::string& currentU
             else if (args.size() == 2) { copyTuxFile(args[0], args[1]); }
             else {
                 const std::string& dstDir = args.back();
-                std::string dn = dstDir; for (char& c : dn) if (c=='/') c='\\';
-                if (!std::filesystem::is_directory("Files\\"+dn)) { colorcout("RED","Destination must be an existing directory for batch copy: "+dstDir+"\n"); }
+                std::string dstDirPath;
+                if (!tryResolveDirectoryPath(dstDir, dstDirPath) ||
+                    !std::filesystem::is_directory(dstDirPath)) {
+                    colorcout("RED","Destination must be an existing directory for batch copy: "+dstDir+"\n");
+                }
                 else { for (size_t i = 0; i+1 < args.size(); ++i) copyTuxFile(args[i], dstDir); }
             }
         }

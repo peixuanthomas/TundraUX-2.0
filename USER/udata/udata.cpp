@@ -4,13 +4,74 @@
 #include <string>
 #include "crypto.hpp" //offers encrypt/decrypt functions
 #include <algorithm>
+#include <cstdio>
+#include <cstdint>
+#include <exception>
 #include <filesystem>
+#include <iterator>
+#include <utility>
+#include <windows.h>
 
 //Old modules just for reading old files.
 //ATTENTION: These modules should not be used in new code.
 
 static bool readEncryptedString(std::ifstream& in, std::string& data);
 static void read_info();
+
+namespace {
+constexpr size_t MAX_USER_COUNT = 10000;
+constexpr size_t MAX_USER_STRING_LENGTH = 1024 * 1024;
+constexpr std::uintmax_t MAX_USER_DATA_FILE_SIZE = 64 * 1024 * 1024;
+
+bool readExact(std::ifstream& file, void* data, std::streamsize size, const std::string& label) {
+    file.read(reinterpret_cast<char*>(data), size);
+    if (!file) {
+        colorcout("red", "Error: Failed to read " + label + " from file.\n");
+        return false;
+    }
+    return true;
+}
+
+bool readStoredString(
+    std::ifstream& file,
+    std::string& value,
+    const std::string& label,
+    bool encrypted = false
+) {
+    size_t length = 0;
+    if (!readExact(file, &length, sizeof(length), label + " length")) {
+        return false;
+    }
+    if (length > MAX_USER_STRING_LENGTH) {
+        colorcout("red", "Error: " + label + " exceeds maximum length.\n");
+        return false;
+    }
+
+    std::string buffer;
+    try {
+        buffer.resize(length);
+    } catch (const std::exception&) {
+        colorcout("red", "Error: Unable to allocate memory for " + label + ".\n");
+        return false;
+    }
+
+    if (length > 0 && !readExact(file, buffer.data(), static_cast<std::streamsize>(length), label)) {
+        return false;
+    }
+
+    if (encrypted) {
+        try {
+            value = decrypt(buffer);
+        } catch (const std::exception&) {
+            colorcout("red", "Error: Failed to decrypt " + label + ".\n");
+            return false;
+        }
+    } else {
+        value = std::move(buffer);
+    }
+    return true;
+}
+}
 
 std::string encryptDecrypt(const std::string& input) {
     const char key = 0x55;  // Fixed key
@@ -154,15 +215,22 @@ bool DataManager::AddUser(const USER& user) {
         }
     }
     userDataList.push_back(user);
-    SaveUsersToFile();
+    if (!SaveUsersToFile()) {
+        userDataList.pop_back();
+        return false;
+    }
     return true;
 }
 
 bool DataManager::UpdateUser(const std::string& name, const USER& updatedUser) {
     for (auto& u : userDataList) {
         if (u.name == name) {
+            const USER previousUser = u;
             u = updatedUser;
-            SaveUsersToFile();
+            if (!SaveUsersToFile()) {
+                u = previousUser;
+                return false;
+            }
             return true;
         }
     }
@@ -170,9 +238,20 @@ bool DataManager::UpdateUser(const std::string& name, const USER& updatedUser) {
 }
 
 bool DataManager::RemoveUser(const std::string& name) {
-    userDataList.erase(std::remove_if(userDataList.begin(), userDataList.end(),
-        [&name](const USER& u) { return u.name == name; }), userDataList.end());
-    SaveUsersToFile();
+    auto it = std::find_if(userDataList.begin(), userDataList.end(),
+        [&name](const USER& u) { return u.name == name; });
+    if (it == userDataList.end()) {
+        return false;
+    }
+
+    const auto index = static_cast<std::vector<USER>::difference_type>(
+        std::distance(userDataList.begin(), it));
+    const USER removedUser = *it;
+    userDataList.erase(it);
+    if (!SaveUsersToFile()) {
+        userDataList.insert(userDataList.begin() + index, removedUser);
+        return false;
+    }
     return true;
 }
 
@@ -206,47 +285,41 @@ void DataManager::LoadUsersFromFile() {
         return;
     }
 
-    int version;
-    inFile.read(reinterpret_cast<char*>(&version), sizeof(version));
+    std::error_code sizeError;
+    const auto fileSize = std::filesystem::file_size(filename_, sizeError);
+    if (!sizeError && fileSize > MAX_USER_DATA_FILE_SIZE) {
+        colorcout("red", "Error: User data file is too large.\n");
+        return;
+    }
+
+    int version = 0;
+    if (!readExact(inFile, &version, sizeof(version), "user data version")) {
+        return;
+    }
     if (version != 2) {
         colorcout("red", "Error: Unsupported user data file version.\n");
         return;
     }
 
-    size_t userCount;
-    inFile.read(reinterpret_cast<char*>(&userCount), sizeof(userCount));
-    if (!inFile) {
-        colorcout("red", "Error: Failed to read user count from file.\n");
+    size_t userCount = 0;
+    if (!readExact(inFile, &userCount, sizeof(userCount), "user count")) {
+        return;
+    }
+    if (userCount > MAX_USER_COUNT) {
+        colorcout("red", "Error: User count exceeds maximum supported value.\n");
         return;
     }
 
     std::vector<USER> tempUserDataList;
+    tempUserDataList.reserve(userCount);
     for (size_t i = 0; i < userCount; ++i) {
         USER user;
-        size_t length;
 
-        inFile.read(reinterpret_cast<char*>(&length), sizeof(length));
-        user.type.resize(length);
-        inFile.read(&user.type[0], length);
-
-        inFile.read(reinterpret_cast<char*>(&length), sizeof(length));
-        user.name.resize(length);
-        inFile.read(&user.name[0], length);
-
-        inFile.read(reinterpret_cast<char*>(&length), sizeof(length));
-        std::string encryptedPassword;
-        encryptedPassword.resize(length);
-        inFile.read(&encryptedPassword[0], length);
-        user.password = decrypt(encryptedPassword);
-
-        inFile.read(reinterpret_cast<char*>(&length), sizeof(length));
-        user.password_hint.resize(length);
-        inFile.read(&user.password_hint[0], length);
-
-        inFile.read(reinterpret_cast<char*>(&user.count), sizeof(user.count));
-
-        if (!inFile) {
-            colorcout("red", "Error: Failed to read user data from file.\n");
+        if (!readStoredString(inFile, user.type, "user type") ||
+            !readStoredString(inFile, user.name, "user name") ||
+            !readStoredString(inFile, user.password, "user password", true) ||
+            !readStoredString(inFile, user.password_hint, "password hint") ||
+            !readExact(inFile, &user.count, sizeof(user.count), "failed login count")) {
             return;
         }
 
@@ -268,20 +341,20 @@ void DataManager::LoadUsersFromFile() {
     userDataList = std::move(tempUserDataList);
 }
 
-void DataManager::SaveUsersToFile() {
-    const size_t MAX_STRING_LENGTH = 1024 * 1024; // 1MB limit per string
+bool DataManager::SaveUsersToFile() {
     std::string tempFilename = filename_ + ".tmp";
 
     //Check if file exists and is writable
-    if(!std::filesystem::exists(filename_)) {
+    std::error_code existsError;
+    if(!std::filesystem::exists(filename_, existsError) || existsError) {
         colorcout("red", "Error: User data file does not exist or is not writable.\n");
-        return;
+        return false;
     }
     
     std::ofstream outFile(tempFilename, std::ios::binary | std::ios::trunc);
     if (!outFile) {
         colorcout("red", "Error: Unable to open temporary file for writing.\n");
-        return;
+        return false;
     }
 
     int version = 2;
@@ -295,22 +368,22 @@ void DataManager::SaveUsersToFile() {
 
         // Write type
         length = user.type.size();
-        if (length > MAX_STRING_LENGTH) {
+        if (length > MAX_USER_STRING_LENGTH) {
             colorcout("red", "Error: User type exceeds maximum length.\n");
             outFile.close();
             std::remove(tempFilename.c_str());
-            return;
+            return false;
         }
         outFile.write(reinterpret_cast<const char*>(&length), sizeof(length));
         outFile.write(user.type.data(), length);
 
         // Write name
         length = user.name.size();
-        if (length > MAX_STRING_LENGTH) {
+        if (length > MAX_USER_STRING_LENGTH) {
             colorcout("red", "Error: User name exceeds maximum length.\n");
             outFile.close();
             std::remove(tempFilename.c_str());
-            return;
+            return false;
         }
         outFile.write(reinterpret_cast<const char*>(&length), sizeof(length));
         outFile.write(user.name.data(), length);
@@ -318,22 +391,22 @@ void DataManager::SaveUsersToFile() {
         // Write encrypted password
         std::string encryptedPassword = encrypt(user.password);
         length = encryptedPassword.size();
-        if (length > MAX_STRING_LENGTH) {
+        if (length > MAX_USER_STRING_LENGTH) {
             colorcout("red", "Error: Encrypted password exceeds maximum length.\n");
             outFile.close();
             std::remove(tempFilename.c_str());
-            return;
+            return false;
         }
         outFile.write(reinterpret_cast<const char*>(&length), sizeof(length));
         outFile.write(encryptedPassword.data(), length);
 
         // Write password hint
         length = user.password_hint.size();
-        if (length > MAX_STRING_LENGTH) {
+        if (length > MAX_USER_STRING_LENGTH) {
             colorcout("red", "Error: Password hint exceeds maximum length.\n");
             outFile.close();
             std::remove(tempFilename.c_str());
-            return;
+            return false;
         }
         outFile.write(reinterpret_cast<const char*>(&length), sizeof(length));
         outFile.write(user.password_hint.data(), length);
@@ -347,23 +420,22 @@ void DataManager::SaveUsersToFile() {
         colorcout("red", "Error: Failed to write user data to temporary file.\n");
         outFile.close();
         std::remove(tempFilename.c_str());
-        return;
+        return false;
     }
     
     outFile.close();
 
-    // Atomic replacement
-    if (std::remove(filename_.c_str()) != 0 && std::ifstream(filename_).good()) {
-        colorcout("red", "Error: Failed to remove old user data file.\n");
+    if (!MoveFileExA(
+            tempFilename.c_str(),
+            filename_.c_str(),
+            MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH)) {
+        colorcout("red", "Error: Failed to replace user data file. Windows error: " +
+            std::to_string(GetLastError()) + "\n");
         std::remove(tempFilename.c_str());
-        return;
+        return false;
     }
-    
-    if (std::rename(tempFilename.c_str(), filename_.c_str()) != 0) {
-        colorcout("red", "Error: Failed to rename temporary file to user data file.\n");
-        std::remove(tempFilename.c_str());
-        return;
-    }
+
+    return true;
 }
 
 void createfile() {
