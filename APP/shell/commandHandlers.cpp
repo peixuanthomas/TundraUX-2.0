@@ -106,9 +106,7 @@ void handleLoginCommand(const std::string& input, USER& currentUser) {
         updated.count = 0; // reset fail count on success
         dataManager.UpdateUser(username, updated);
         currentUser = updated;
-        //colorcout("green", "Login successful! Welcome, " + currentUser.name + ".\n");
         rollcout("green", "Welcome, " + currentUser.name + "!");
-        //std::cout << std::endl;
     }
     else
     {
@@ -148,7 +146,7 @@ void handleModifyCommand(const std::string&, USER& currentUser) {
 void handleClearScreenCommand(const std::string&) {
     clear_screen();
     print_icon();
-    std::cout << std::endl;
+    colorcout("", "\n");
 }
 
 void handleLogoutCommand(const std::string&, USER& currentUser) {

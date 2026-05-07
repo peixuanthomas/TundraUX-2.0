@@ -15,7 +15,7 @@ int main(int argc, char* argv[]) {
     if (licenseFile && !detectData) {
         std::string line;
         while (std::getline(licenseFile, line)) {
-            std::cout << line << std::endl;
+            colorcout("white", line + "\n");
         }
         licenseFile.close();
         colorcout("yellow", "\nPress Enter to accept the license and continue...");
@@ -33,7 +33,7 @@ int main(int argc, char* argv[]) {
         pause();
         return 1;
     }
-    std::cerr << "Program has run into an unexpected place. You may need to contact developer for assistance.\n";
+    colorcout("red", "Program has run into an unexpected place. You may need to contact developer for assistance.\n");
     pause();
     return 1;
 }

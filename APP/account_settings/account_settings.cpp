@@ -564,6 +564,10 @@ void open_account_settings(USER& currentUser) {
         colorcout("yellow", "No user is currently logged in.\n");
         return;
     }
+    if (currentUser.type == "debug") {
+        colorcout("yellow", "Cannot open account settings as debug user.\n");
+        return;
+    }
 
     std::ifstream check("user_data.dat");
     if (!check.good()) {

@@ -84,7 +84,7 @@ void license() {
     }
     std::string line;
     while (std::getline(licenseFile, line)) {
-        std::cout << line << std::endl;
+        colorcout("white", line + "\n");
     }
     licenseFile.close();
 }

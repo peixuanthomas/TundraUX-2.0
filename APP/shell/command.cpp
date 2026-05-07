@@ -35,7 +35,7 @@ bool canRunSystemCommand(const USER& currentUser) {
 void task_main() {
     clear_screen();
     print_icon();
-    std::cout << std::endl;
+    colorcout("", "\n");
 
     USER currentUser = {
         TUNDRAUX_DEFAULT_USER_TYPE,
@@ -51,7 +51,7 @@ void task_main() {
     const int MAX_HISTORY = 100;
 
     while (true) {
-        std::cout << std::endl;
+        colorcout("", "\n");
         if (currentUser.type == "debug") {
             set_title("TundraUX 2.0 [DEBUG MODE]");
             colorcout("magenta", "DEBUG MODE ACTIVE>> ");

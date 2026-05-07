@@ -275,7 +275,7 @@ void listTuxFiles() {
     colorcout("CYAN", "Files/\n");
     walk(root, "");
     if (count == 0) colorcout("YELLOW", "\n(No files)\n");
-    std::cout << "\n";
+    colorcout("", "\n");
 }
 
 // ---------- Create ----------
@@ -316,7 +316,7 @@ void viewTuxFile(const std::string& filename) {
     auto [content, _] = readFullTuxFile(path);
     if (!g_lastTuxReadOk) { colorcout("RED","File corrupted or invalid format\n\n"); return; }
     colorcout("CYAN","=== "+filename+" ===\n");
-    std::cout << content << "\n\n";
+    colorcout("", content + "\n\n");
 }
 
 // ---------- Edit ----------
@@ -688,7 +688,7 @@ void findTuxFiles(const std::string& pattern) {
     } else {
         colorcout("CYAN","Found "+std::to_string(results.size())+" file(s):\n");
         for (auto& r : results) colorcout("white","  "+r+"\n");
-        std::cout << "\n";
+        colorcout("", "\n");
     }
 }
 

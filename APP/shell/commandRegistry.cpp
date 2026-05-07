@@ -90,7 +90,7 @@ std::vector<RegisteredCommand> buildNewCommandRegistry(USER& currentUser) {
         {
             "TUXfile",
             "TUXfile",
-            "Open TUX File Manager",
+            "Open TUX File Manager (Terminal style)",
             {"tuxfile"},
             [&currentUser](const std::string& input) { handleTuxFileCommand(input, currentUser); },
             "user,admin,debug",
