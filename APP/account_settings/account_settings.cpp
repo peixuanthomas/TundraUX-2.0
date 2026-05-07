@@ -1,4 +1,4 @@
-#include "hello.hpp"
+#include "account_settings.hpp"
 
 #include <algorithm>
 #include <cctype>
@@ -12,9 +12,7 @@
 
 #include "color.hpp"
 #include "console_screen.hpp"
-#include "crypto.hpp"
 #include "explorer_style.hpp"
-#include "udata.hpp"
 
 namespace {
 
@@ -30,8 +28,6 @@ enum class Key {
     Tab,
     Up,
     Down,
-    Left,
-    Right,
     Home,
     End,
     F1,
@@ -50,22 +46,22 @@ struct PasswordStatus {
     bool hasDigit = false;
 };
 
-struct SetupState {
-    std::string username;
-    std::string password;
+struct DetailLine {
+    std::string label;
+    std::string value;
+    bool section = false;
+};
+
+struct AccountSettingsState {
+    USER original;
+    std::string newPassword;
     std::string confirmPassword;
     std::string passwordHint;
     std::size_t field = 0;
     bool showPassword = false;
     bool showHelp = false;
-    bool created = false;
-    std::string message = "Fill the setup form. Enter creates the admin account.";
-};
-
-struct DetailLine {
-    std::string label;
-    std::string value;
-    bool section = false;
+    bool saved = false;
+    std::string message = "Edit settings. Enter saves changes.";
 };
 
 std::string trimCopy(std::string value) {
@@ -75,12 +71,6 @@ std::string trimCopy(std::string value) {
     }
     const auto last = value.find_last_not_of(" \t\r\n");
     return value.substr(first, last - first + 1);
-}
-
-bool hasWhitespace(const std::string& value) {
-    return std::any_of(value.begin(), value.end(), [](unsigned char ch) {
-        return std::isspace(ch) != 0;
-    });
 }
 
 std::string trimToWidth(const std::string& text, std::size_t width) {
@@ -113,7 +103,7 @@ std::string maskText(const std::string& value) {
 
 std::string passwordSummary(const std::string& value, bool showPassword) {
     if (value.empty()) {
-        return "(empty)";
+        return "(keep current)";
     }
     const std::string display = showPassword ? value : std::string(value.size(), '*');
     return display + " (" + std::to_string(value.size()) + " chars)";
@@ -151,18 +141,19 @@ const char* statusStyle(const std::string& value) {
         normalized.find("cannot") != std::string::npos ||
         normalized.find("does not") != std::string::npos ||
         normalized.find("failed") != std::string::npos ||
-        normalized.find("incomplete") != std::string::npos ||
-        normalized.find("replace") != std::string::npos) {
+        normalized.find("incomplete") != std::string::npos) {
         return tui::kWarningStyle;
     }
     if (normalized.find("ok") != std::string::npos ||
         normalized.find("ready") != std::string::npos ||
-        normalized.find("created") != std::string::npos ||
-        normalized.find("valid") != std::string::npos ||
-        normalized.find("saved") != std::string::npos) {
+        normalized.find("saved") != std::string::npos ||
+        normalized.find("updated") != std::string::npos ||
+        normalized.find("will") != std::string::npos) {
         return tui::kCopyStyle;
     }
-    if (normalized == "(none)" || normalized == "(empty)" || normalized == "optional") {
+    if (normalized == "(none)" || normalized == "(empty)" ||
+        normalized == "unchanged" || normalized == "not needed" ||
+        normalized == "no changes") {
         return tui::kHintStyle;
     }
     return tui::kHelpTextStyle;
@@ -178,20 +169,6 @@ std::string detailLineText(const DetailLine& line, std::size_t width) {
     return tui::colorText(fitText(line.label + ":", labelWidth), tui::kKeyStyle) +
            " " +
            tui::colorText(fitText(line.value, valueWidth), statusStyle(line.value));
-}
-
-std::string validateUsername(const std::string& username) {
-    const std::string trimmed = trimCopy(username);
-    if (trimmed.empty()) {
-        return "Username cannot be empty.";
-    }
-    if (trimmed == "null") {
-        return "\"null\" is reserved for setup.";
-    }
-    if (hasWhitespace(trimmed)) {
-        return "Username cannot contain spaces.";
-    }
-    return "";
 }
 
 PasswordStatus getPasswordStatus(const std::string& password) {
@@ -213,69 +190,125 @@ bool isValidPassword(const PasswordStatus& status) {
     return status.hasMinLength && status.hasUpper && status.hasLower && status.hasDigit;
 }
 
-std::string passwordRuleValue(bool passed) {
+std::string passwordRuleValue(const std::string& password, bool passed) {
+    if (password.empty()) {
+        return "Unchanged";
+    }
     return passed ? "OK" : "Missing";
 }
 
-std::vector<DetailLine> buildDetailLines(const SetupState& state, bool dataFileExists) {
-    const PasswordStatus passwordStatus = getPasswordStatus(state.password);
-    const std::string usernameError = validateUsername(state.username);
-    const bool passwordValid = isValidPassword(passwordStatus);
-    const bool confirmMatches = !state.password.empty() && state.password == state.confirmPassword;
-    const bool hintValid = state.passwordHint.empty() || state.passwordHint != state.password;
+bool passwordWillChange(const AccountSettingsState& state) {
+    return !state.newPassword.empty();
+}
 
-    std::vector<DetailLine> lines = {
-        {"Account", "", true},
-        {"Role", "admin", false},
-        {"Username", state.username.empty() ? "(empty)" : trimCopy(state.username), false},
-        {"Password", passwordSummary(state.password, state.showPassword), false},
-        {"Hint", state.passwordHint.empty() ? "(none)" : state.passwordHint, false},
-        {"Validation", "", true},
-        {"Username", usernameError.empty() ? "OK" : usernameError, false},
-        {"6+ characters", passwordRuleValue(passwordStatus.hasMinLength), false},
-        {"Uppercase", passwordRuleValue(passwordStatus.hasUpper), false},
-        {"Lowercase", passwordRuleValue(passwordStatus.hasLower), false},
-        {"Number", passwordRuleValue(passwordStatus.hasDigit), false},
-        {"Confirm", confirmMatches ? "OK" : "Does not match", false},
-        {"Hint", hintValid ? "OK" : "Cannot equal password", false},
-        {"Ready", usernameError.empty() && passwordValid && confirmMatches && hintValid ? "Ready" : "Incomplete", false}
-    };
+bool hintWillChange(const AccountSettingsState& state) {
+    return trimCopy(state.passwordHint) != state.original.password_hint;
+}
 
-    if (dataFileExists) {
-        lines.push_back({"Existing file", "Will replace user_data.dat", false});
+bool hasAnyChange(const AccountSettingsState& state) {
+    return passwordWillChange(state) || hintWillChange(state);
+}
+
+std::string effectivePassword(const AccountSettingsState& state) {
+    return passwordWillChange(state) ? state.newPassword : state.original.password;
+}
+
+std::string validateSettings(const AccountSettingsState& state) {
+    if (!passwordWillChange(state) && !state.confirmPassword.empty()) {
+        return "New password is empty; clear confirm or enter a password.";
     }
-    return lines;
+
+    if (passwordWillChange(state)) {
+        const PasswordStatus passwordStatus = getPasswordStatus(state.newPassword);
+        if (!isValidPassword(passwordStatus)) {
+            return "Password requirements are incomplete.";
+        }
+        if (state.newPassword != state.confirmPassword) {
+            return "Password confirmation does not match.";
+        }
+    }
+
+    if (!state.passwordHint.empty() && trimCopy(state.passwordHint) == effectivePassword(state)) {
+        return "Password hint cannot equal the password.";
+    }
+
+    if (!hasAnyChange(state)) {
+        return "No changes to save.";
+    }
+
+    return "";
+}
+
+std::vector<DetailLine> buildDetailLines(const AccountSettingsState& state) {
+    const PasswordStatus passwordStatus = getPasswordStatus(state.newPassword);
+    const bool changingPassword = passwordWillChange(state);
+    const bool confirmMatches = changingPassword && state.newPassword == state.confirmPassword;
+    const bool hintValid = state.passwordHint.empty() || trimCopy(state.passwordHint) != effectivePassword(state);
+    const bool ready = validateSettings(state).empty();
+
+    return {
+        {"Account", "", true},
+        {"Name", state.original.name, false},
+        {"Role", state.original.type, false},
+        {"Failed attempts", std::to_string(state.original.count), false},
+        {"Current hint", state.original.password_hint.empty() ? "(none)" : state.original.password_hint, false},
+        {"Changes", "", true},
+        {"Password", changingPassword ? "Will update" : "Unchanged", false},
+        {"New password", passwordSummary(state.newPassword, state.showPassword), false},
+        {"Hint", hintWillChange(state) ? "Will update" : "Unchanged", false},
+        {"Validation", "", true},
+        {"6+ characters", passwordRuleValue(state.newPassword, passwordStatus.hasMinLength), false},
+        {"Uppercase", passwordRuleValue(state.newPassword, passwordStatus.hasUpper), false},
+        {"Lowercase", passwordRuleValue(state.newPassword, passwordStatus.hasLower), false},
+        {"Number", passwordRuleValue(state.newPassword, passwordStatus.hasDigit), false},
+        {"Confirm", changingPassword ? (confirmMatches ? "OK" : "Does not match") : "Not needed", false},
+        {"Hint", hintValid ? "OK" : "Cannot equal password", false},
+        {"Ready", ready ? "Ready" : (hasAnyChange(state) ? "Incomplete" : "No changes"), false}
+    };
 }
 
 std::string fieldLabel(std::size_t index) {
     switch (index) {
-        case 0: return "Username";
-        case 1: return "Password";
-        case 2: return "Confirm";
-        case 3: return "Password hint";
+        case 0: return "New password";
+        case 1: return "Confirm";
+        case 2: return "Password hint";
         default: return "";
     }
 }
 
-std::string fieldValue(const SetupState& state, std::size_t index) {
+std::string fieldValue(const AccountSettingsState& state, std::size_t index) {
     switch (index) {
-        case 0: return state.username.empty() ? "(empty)" : state.username;
-        case 1: return state.showPassword ? state.password : maskText(state.password);
-        case 2: return state.showPassword ? state.confirmPassword : maskText(state.confirmPassword);
-        case 3: return state.passwordHint.empty() ? "(optional)" : state.passwordHint;
-        default: return "";
+        case 0:
+            if (state.newPassword.empty()) {
+                return "(keep current)";
+            }
+            return state.showPassword ? state.newPassword : maskText(state.newPassword);
+        case 1:
+            if (state.newPassword.empty() && state.confirmPassword.empty()) {
+                return "(not needed)";
+            }
+            if (state.confirmPassword.empty()) {
+                return "(empty)";
+            }
+            return state.showPassword ? state.confirmPassword : maskText(state.confirmPassword);
+        case 2:
+            return state.passwordHint.empty() ? "(none)" : state.passwordHint;
+        default:
+            return "";
     }
 }
 
-std::string formatFormLine(const SetupState& state, std::size_t index, std::size_t width) {
+std::string formatFormLine(const AccountSettingsState& state, std::size_t index, std::size_t width) {
     const bool selected = state.field == index;
     const std::string marker = selected ? "> " : "  ";
     const std::string label = fitText(fieldLabel(index), 16);
     const std::string prefix = marker + label + " ";
     const std::size_t valueWidth = width > prefix.size() ? width - prefix.size() : 0;
 
-    const char* valueStyle = index == 0 ? tui::kUserStyle : tui::kInputStyle;
-    if (index == 3 && state.passwordHint.empty()) {
+    const char* valueStyle = tui::kInputStyle;
+    if ((index == 0 && state.newPassword.empty()) ||
+        (index == 1 && state.newPassword.empty() && state.confirmPassword.empty()) ||
+        (index == 2 && state.passwordHint.empty())) {
         valueStyle = tui::kHintStyle;
     }
 
@@ -294,26 +327,27 @@ void renderHelpBinding(const std::string& keys, const std::string& description) 
 
 void renderHelp() {
     std::cout << "\x1b[0m\x1b[2J\x1b[H\x1b[?25l";
-    std::cout << tui::colorText("TundraUX First-Time Setup Help", tui::kTitleStyle) << "\n\n";
+    std::cout << tui::colorText("TundraUX Account Settings Help", tui::kTitleStyle) << "\n\n";
     std::cout << tui::colorText("Navigation", tui::kSectionStyle) << "\n";
-    renderHelpBinding("Up/Down or Tab", "Move through setup fields");
+    renderHelpBinding("Up/Down or Tab", "Move through setting fields");
     renderHelpBinding("Home/End", "Jump to first or last field");
     std::cout << "\n";
 
     std::cout << tui::colorText("Editing", tui::kSectionStyle) << "\n";
     renderHelpBinding("Type / Backspace", "Edit the highlighted field");
     renderHelpBinding("Delete", "Clear the highlighted field");
-    renderHelpBinding("F2", "Show or hide password fields");
+    renderHelpBinding("F2", "Show or hide new password fields");
     std::cout << "\n";
 
-    std::cout << tui::colorText("Create Admin", tui::kSectionStyle) << "\n";
-    renderHelpBinding("Enter", "Create the first administrator when validation passes");
+    std::cout << tui::colorText("Saving", tui::kSectionStyle) << "\n";
+    renderHelpBinding("Enter", "Save changes when validation passes");
+    renderHelpBinding("Esc", "Return without saving");
     renderHelpBinding("F1", "Return from help");
     std::cout << "\n";
     std::cout << tui::colorText("Press F1, q, Esc, or Enter to return.", tui::kHintStyle) << std::flush;
 }
 
-void renderSetup(const SetupState& state, bool dataFileExists) {
+void renderSettings(const AccountSettingsState& state) {
     const COORD size = consoleSize();
     const std::size_t width = std::max<int>(size.X, 92);
     const std::size_t height = std::max<int>(size.Y, 20);
@@ -321,17 +355,17 @@ void renderSetup(const SetupState& state, bool dataFileExists) {
     const std::size_t usableWidth = width > 3 ? width - 3 : width;
     const std::size_t formWidth = std::max<std::size_t>(38, usableWidth * 45 / 100);
     const std::size_t detailsWidth = usableWidth - formWidth;
-    const auto details = buildDetailLines(state, dataFileExists);
+    const auto details = buildDetailLines(state);
 
     std::cout << "\x1b[0m\x1b[2J\x1b[H\x1b[?25l";
-    std::cout << tui::colorText("TundraUX First-Time Setup", tui::kTitleStyle)
+    std::cout << tui::colorText("TundraUX Account Settings", tui::kTitleStyle)
               << tui::colorText(" - ", tui::kHintStyle)
-              << tui::colorText("administrator account", tui::kPathStyle)
+              << tui::colorText(state.original.name, tui::kPathStyle)
               << "\n";
     std::cout << tui::colorText("user_data.dat", tui::kPathStyle) << "\n";
     std::cout << tui::colorText(border(formWidth, detailsWidth), tui::kBorderStyle) << "\n";
     std::cout << tui::colorText("|", tui::kBorderStyle)
-              << headerCell("Setup Form", formWidth)
+              << headerCell("Settings Form", formWidth)
               << tui::colorText("|", tui::kBorderStyle)
               << headerCell("Details", detailsWidth)
               << tui::colorText("|", tui::kBorderStyle)
@@ -340,12 +374,12 @@ void renderSetup(const SetupState& state, bool dataFileExists) {
 
     for (std::size_t rowIndex = 0; rowIndex < rows; ++rowIndex) {
         std::string formText = std::string(formWidth, ' ');
-        if (rowIndex < 4) {
+        if (rowIndex < 3) {
             formText = formatFormLine(state, rowIndex, formWidth);
+        } else if (rowIndex == 4) {
+            formText = tui::colorText(fitText(" Leave new password empty to keep the current password.", formWidth), tui::kHintStyle);
         } else if (rowIndex == 5) {
             formText = tui::colorText(fitText(" Password rules: 6+ chars, upper, lower, number", formWidth), tui::kHintStyle);
-        } else if (rowIndex == 6) {
-            formText = tui::colorText(fitText(" Password hint is optional but cannot equal password.", formWidth), tui::kHintStyle);
         }
 
         const std::string detailText = rowIndex < details.size()
@@ -366,11 +400,13 @@ void renderSetup(const SetupState& state, bool dataFileExists) {
               << tui::colorText("Tab", tui::kKeyStyle)
               << tui::colorText(" next | ", tui::kHintStyle)
               << tui::colorText("Enter", tui::kKeyStyle)
-              << tui::colorText(" create | ", tui::kHintStyle)
+              << tui::colorText(" save | ", tui::kHintStyle)
               << tui::colorText("F2", tui::kKeyStyle)
               << tui::colorText(state.showPassword ? " hide password | " : " show password | ", tui::kHintStyle)
               << tui::colorText("F1", tui::kKeyStyle)
-              << tui::colorText(" help", tui::kHintStyle)
+              << tui::colorText(" help | ", tui::kHintStyle)
+              << tui::colorText("Esc", tui::kKeyStyle)
+              << tui::colorText(" quit", tui::kHintStyle)
               << "\n";
     std::cout << tui::colorText("Status: ", tui::kSectionStyle)
               << tui::colorText(state.message, statusStyle(state.message))
@@ -384,8 +420,6 @@ KeyPress readKey() {
         switch (ext) {
             case 72: return {Key::Up, '\0'};
             case 80: return {Key::Down, '\0'};
-            case 75: return {Key::Left, '\0'};
-            case 77: return {Key::Right, '\0'};
             case 71: return {Key::Home, '\0'};
             case 79: return {Key::End, '\0'};
             case 83: return {Key::Delete, '\0'};
@@ -408,114 +442,67 @@ KeyPress readKey() {
     }
 }
 
-std::string& activeField(SetupState& state) {
+std::string& activeField(AccountSettingsState& state) {
     switch (state.field) {
-        case 0: return state.username;
-        case 1: return state.password;
-        case 2: return state.confirmPassword;
-        case 3: return state.passwordHint;
-        default: return state.username;
+        case 0: return state.newPassword;
+        case 1: return state.confirmPassword;
+        case 2: return state.passwordHint;
+        default: return state.newPassword;
     }
 }
 
-std::string validateSetup(const SetupState& state) {
-    const std::string usernameError = validateUsername(state.username);
-    if (!usernameError.empty()) {
-        return usernameError;
-    }
-
-    const PasswordStatus passwordStatus = getPasswordStatus(state.password);
-    if (!isValidPassword(passwordStatus)) {
-        return "Password requirements are incomplete.";
-    }
-    if (state.password != state.confirmPassword) {
-        return "Password confirmation does not match.";
-    }
-    if (!state.passwordHint.empty() && state.passwordHint == state.password) {
-        return "Password hint cannot equal the password.";
-    }
-    return "";
-}
-
-void writeString(std::ofstream& outFile, const std::string& value) {
-    const std::size_t length = value.size();
-    outFile.write(reinterpret_cast<const char*>(&length), sizeof(length));
-    outFile.write(value.data(), static_cast<std::streamsize>(length));
-}
-
-bool createAdminUser(const SetupState& state, std::string& error) {
-    std::ofstream outFile("user_data.dat", std::ios::binary | std::ios::trunc);
-    if (!outFile) {
-        error = "Unable to create user_data.dat.";
+bool saveSettings(AccountSettingsState& state, USER& currentUser) {
+    const std::string validationError = validateSettings(state);
+    if (!validationError.empty()) {
+        state.message = validationError;
         return false;
     }
 
-    const int version = 2;
-    const std::size_t userCount = 1;
-    const int failedCount = 0;
-    outFile.write(reinterpret_cast<const char*>(&version), sizeof(version));
-    outFile.write(reinterpret_cast<const char*>(&userCount), sizeof(userCount));
-    writeString(outFile, "admin");
-    writeString(outFile, trimCopy(state.username));
-    writeString(outFile, encrypt(state.password));
-    writeString(outFile, trimCopy(state.passwordHint));
-    outFile.write(reinterpret_cast<const char*>(&failedCount), sizeof(failedCount));
-    outFile.close();
-
-    if (outFile.fail() || outFile.bad()) {
-        error = "Failed to write user_data.dat.";
-        return false;
+    USER updated = state.original;
+    if (passwordWillChange(state)) {
+        updated.password = state.newPassword;
     }
+    updated.password_hint = trimCopy(state.passwordHint);
 
     DataManager dataManager("user_data.dat");
-    const auto& users = dataManager.GetAllUsers();
-    if (users.size() != 1 || users.front().name != trimCopy(state.username) ||
-        users.front().type != "admin") {
-        error = "Created user data did not verify.";
+    if (!dataManager.UpdateUser(state.original.name, updated)) {
+        state.message = "Failed to update user info.";
         return false;
     }
 
+    currentUser = updated;
+    state.original = updated;
+    state.newPassword.clear();
+    state.confirmPassword.clear();
+    state.passwordHint = updated.password_hint;
+    state.saved = true;
+    state.message = "Settings saved. Press Enter or Esc to return.";
     return true;
 }
 
-void tryCreate(SetupState& state) {
-    const std::string validationError = validateSetup(state);
-    if (!validationError.empty()) {
-        state.message = validationError;
-        return;
-    }
-
-    std::string error;
-    if (!createAdminUser(state, error)) {
-        state.message = error;
-        return;
-    }
-
-    state.created = true;
-    state.message = "Admin user created. Press Enter to continue.";
-}
-
-void handleSetupKey(SetupState& state, const KeyPress& key) {
+bool handleSettingsKey(AccountSettingsState& state, USER& currentUser, const KeyPress& key) {
     if (state.showHelp) {
         if (key.key == Key::Escape || key.key == Key::Enter ||
             key.key == Key::F1 ||
             (key.key == Key::Character && (key.character == 'q' || key.character == 'Q'))) {
             state.showHelp = false;
         }
-        return;
+        return true;
     }
 
-    if (state.created) {
+    if (state.saved) {
         if (key.key == Key::Enter || key.key == Key::Escape ||
             (key.key == Key::Character && (key.character == 'q' || key.character == 'Q'))) {
-            return;
+            return false;
         }
-        state.message = "Admin user created. Press Enter to continue.";
-        return;
+        state.message = "Settings saved. Press Enter or Esc to return.";
+        return true;
     }
 
-    state.message = "Fill the setup form. Enter creates the admin account.";
+    state.message = "Edit settings. Enter saves changes.";
     switch (key.key) {
+        case Key::Escape:
+            return false;
         case Key::Up:
             if (state.field > 0) {
                 --state.field;
@@ -523,13 +510,13 @@ void handleSetupKey(SetupState& state, const KeyPress& key) {
             break;
         case Key::Down:
         case Key::Tab:
-            state.field = (state.field + 1) % 4;
+            state.field = (state.field + 1) % 3;
             break;
         case Key::Home:
             state.field = 0;
             break;
         case Key::End:
-            state.field = 3;
+            state.field = 2;
             break;
         case Key::Backspace: {
             std::string& value = activeField(state);
@@ -542,7 +529,7 @@ void handleSetupKey(SetupState& state, const KeyPress& key) {
             activeField(state).clear();
             break;
         case Key::Enter:
-            tryCreate(state);
+            saveSettings(state, currentUser);
             break;
         case Key::Character:
             activeField(state).push_back(key.character);
@@ -554,38 +541,59 @@ void handleSetupKey(SetupState& state, const KeyPress& key) {
             state.showPassword = !state.showPassword;
             state.message = state.showPassword ? "Password visible." : "Password hidden.";
             break;
-        case Key::Escape:
-            state.message = "Setup is required before using TundraUX.";
-            break;
-        case Key::Left:
-        case Key::Right:
         case Key::Unknown:
             break;
     }
+
+    return true;
+}
+
+const USER* findCurrentUser(const DataManager& dataManager, const USER& currentUser) {
+    for (const auto& user : dataManager.GetAllUsers()) {
+        if (user.name == currentUser.name) {
+            return &user;
+        }
+    }
+    return nullptr;
 }
 
 } // namespace
 
-void hello() {
-    set_title("TundraUX 2.0 init");
+void open_account_settings(USER& currentUser) {
+    if (currentUser.name.empty()) {
+        colorcout("yellow", "No user is currently logged in.\n");
+        return;
+    }
+
+    std::ifstream check("user_data.dat");
+    if (!check.good()) {
+        colorcout("red", "Error: user_data.dat not found.\n");
+        return;
+    }
+    check.close();
+
+    DataManager dataManager("user_data.dat");
+    const USER* storedUser = findCurrentUser(dataManager, currentUser);
+    if (storedUser == nullptr) {
+        colorcout("red", "Current user is not stored in user_data.dat.\n");
+        return;
+    }
+
+    set_title("Account Settings");
     ConsoleScreenGuard screenGuard;
 
-    SetupState state;
-    const bool dataFileExists = static_cast<bool>(std::ifstream("user_data.dat"));
+    AccountSettingsState state;
+    state.original = *storedUser;
+    state.passwordHint = storedUser->password_hint;
 
-    while (true) {
+    bool running = true;
+    while (running) {
         if (state.showHelp) {
             renderHelp();
         } else {
-            renderSetup(state, dataFileExists);
+            renderSettings(state);
         }
 
-        const KeyPress key = readKey();
-        if (state.created &&
-            (key.key == Key::Enter || key.key == Key::Escape ||
-             (key.key == Key::Character && (key.character == 'q' || key.character == 'Q')))) {
-            break;
-        }
-        handleSetupKey(state, key);
+        running = handleSettingsKey(state, currentUser, readKey());
     }
 }

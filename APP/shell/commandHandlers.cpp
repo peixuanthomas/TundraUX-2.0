@@ -12,6 +12,7 @@
 #include <sstream>
 #include <sys/stat.h>
 
+#include "account_settings.hpp"
 #include "color.hpp"
 #include "editor.hpp"
 #include "manageusers.hpp"
@@ -141,89 +142,7 @@ void handleTimeCommand(const std::string&) {
 }
 
 void handleModifyCommand(const std::string&, USER& currentUser) {
-    if (currentUser.name.empty())
-    {
-        colorcout("yellow", "No user is currently logged in.\n");
-        return;
-    }
-    colorcout("cyan", "Modify current user\n");
-    DataManager dataManager("user_data.dat");
-    bool changed = false;
-    if (getYN("Change password?"))
-    {
-        while (true)
-        {
-            std::string newPwd = getHiddenInput("Enter new password: ", '*');
-            if (newPwd.empty())
-            {
-                colorcout("red", "Password cannot be empty. Please try again.\n");
-                continue;
-            }
-            if (newPwd.length() < 6)
-            {
-                colorcout("red", "Password must be at least 6 characters long. Please try again.\n");
-                continue;
-            }
-            bool hasUpper = false, hasLower = false, hasDigit = false;
-            for (char c : newPwd)
-            {
-                if (std::isupper(static_cast<unsigned char>(c)))
-                    hasUpper = true;
-                else if (std::islower(static_cast<unsigned char>(c)))
-                    hasLower = true;
-                else if (std::isdigit(static_cast<unsigned char>(c)))
-                    hasDigit = true;
-            }
-            if (!(hasUpper && hasLower && hasDigit))
-            {
-                colorcout("red", "Password must contain at least one uppercase letter, one lowercase letter, and one digit. Please try again.\n");
-                continue;
-            }
-            std::string confirm = getHiddenInput("Confirm new password: ", '*');
-            if (newPwd != confirm)
-            {
-                colorcout("red", "Passwords do not match. Please try again.\n");
-                continue;
-            }
-            currentUser.password = newPwd;
-            changed = true;
-            break;
-        }
-    }
-    if (getYN("Change password hint?"))
-    {
-        while (true)
-        {
-            std::string newHint;
-            colorcout("white", "Enter new password hint (leave blank if none):");
-            std::getline(std::cin, newHint);
-            if (newHint == currentUser.password)
-            {
-                colorcout("red", "Password hint cannot be the same as the password.\n");
-            }
-            else
-            {
-                currentUser.password_hint = newHint;
-                changed = true;
-                break;
-            }
-        }
-    }
-    if (changed)
-    {
-        if (dataManager.UpdateUser(currentUser.name, currentUser))
-        {
-            colorcout("green", "User info updated successfully.\n");
-        }
-        else
-        {
-            colorcout("red", "Failed to update user info.\n");
-        }
-    }
-    else
-    {
-        colorcout("yellow", "No changes made.\n");
-    }
+    open_account_settings(currentUser);
 }
 
 void handleClearScreenCommand(const std::string&) {

@@ -19,6 +19,7 @@ set(TUNDRAUX_CORE_SOURCES
 )
 
 set(TUNDRAUX_APP_SOURCES
+    APP/account_settings/account_settings.cpp
     APP/editor/editor.cpp
     APP/editor/editor_portable.cpp
     APP/editor/editor_win.cpp
@@ -65,6 +66,7 @@ target_sources(${PROJECT_NAME}
 target_include_directories(${PROJECT_NAME}
     PRIVATE
         ${PROJECT_SOURCE_DIR}/CORE/startup
+        ${PROJECT_SOURCE_DIR}/APP/account_settings
         ${PROJECT_SOURCE_DIR}/APP/editor
         ${PROJECT_SOURCE_DIR}/APP/explorer
         ${PROJECT_SOURCE_DIR}/APP/file_manager
