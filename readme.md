@@ -111,17 +111,21 @@ Open it from the main shell:
 manageuser
 ```
 
-Available commands:
+User management opens as a keyboard-driven TUI.
 
-| Command | Description |
+| Key | Action |
 | --- | --- |
-| `help`, `h`, `?` | Show help |
-| `list`, `ls`, `l` | List users |
-| `show <username>` | Show user details |
-| `add <username> type=<admin|user> password=<password> [hint=<hint>] [count=<n>]` | Add a user |
-| `set <username> field=value...` | Update `type`, `password`, `hint`, or `count` |
-| `delete <username>` | Delete a user |
-| `exit`, `quit`, `q` | Return to the main shell |
+| `Up`/`Down`, `j`/`k` | Select a user |
+| `Home`/`End` | Jump to first or last user |
+| `Enter`, `e` | Edit the selected user |
+| `a` | Add a user with a form |
+| `d` | Delete the selected user after confirmation |
+| `r` | Reset failed login attempts |
+| `p` | Show or hide the password in details |
+| `h` | Show TUI help |
+| `q`, `Esc` | Return to the main shell |
+
+In the add/edit form, type directly into the highlighted field. Use `Up`/`Down` or `Tab` to move fields, `Left`/`Right`/`Space` to toggle the account type, `Enter` to save, and `Esc` to cancel.
 
 ## TUX File Manager
 

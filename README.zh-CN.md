@@ -111,17 +111,21 @@ cmake --build build
 manageuser
 ```
 
-可用命令：
+用户管理会打开按键式 TUI。
 
-| 命令 | 说明 |
+| 按键 | 说明 |
 | --- | --- |
-| `help`, `h`, `?` | 显示帮助 |
-| `list`, `ls`, `l` | 列出用户 |
-| `show <username>` | 显示用户详情 |
-| `add <username> type=<admin|user> password=<password> [hint=<hint>] [count=<n>]` | 新增用户 |
-| `set <username> field=value...` | 修改 `type`、`password`、`hint` 或 `count` |
-| `delete <username>` | 删除用户 |
-| `exit`, `quit`, `q` | 返回主 Shell |
+| `Up`/`Down`, `j`/`k` | 选择用户 |
+| `Home`/`End` | 跳到第一个或最后一个用户 |
+| `Enter`, `e` | 编辑选中的用户 |
+| `a` | 通过表单新增用户 |
+| `d` | 确认后删除选中的用户 |
+| `r` | 重置登录失败次数 |
+| `p` | 在详情中显示或隐藏密码 |
+| `h` | 显示 TUI 帮助 |
+| `q`, `Esc` | 返回主 Shell |
+
+新增/编辑表单中可以直接输入当前高亮字段。使用 `Up`/`Down` 或 `Tab` 切换字段，`Left`/`Right`/`Space` 切换账户类型，`Enter` 保存，`Esc` 取消。
 
 ## TUX File Manager
 
