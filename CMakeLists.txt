@@ -13,30 +13,55 @@ option(TUNDRAUX_DEBUG_STARTUP "Start TundraUX2 in debug mode without logging in.
 
 add_executable(${PROJECT_NAME})
 
+set(TUNDRAUX_CORE_SOURCES
+    CORE/main/main.cpp
+    CORE/startup/hello.cpp
+)
+
+set(TUNDRAUX_APP_SOURCES
+    APP/editor/editor.cpp
+    APP/editor/editor_portable.cpp
+    APP/editor/editor_win.cpp
+    APP/explorer/explorer.cpp
+    APP/file_manager/TUXfile.cpp
+    APP/shell/command.cpp
+    APP/shell/commandHandlers.cpp
+    APP/shell/commandReg.cpp
+    APP/shell/commandRegistry.cpp
+)
+
+set(TUNDRAUX_USER_SOURCES
+    USER/account/manageusers.cpp
+    USER/udata/udata.cpp
+)
+
+set(TUNDRAUX_SYSTEM_SOURCES
+    SYSTEM/console/color.cpp
+    SYSTEM/console/console_screen.cpp
+    SYSTEM/crypto/crypto.cpp
+    SYSTEM/debug/debug.cpp
+)
+
 target_sources(${PROJECT_NAME}
     PRIVATE
-        src/TUXfile.cpp
-        src/color.cpp
-        src/command.cpp
-        src/commandHandlers.cpp
-        src/commandReg.cpp
-        src/commandRegistry.cpp
-        src/console_screen.cpp
-        src/crypto.cpp
-        src/debug.cpp
-        src/editor.cpp
-        src/editor_portable.cpp
-        src/editor_win.cpp
-        src/hello.cpp
-        src/main.cpp
-        src/manageusers.cpp
-        src/udata.cpp
-        src/explorer.cpp
+        ${TUNDRAUX_CORE_SOURCES}
+        ${TUNDRAUX_APP_SOURCES}
+        ${TUNDRAUX_USER_SOURCES}
+        ${TUNDRAUX_SYSTEM_SOURCES}
 )
 
 target_include_directories(${PROJECT_NAME}
     PRIVATE
-        ${PROJECT_SOURCE_DIR}/inc
+        ${PROJECT_SOURCE_DIR}/CORE/startup
+        ${PROJECT_SOURCE_DIR}/APP/editor
+        ${PROJECT_SOURCE_DIR}/APP/explorer
+        ${PROJECT_SOURCE_DIR}/APP/file_manager
+        ${PROJECT_SOURCE_DIR}/APP/shell
+        ${PROJECT_SOURCE_DIR}/USER/account
+        ${PROJECT_SOURCE_DIR}/USER/udata
+        ${PROJECT_SOURCE_DIR}/SYSTEM/console
+        ${PROJECT_SOURCE_DIR}/SYSTEM/crypto
+        ${PROJECT_SOURCE_DIR}/SYSTEM/debug
 )
 
 target_compile_features(${PROJECT_NAME}

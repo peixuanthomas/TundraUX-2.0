@@ -210,25 +210,24 @@ edit docs/notes
 
 当前加密方式是简单 XOR 变换，适合演示文件格式和读写流程，但不具备真正的密码学安全性。不要在未替换加密实现的情况下，用本项目保护敏感数据。
 
-如果要使用真实加密方案，应替换 `crypto.cpp` 中的实现，并考虑已有 `.TUX` 文件的迁移兼容问题。
+如果要使用真实加密方案，应替换 `SYSTEM/crypto/crypto.cpp` 中的实现，并考虑已有 `.TUX` 文件的迁移兼容问题。
 
 ## 项目结构
 
 | 路径 | 作用 |
 | --- | --- |
 | `CMakeLists.txt` | 构建配置 |
-| `inc/` | 头文件 |
-| `src/main.cpp` | 启动流程、许可证检查、Shell 入口 |
-| `src/command.cpp` | 主 Shell 循环、命令历史、相似命令提示、CMD 转发 |
-| `src/commandRegistry.cpp` | 主 Shell 命令表 |
-| `src/commandHandlers.cpp` | 主 Shell 命令处理函数 |
-| `src/TUXfile.cpp` | TUX File Manager 和 `.TUX` 文件读写 |
-| `src/editor*.cpp` | 编辑器前端和后端选择 |
-| `src/manageusers.cpp` | 用户管理界面 |
-| `src/udata.cpp` | 用户数据持久化 |
-| `src/crypto.cpp` | XOR 加密辅助函数 |
-| `src/color.cpp` | 彩色控制台输出 |
-| `src/console_screen.cpp` | 控制台屏幕保护工具 |
+| `CORE/main/` | 启动流程、许可证检查、Shell 入口 |
+| `CORE/startup/` | 登录和欢迎流程 |
+| `APP/shell/` | 主 Shell 循环、命令表和命令处理函数 |
+| `APP/explorer/` | Explorer 应用 |
+| `APP/file_manager/` | TUX File Manager 和 `.TUX` 文件读写 |
+| `APP/editor/` | 编辑器前端和后端选择 |
+| `USER/account/` | 用户管理界面 |
+| `USER/udata/` | 用户数据持久化 |
+| `SYSTEM/console/` | 彩色控制台输出和控制台屏幕保护工具 |
+| `SYSTEM/crypto/` | XOR 加密辅助函数 |
+| `SYSTEM/debug/` | 调试命令和诊断工具 |
 
 ## 许可证
 

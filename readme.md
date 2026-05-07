@@ -208,7 +208,7 @@ Implementation limits:
 
 ## Security Notice
 
-The current encryption is a simple XOR transform. It is useful for demonstrating file format handling, but it is not cryptographically secure. Do not use this project to protect sensitive data without replacing the implementation in `crypto.cpp` with a real authenticated encryption scheme.
+The current encryption is a simple XOR transform. It is useful for demonstrating file format handling, but it is not cryptographically secure. Do not use this project to protect sensitive data without replacing the implementation in `SYSTEM/crypto/crypto.cpp` with a real authenticated encryption scheme.
 
 Changing the encryption implementation will likely break compatibility with existing `.TUX` files unless a migration path is added.
 
@@ -217,18 +217,17 @@ Changing the encryption implementation will likely break compatibility with exis
 | Path | Purpose |
 | --- | --- |
 | `CMakeLists.txt` | Build configuration |
-| `inc/` | Header files |
-| `src/main.cpp` | Startup, license check, shell entry |
-| `src/command.cpp` | Main shell loop, command history, suggestions, CMD passthrough |
-| `src/commandRegistry.cpp` | Main shell command table |
-| `src/commandHandlers.cpp` | Main shell command handlers |
-| `src/TUXfile.cpp` | TUX File Manager and `.TUX` I/O |
-| `src/editor*.cpp` | Editor frontends and backend selection |
-| `src/manageusers.cpp` | User management interface |
-| `src/udata.cpp` | User data persistence |
-| `src/crypto.cpp` | XOR encryption helper |
-| `src/color.cpp` | Colored console output |
-| `src/console_screen.cpp` | Console screen guard utilities |
+| `CORE/main/` | Startup, license check, shell entry |
+| `CORE/startup/` | Login and welcome flow |
+| `APP/shell/` | Main shell loop, command registry, and command handlers |
+| `APP/explorer/` | Explorer app |
+| `APP/file_manager/` | TUX File Manager and `.TUX` I/O |
+| `APP/editor/` | Editor frontend and backend selection |
+| `USER/account/` | User management interface |
+| `USER/udata/` | User data persistence |
+| `SYSTEM/console/` | Colored output and console screen guard utilities |
+| `SYSTEM/crypto/` | XOR encryption helper |
+| `SYSTEM/debug/` | Debug commands and diagnostics |
 
 ## License
 
