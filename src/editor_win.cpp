@@ -46,17 +46,17 @@
 #define KEY_BACKSPACE_SPECIAL (SPECIAL_KEY_BASE + 11)
 
 // Color pair indices (Windows console attributes)
-#define COLOR_PAIR_TITLE    1   // White on Blue
-#define COLOR_PAIR_STATUS   2   // Black on White
-#define COLOR_PAIR_HIGHLIGHT 3  // Yellow on Black
-#define COLOR_PAIR_SUCCESS  4   // Green on Black
-#define COLOR_PAIR_ERROR    5   // Red on Black
+#define COLOR_PAIR_TITLE    1   // Bright cyan on blue
+#define COLOR_PAIR_STATUS   2   // Black on bright cyan
+#define COLOR_PAIR_HIGHLIGHT 3  // Bright yellow on black
+#define COLOR_PAIR_SUCCESS  4   // Bright green on black
+#define COLOR_PAIR_ERROR    5   // Bright red on black
 // Syntax highlight color pairs
-#define COLOR_PAIR_KEYWORD  6   // Blue - keywords
-#define COLOR_PAIR_STRING   7   // Green - strings/chars
-#define COLOR_PAIR_COMMENT  8   // Cyan - comments
-#define COLOR_PAIR_NUMBER   9   // Magenta - numbers
-#define COLOR_PAIR_PREPROC  10  // Yellow - preprocessor
+#define COLOR_PAIR_KEYWORD  6   // Bright cyan - keywords
+#define COLOR_PAIR_STRING   7   // Bright yellow - strings/chars
+#define COLOR_PAIR_COMMENT  8   // Soft gray - comments
+#define COLOR_PAIR_NUMBER   9   // Bright magenta - numbers
+#define COLOR_PAIR_PREPROC  10  // Bright yellow - preprocessor
 
 // Editor mode enum
 enum EditorMode {
@@ -272,16 +272,26 @@ public:
 
     WORD getColorPair(int pair) {
         switch (pair) {
-            case COLOR_PAIR_TITLE:      return FOREGROUND_RED | FOREGROUND_GREEN | FOREGROUND_BLUE | FOREGROUND_INTENSITY | BACKGROUND_BLUE; // White on Blue
-            case COLOR_PAIR_STATUS:     return 0 | BACKGROUND_RED | BACKGROUND_GREEN | BACKGROUND_BLUE; // Black on White
-            case COLOR_PAIR_HIGHLIGHT:  return FOREGROUND_RED | FOREGROUND_GREEN | FOREGROUND_INTENSITY; // Yellow on Black
-            case COLOR_PAIR_SUCCESS:    return FOREGROUND_GREEN | FOREGROUND_INTENSITY; // Green on Black
-            case COLOR_PAIR_ERROR:      return FOREGROUND_RED | FOREGROUND_INTENSITY; // Red on Black
-            case COLOR_PAIR_KEYWORD:    return FOREGROUND_BLUE | FOREGROUND_INTENSITY; // Blue - keywords
-            case COLOR_PAIR_STRING:     return FOREGROUND_GREEN | FOREGROUND_INTENSITY; // Green - strings/chars
-            case COLOR_PAIR_COMMENT:    return FOREGROUND_BLUE | FOREGROUND_GREEN | FOREGROUND_INTENSITY; // Cyan
-            case COLOR_PAIR_NUMBER:     return FOREGROUND_RED | FOREGROUND_BLUE | FOREGROUND_INTENSITY;   // Magenta
-            case COLOR_PAIR_PREPROC:    return FOREGROUND_RED | FOREGROUND_GREEN | FOREGROUND_INTENSITY;  // Yellow
+            case COLOR_PAIR_TITLE:
+                return FOREGROUND_GREEN | FOREGROUND_BLUE | FOREGROUND_INTENSITY | BACKGROUND_BLUE;
+            case COLOR_PAIR_STATUS:
+                return BACKGROUND_GREEN | BACKGROUND_BLUE | BACKGROUND_INTENSITY;
+            case COLOR_PAIR_HIGHLIGHT:
+                return FOREGROUND_RED | FOREGROUND_GREEN | FOREGROUND_INTENSITY;
+            case COLOR_PAIR_SUCCESS:
+                return FOREGROUND_GREEN | FOREGROUND_INTENSITY;
+            case COLOR_PAIR_ERROR:
+                return FOREGROUND_RED | FOREGROUND_INTENSITY;
+            case COLOR_PAIR_KEYWORD:
+                return FOREGROUND_GREEN | FOREGROUND_BLUE | FOREGROUND_INTENSITY;
+            case COLOR_PAIR_STRING:
+                return FOREGROUND_RED | FOREGROUND_GREEN | FOREGROUND_INTENSITY;
+            case COLOR_PAIR_COMMENT:
+                return FOREGROUND_RED | FOREGROUND_GREEN | FOREGROUND_BLUE;
+            case COLOR_PAIR_NUMBER:
+                return FOREGROUND_RED | FOREGROUND_BLUE | FOREGROUND_INTENSITY;
+            case COLOR_PAIR_PREPROC:
+                return FOREGROUND_RED | FOREGROUND_GREEN | FOREGROUND_INTENSITY;
             default:                    return originalAttributes;
         }
     }

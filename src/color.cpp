@@ -11,23 +11,27 @@
 #include <vector>
 #include <conio.h>
 
-//TODO: Consider updating color into 256bit or True Color in the future.
 std::unordered_map<std::string, std::string> colorMap = {
-    {"red", "\033[31m"},          //For warning/error messages
-    {"green", "\033[32m"},        //For success messages
-    {"yellow", "\033[33m"},       //For prompts/instructions
-    {"blue", "\033[34m"},         //For informational messages
-    {"magenta", "\033[35m"},      //For highlights/alerts
-    {"cyan", "\033[36m"},         //For titles/headings
-    {"white", "\033[37m"},        //For regular text
+    {"red", "\033[1;38;5;203m"},      // Warning/error messages
+    {"green", "\033[1;38;5;119m"},    // Success messages
+    {"yellow", "\033[1;38;5;220m"},   // Prompts/instructions
+    {"blue", "\033[38;5;39m"},        // Informational messages
+    {"magenta", "\033[1;38;5;213m"},  // Highlights/alerts
+    {"cyan", "\033[1;38;5;51m"},      // Titles/headings
+    {"white", "\033[38;5;254m"},      // Regular text
+    {"gray", "\033[38;5;245m"},
+    {"grey", "\033[38;5;245m"},
     {"reset", "\033[0m"},
-    {"RED", "\033[31m"},          //For warning/error messages
-    {"GREEN", "\033[32m"},        //For success messages
-    {"YELLOW", "\033[33m"},       //For prompts/instructions
-    {"BLUE", "\033[34m"},         //For informational messages
-    {"MAGENTA", "\033[35m"},      //For highlights/alerts
-    {"CYAN", "\033[36m"},         //For titles/headings
-    {"WHITE", "\033[37m"},        //For regular text
+    {"RED", "\033[1;38;5;203m"},      // Warning/error messages
+    {"GREEN", "\033[1;38;5;119m"},    // Success messages
+    {"YELLOW", "\033[1;38;5;220m"},   // Prompts/instructions
+    {"BLUE", "\033[38;5;39m"},        // Informational messages
+    {"MAGENTA", "\033[1;38;5;213m"},  // Highlights/alerts
+    {"CYAN", "\033[1;38;5;51m"},      // Titles/headings
+    {"WHITE", "\033[38;5;254m"},      // Regular text
+    {"GRAY", "\033[38;5;245m"},
+    {"GREY", "\033[38;5;245m"},
+    {"ERROR", "\033[1;38;5;203m"},
     {"RESET", "\033[0m"}
 };
 

@@ -205,16 +205,16 @@ public:
 
     void attron(int attributes) {
         switch (attributes) {
-            case COLOR_PAIR_TITLE: writeAnsi("\x1b[37;44;1m"); break;
-            case COLOR_PAIR_STATUS: writeAnsi("\x1b[30;47m"); break;
-            case COLOR_PAIR_HIGHLIGHT: writeAnsi("\x1b[33m"); break;
-            case COLOR_PAIR_SUCCESS: writeAnsi("\x1b[32m"); break;
-            case COLOR_PAIR_ERROR: writeAnsi("\x1b[31m"); break;
-            case COLOR_PAIR_KEYWORD: writeAnsi("\x1b[94m"); break;
-            case COLOR_PAIR_STRING: writeAnsi("\x1b[32m"); break;
-            case COLOR_PAIR_COMMENT: writeAnsi("\x1b[36m"); break;
-            case COLOR_PAIR_NUMBER: writeAnsi("\x1b[35m"); break;
-            case COLOR_PAIR_PREPROC: writeAnsi("\x1b[33;1m"); break;
+            case COLOR_PAIR_TITLE: writeAnsi("\x1b[1;38;5;51;48;5;24m"); break;
+            case COLOR_PAIR_STATUS: writeAnsi("\x1b[1;38;5;195;48;5;24m"); break;
+            case COLOR_PAIR_HIGHLIGHT: writeAnsi("\x1b[1;38;5;220m"); break;
+            case COLOR_PAIR_SUCCESS: writeAnsi("\x1b[1;38;5;119m"); break;
+            case COLOR_PAIR_ERROR: writeAnsi("\x1b[1;38;5;203m"); break;
+            case COLOR_PAIR_KEYWORD: writeAnsi("\x1b[1;38;5;51m"); break;
+            case COLOR_PAIR_STRING: writeAnsi("\x1b[38;5;229m"); break;
+            case COLOR_PAIR_COMMENT: writeAnsi("\x1b[38;5;245m"); break;
+            case COLOR_PAIR_NUMBER: writeAnsi("\x1b[1;38;5;213m"); break;
+            case COLOR_PAIR_PREPROC: writeAnsi("\x1b[1;38;5;220m"); break;
             default: writeAnsi("\x1b[0m"); break;
         }
     }
