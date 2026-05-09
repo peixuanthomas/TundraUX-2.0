@@ -18,6 +18,7 @@
 #include <cwctype>
 #include <functional>
 #include <unordered_map>
+#include <utility>
 #include "udata.hpp"
 #include <conio.h>
 #include <random>
@@ -46,6 +47,29 @@ struct FileMetadata {
     std::string lastEditor;
     std::time_t createTime{};
     std::time_t modifyTime{};
+};
+
+class ScopedTuxTempFiles {
+public:
+    explicit ScopedTuxTempFiles(std::filesystem::path tempDir)
+        : tempDir_(std::move(tempDir)) {}
+
+    void add(const std::filesystem::path& path) {
+        paths_.push_back(path);
+    }
+
+    ~ScopedTuxTempFiles() {
+        std::error_code ec;
+        for (const auto& path : paths_) {
+            std::filesystem::remove(path, ec);
+            ec.clear();
+        }
+        std::filesystem::remove(tempDir_, ec);
+    }
+
+private:
+    std::filesystem::path tempDir_;
+    std::vector<std::filesystem::path> paths_;
 };
 
 USER currentUser;
@@ -500,6 +524,7 @@ int open_tux_file_in_editor(
     if (ec) {
         return 4;
     }
+    ScopedTuxTempFiles tempCleanup(tempDir);
 
     static std::mt19937 rng(
         static_cast<unsigned>(std::chrono::steady_clock::now().time_since_epoch().count()));
@@ -518,6 +543,7 @@ int open_tux_file_in_editor(
     do {
         tempPath = genTempPath();
     } while (std::filesystem::exists(tempPath));
+    tempCleanup.add(tempPath);
 
     {
         std::ofstream tempFile(tempPath, std::ios::binary);
@@ -533,7 +559,6 @@ int open_tux_file_in_editor(
     {
         std::ifstream tempFile(tempPath, std::ios::binary);
         if (!tempFile) {
-            std::filesystem::remove(tempPath, ec);
             return 6;
         }
         std::ostringstream buffer;
@@ -548,7 +573,6 @@ int open_tux_file_in_editor(
         writeTuxFile(tuxPath, newContent, meta);
     }
 
-    std::filesystem::remove(tempPath, ec);
     return canModify ? editorResult : 7;
 }
 
@@ -569,7 +593,15 @@ void editTuxFile(const std::string& filename) {
 
     // Use Files\temp directory
     std::string tempDir = "Files\\temp";
-    { std::error_code ec; std::filesystem::create_directories(tempDir, ec); }
+    {
+        std::error_code ec;
+        std::filesystem::create_directories(tempDir, ec);
+        if (ec) {
+            colorcout("RED","Failed to create temp directory\n\n");
+            return;
+        }
+    }
+    ScopedTuxTempFiles tempCleanup(tempDir);
 
     // Seeded RNG
     static std::mt19937 rng(
@@ -591,6 +623,7 @@ void editTuxFile(const std::string& filename) {
         std::string p;
         do { p = genHexName(); } while (std::filesystem::exists(p));
         tempPaths.push_back(p);
+        tempCleanup.add(p);
     }
 
     // Choose which file holds the real content
@@ -623,7 +656,6 @@ void editTuxFile(const std::string& filename) {
             newContent = oss.str();
         } else {
             colorcout("RED","Failed to read temp file\n\n");
-            for (auto& p : tempPaths) { std::error_code ec; std::filesystem::remove(p, ec); }
             return;
         }
     }
@@ -635,9 +667,6 @@ void editTuxFile(const std::string& filename) {
         meta.modifyTime = now;
         writeTuxFile(path, newContent, meta);
     }
-
-    // Delete all temp files
-    for (auto& p : tempPaths) { std::error_code ec; std::filesystem::remove(p, ec); }
 }
 
 // ---------- Delete ----------
