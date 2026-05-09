@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cctype>
+#include <exception>
 #include <sstream>
 
 #include "color.hpp"
@@ -107,7 +108,13 @@ bool tryExecuteRegisteredCommand(
                 colorcout("white", " - " + helpCmd->usage + ": " + helpCmd->description + "\n");
             }
         } else {
-            cmd.handler(input);
+            try {
+                cmd.handler(input);
+            } catch (const std::exception& ex) {
+                colorcout("red", "Command failed: " + std::string(ex.what()) + "\n");
+            } catch (...) {
+                colorcout("red", "Command failed due to an unknown error.\n");
+            }
         }
         return true;
     }

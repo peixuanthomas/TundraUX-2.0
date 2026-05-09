@@ -33,14 +33,23 @@ cmake --build build
 
 生成的可执行文件名为 `TundraUX2`。
 
-### 启动模式
-
-默认情况下，CMake 选项 `TUNDRAUX_DEBUG_STARTUP` 是关闭的。程序会以 guest 模式启动，需要登录后才能使用 user、admin 或 debug 权限。
-
-如果需要为本地开发启用 debug 启动：
+## 验证
 
 ```powershell
-cmake -B build -DTUNDRAUX_DEBUG_STARTUP=ON
+cmake --build build
+ctest --test-dir build --output-on-failure
+```
+
+项目当前没有注册自动化测试，因此 `ctest` 会报告未找到测试。
+
+### 启动模式
+
+默认情况下，CMake 选项 `TUNDRAUX_DEBUG_STARTUP` 是开启的。程序会以 debug 模式启动，无需登录即可使用 debug/admin 命令，以及 `/` 前缀的 Windows CMD 透传。
+
+如果需要以 guest 模式启动，并要求登录后才能使用 user、admin 或 debug 权限：
+
+```powershell
+cmake -B build -DTUNDRAUX_DEBUG_STARTUP=OFF
 cmake --build build
 ```
 

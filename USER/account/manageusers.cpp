@@ -44,6 +44,13 @@ struct DetailLine {
     bool section = false;
 };
 
+struct PasswordStatus {
+    bool hasMinLength = false;
+    bool hasUpper = false;
+    bool hasLower = false;
+    bool hasDigit = false;
+};
+
 struct UserForm {
     bool editing = false;
     std::string originalName;
@@ -125,6 +132,25 @@ bool hasWhitespace(const std::string& value) {
     return std::any_of(value.begin(), value.end(), [](unsigned char ch) {
         return std::isspace(ch) != 0;
     });
+}
+
+PasswordStatus getPasswordStatus(const std::string& password) {
+    PasswordStatus status;
+    status.hasMinLength = password.length() >= 6;
+    for (char c : password) {
+        if (std::isupper(static_cast<unsigned char>(c))) {
+            status.hasUpper = true;
+        } else if (std::islower(static_cast<unsigned char>(c))) {
+            status.hasLower = true;
+        } else if (std::isdigit(static_cast<unsigned char>(c))) {
+            status.hasDigit = true;
+        }
+    }
+    return status;
+}
+
+bool isValidPassword(const PasswordStatus& status) {
+    return status.hasMinLength && status.hasUpper && status.hasLower && status.hasDigit;
 }
 
 std::string trimToWidth(const std::string& text, std::size_t width) {
@@ -642,6 +668,9 @@ std::string validateForm(const UserForm& form, const DataManager& dataManager, U
     }
     if (user.password.empty()) {
         return "Password cannot be empty.";
+    }
+    if (!isValidPassword(getPasswordStatus(user.password))) {
+        return "Password must be 6+ chars with uppercase, lowercase, and number.";
     }
     if (!user.password_hint.empty() && user.password_hint == user.password) {
         return "Password hint cannot equal the password.";

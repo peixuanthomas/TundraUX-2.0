@@ -33,14 +33,23 @@ cmake --build build
 
 The generated executable is named `TundraUX2`.
 
-### Startup Mode
-
-By default, the CMake option `TUNDRAUX_DEBUG_STARTUP` is disabled. The program starts in guest mode and requires login before user, admin, or debug capabilities are available.
-
-To build with debug startup for local development:
+## Validation
 
 ```powershell
-cmake -B build -DTUNDRAUX_DEBUG_STARTUP=ON
+cmake --build build
+ctest --test-dir build --output-on-failure
+```
+
+The project currently does not register automated tests, so `ctest` reports that no tests were found.
+
+### Startup Mode
+
+By default, the CMake option `TUNDRAUX_DEBUG_STARTUP` is enabled. The program starts in debug mode without login for local development, including access to debug/admin commands and `/` CMD passthrough.
+
+To build with guest startup and require login before user, admin, or debug capabilities are available:
+
+```powershell
+cmake -B build -DTUNDRAUX_DEBUG_STARTUP=OFF
 cmake --build build
 ```
 

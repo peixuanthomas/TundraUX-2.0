@@ -15,6 +15,11 @@ bool can_modify_tux_file(
     const std::string& currentUsername,
     const std::string& currentUsertype
 );
+bool can_read_tux_file(
+    const std::string& tuxPath,
+    const std::string& currentUsername,
+    const std::string& currentUsertype
+);
 bool directory_has_protected_tux_files(
     const std::string& directoryPath,
     const std::string& currentUsername,

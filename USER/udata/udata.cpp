@@ -85,7 +85,17 @@ static bool readEncryptedString(std::ifstream& in, std::string& data) {
     size_t len;
     in.read(reinterpret_cast<char*>(&len), sizeof(len));
     if (!in) return false;
-    std::vector<char> buffer(len);
+    if (len > MAX_USER_STRING_LENGTH) {
+        colorcout("red", "Error: Legacy user string exceeds maximum length.\n");
+        return false;
+    }
+    std::vector<char> buffer;
+    try {
+        buffer.resize(len);
+    } catch (const std::exception&) {
+        colorcout("red", "Error: Unable to allocate memory for legacy user string.\n");
+        return false;
+    }
     in.read(buffer.data(), len);
     if (!in) return false;
     data = encryptDecrypt(std::string(buffer.data(), len));

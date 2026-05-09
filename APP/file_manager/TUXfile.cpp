@@ -96,6 +96,14 @@ static bool canModifyTuxMetadata(
     return isPrivilegedType(usertype) || (!username.empty() && meta.creator == username);
 }
 
+static bool canReadTuxMetadata(
+    const FileMetadata& meta,
+    const std::string& username,
+    const std::string& usertype
+) {
+    return canModifyTuxMetadata(meta, username, usertype);
+}
+
 static std::string lowerCopy(std::string value) {
     std::transform(value.begin(), value.end(), value.begin(), [](unsigned char ch) {
         return static_cast<char>(std::tolower(ch));
@@ -342,6 +350,21 @@ bool can_modify_tux_file(
     return canModifyTuxMetadata(meta, currentUsername, currentUsertype);
 }
 
+bool can_read_tux_file(
+    const std::string& tuxPath,
+    const std::string& currentUsername,
+    const std::string& currentUsertype
+) {
+    if (isPrivilegedType(currentUsertype)) {
+        return true;
+    }
+    FileMetadata meta = readMetadata(tuxPath);
+    if (meta.creator.empty() && meta.lastEditor.empty()) {
+        return false;
+    }
+    return canReadTuxMetadata(meta, currentUsername, currentUsertype);
+}
+
 bool directory_has_protected_tux_files(
     const std::string& directoryPath,
     const std::string& currentUsername,
@@ -395,9 +418,16 @@ std::pair<std::string, FileMetadata> readFullTuxFile(const std::string& path) {
 }
 
 // ---------- Write ----------
-void writeTuxFile(const std::string& path, const std::string& content, const FileMetadata& meta) {
-    std::ofstream out(path, std::ios::binary);
-    if (!out) { colorcout("RED", "Write failed: " + path + "\n"); return; }
+bool writeTuxFile(const std::string& path, const std::string& content, const FileMetadata& meta) {
+    const std::string tempPath = path + ".tmp";
+    std::error_code removeError;
+    std::filesystem::remove(tempPath, removeError);
+
+    std::ofstream out(tempPath, std::ios::binary | std::ios::trunc);
+    if (!out) {
+        colorcout("RED", "Write failed: " + path + "\n");
+        return false;
+    }
     unsigned int ver = 1;
     out.write(reinterpret_cast<const char*>(&ver), sizeof(ver));
     writeEncryptedString(out, meta.creator);
@@ -405,6 +435,29 @@ void writeTuxFile(const std::string& path, const std::string& content, const Fil
     out.write(reinterpret_cast<const char*>(&meta.createTime), sizeof(meta.createTime));
     out.write(reinterpret_cast<const char*>(&meta.modifyTime), sizeof(meta.modifyTime));
     writeEncryptedString(out, content);
+    out.flush();
+    if (!out) {
+        out.close();
+        std::filesystem::remove(tempPath, removeError);
+        colorcout("RED", "Write failed: " + path + "\n");
+        return false;
+    }
+    out.close();
+    if (!out) {
+        std::filesystem::remove(tempPath, removeError);
+        colorcout("RED", "Write failed: " + path + "\n");
+        return false;
+    }
+
+    if (!MoveFileExA(
+            tempPath.c_str(),
+            path.c_str(),
+            MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH)) {
+        std::filesystem::remove(tempPath, removeError);
+        colorcout("RED", "Write failed: " + std::to_string(GetLastError()) + "\n");
+        return false;
+    }
+    return true;
 }
 
 // ---------- List ----------
@@ -475,7 +528,9 @@ void createTuxFile(const std::string& filename) {
     }
     auto now = std::chrono::system_clock::to_time_t(std::chrono::system_clock::now());
     FileMetadata meta{currentUser.name,currentUser.name,now,now};
-    writeTuxFile(path,"",meta);
+    if (!writeTuxFile(path,"",meta)) {
+        return;
+    }
     colorcout("GREEN","Created empty file: "+filename+"\n\n");
 }
 
@@ -488,6 +543,10 @@ void viewTuxFile(const std::string& filename) {
         return;
     }
     if (!std::filesystem::exists(path)) { colorcout("RED","Not found: "+filename+"\n"); return; }
+    if (!can_read_tux_file(path, currentUser.name, currentUser.type)) {
+        colorcout("RED","Access denied: You cannot view this file\n");
+        return;
+    }
     auto [content, _] = readFullTuxFile(path);
     if (!g_lastTuxReadOk) { colorcout("RED","File corrupted or invalid format\n\n"); return; }
     colorcout("CYAN","=== "+filename+" ===\n");
@@ -512,6 +571,10 @@ int open_tux_file_in_editor(
     auto [oldContent, meta] = readFullTuxFile(tuxPath);
     if (!g_lastTuxReadOk) {
         return 2;
+    }
+    const bool canRead = canReadTuxMetadata(meta, currentUser.name, currentUser.type);
+    if (!canRead) {
+        return 3;
     }
     const bool canModify = canModifyTuxMetadata(meta, currentUser.name, currentUser.type);
     if (!canModify && !allowReadOnly) {
@@ -570,7 +633,9 @@ int open_tux_file_in_editor(
         const auto now = std::chrono::system_clock::to_time_t(std::chrono::system_clock::now());
         meta.lastEditor = currentUser.name;
         meta.modifyTime = now;
-        writeTuxFile(tuxPath, newContent, meta);
+        if (!writeTuxFile(tuxPath, newContent, meta)) {
+            return 8;
+        }
     }
 
     return canModify ? editorResult : 7;
@@ -665,7 +730,9 @@ void editTuxFile(const std::string& filename) {
         auto now = std::chrono::system_clock::to_time_t(std::chrono::system_clock::now());
         meta.lastEditor = currentUser.name;
         meta.modifyTime = now;
-        writeTuxFile(path, newContent, meta);
+        if (!writeTuxFile(path, newContent, meta)) {
+            return;
+        }
     }
 }
 
@@ -709,7 +776,12 @@ void renameTuxFile(const std::string& oldname, const std::string& newname) {
         std::filesystem::create_directories(nfp.parent_path(), ec);
         if (ec) { colorcout("RED","Failed to create directory: "+ec.message()+"\n"); return; }
     }
-    std::filesystem::rename(op,np);
+    std::error_code ec;
+    std::filesystem::rename(op, np, ec);
+    if (ec) {
+        colorcout("RED","Rename failed: "+ec.message()+"\n");
+        return;
+    }
     colorcout("GREEN","Renamed: "+oldname+" -> "+newname+"\n\n");
 }
 
@@ -800,7 +872,9 @@ void copyTuxFile(const std::string& src, const std::string& dst) {
     meta.lastEditor = currentUser.name;
     meta.createTime = now;
     meta.modifyTime = now;
-    writeTuxFile(dstPath, content, meta);
+    if (!writeTuxFile(dstPath, content, meta)) {
+        return;
+    }
     colorcout("GREEN","Copied: "+src+" -> "+displayDst+"\n\n");
 }
 
@@ -979,7 +1053,9 @@ void importTxtFile(const std::string& filename) {
     }
     meta.lastEditor = currentUser.name;
     meta.modifyTime = std::chrono::system_clock::to_time_t(std::chrono::system_clock::now());
-    writeTuxFile(tuxPath, content, meta);
+    if (!writeTuxFile(tuxPath, content, meta)) {
+        return;
+    }
     colorcout("GREEN","Imported as: "+tuxName+"\n\n");
 }
 

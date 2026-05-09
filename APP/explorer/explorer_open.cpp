@@ -51,9 +51,11 @@ void openSelected(ExplorerState& state) {
         } else if (result == 2) {
             state.message = redMessage("TUX file is corrupted or invalid.");
         } else if (result == 3) {
-            state.message = redMessage("Access denied: only the creator, admin, or debug can edit this TUX file.");
+            state.message = redMessage("Access denied: only the creator, admin, or debug can open this TUX file.");
         } else if (result == 7) {
             state.message = "Viewed read-only " + selected.name;
+        } else if (result == 8) {
+            state.message = redMessage("Failed to save TUX file.");
         } else {
             state.message = redMessage("Failed to decrypt and open TUX file.");
         }
