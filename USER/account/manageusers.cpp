@@ -1,42 +1,49 @@
 // Attention: Windows only code.
 #include "manageusers.hpp"
 
-#include "color.hpp"
-#include "console_screen.hpp"
+#include "TundraTUI/color.hpp"
+#include "TundraTUI/input.hpp"
+#include "TundraTUI/render_engine.hpp"
+#include "TundraTUI/screen.hpp"
+#include "TundraTUI/style.hpp"
+#include "TundraTUI/text.hpp"
 #include "udata.hpp"
 
 #include <algorithm>
 #include <cctype>
-#include <conio.h>
 #include <fstream>
 #include <iostream>
 #include <sstream>
 #include <string>
 #include <vector>
-#include <windows.h>
 
 namespace {
 
-enum class Key {
-    Unknown,
-    Character,
-    Enter,
-    Escape,
-    Backspace,
-    Delete,
-    Tab,
-    Up,
-    Down,
-    Left,
-    Right,
-    Home,
-    End
-};
-
-struct KeyPress {
-    Key key = Key::Unknown;
-    char character = '\0';
-};
+using tundra_tui::colorCellPart;
+using tundra_tui::colorText;
+using tundra_tui::ConsoleScreenGuard;
+using tundra_tui::fitText;
+using tundra_tui::Key;
+using tundra_tui::KeyPress;
+using tundra_tui::readKey;
+using tundra_tui::singleBorder;
+using tundra_tui::splitBorder;
+using tundra_tui::terminalSize;
+using tundra_tui::trimToWidth;
+using tundra_tui::kBorderStyle;
+using tundra_tui::kCopyStyle;
+using tundra_tui::kHeaderStyle;
+using tundra_tui::kHelpTextStyle;
+using tundra_tui::kHintStyle;
+using tundra_tui::kInputStyle;
+using tundra_tui::kKeyStyle;
+using tundra_tui::kPathStyle;
+using tundra_tui::kRoleStyle;
+using tundra_tui::kSectionStyle;
+using tundra_tui::kSelectedMarkStyle;
+using tundra_tui::kTitleStyle;
+using tundra_tui::kUserStyle;
+using tundra_tui::kWarningStyle;
 
 struct DetailLine {
     std::string label;
@@ -74,43 +81,6 @@ struct UserManagerState {
     std::string pendingDeleteName;
     std::string message = "Ready";
 };
-
-constexpr const char* kResetStyle = "\x1b[0m";
-constexpr const char* kTitleStyle = "\x1b[1;38;5;51m";
-constexpr const char* kRoleStyle = "\x1b[1;38;5;213m";
-constexpr const char* kUserStyle = "\x1b[1;38;5;220m";
-constexpr const char* kPathStyle = "\x1b[38;5;117m";
-constexpr const char* kBorderStyle = "\x1b[38;5;39m";
-constexpr const char* kHeaderStyle = "\x1b[1;38;5;195;48;5;24m";
-constexpr const char* kSectionStyle = "\x1b[1;38;5;87m";
-constexpr const char* kKeyStyle = "\x1b[1;38;5;220m";
-constexpr const char* kHintStyle = "\x1b[38;5;245m";
-constexpr const char* kHelpTextStyle = "\x1b[38;5;252m";
-constexpr const char* kInputStyle = "\x1b[1;38;5;230m";
-constexpr const char* kWarningStyle = "\x1b[1;38;5;203m";
-constexpr const char* kCopyStyle = "\x1b[1;38;5;119m";
-constexpr const char* kSelectedBgStyle = "\x1b[48;5;24m";
-constexpr const char* kSelectedMarkStyle = "\x1b[1;38;5;229m";
-
-std::string colorText(const std::string& text, const char* style) {
-    if (text.empty()) {
-        return text;
-    }
-    return std::string(style) + text + kResetStyle;
-}
-
-std::string colorCellPart(const std::string& text, const char* style, bool selected) {
-    if (text.empty()) {
-        return text;
-    }
-
-    std::string prefix;
-    if (selected) {
-        prefix += kSelectedBgStyle;
-    }
-    prefix += style;
-    return prefix + text + kResetStyle;
-}
 
 std::string trimCopy(std::string value) {
     const auto first = value.find_first_not_of(" \t\r\n");
@@ -153,55 +123,11 @@ bool isValidPassword(const PasswordStatus& status) {
     return status.hasMinLength && status.hasUpper && status.hasLower && status.hasDigit;
 }
 
-std::string trimToWidth(const std::string& text, std::size_t width) {
-    if (text.size() <= width) {
-        return text;
-    }
-    if (width == 0) {
-        return "";
-    }
-    if (width <= 3) {
-        return text.substr(0, width);
-    }
-    return text.substr(0, width - 3) + "...";
-}
-
-std::string fitText(const std::string& text, std::size_t width) {
-    std::string fitted = trimToWidth(text, width);
-    if (fitted.size() < width) {
-        fitted += std::string(width - fitted.size(), ' ');
-    }
-    return fitted;
-}
-
 std::string maskText(const std::string& value) {
     if (value.empty()) {
         return "(empty)";
     }
     return std::string(value.size(), '*');
-}
-
-COORD consoleSize() {
-    CONSOLE_SCREEN_BUFFER_INFO info{};
-    HANDLE output = GetStdHandle(STD_OUTPUT_HANDLE);
-    if (output != INVALID_HANDLE_VALUE && GetConsoleScreenBufferInfo(output, &info)) {
-        return {
-            static_cast<SHORT>(info.srWindow.Right - info.srWindow.Left + 1),
-            static_cast<SHORT>(info.srWindow.Bottom - info.srWindow.Top + 1)
-        };
-    }
-    return {120, 30};
-}
-
-std::string singleBorder(std::size_t width) {
-    if (width < 2) {
-        return "";
-    }
-    return "+" + std::string(width - 2, '-') + "+";
-}
-
-std::string border(std::size_t leftWidth, std::size_t rightWidth) {
-    return "+" + std::string(leftWidth, '-') + "+" + std::string(rightWidth, '-') + "+";
 }
 
 std::string headerCell(const std::string& text, std::size_t width) {
@@ -333,7 +259,7 @@ std::string formatUserCell(const USER* user, bool selected, std::size_t width) {
         return colorCellPart(fitText(marker + user->name, width), typeStyle(user->type), selected);
     }
 
-    const std::string name = fitText(user->name, width - fixedWidth);
+    const std::string name = fitText(trimToWidth(user->name, width - fixedWidth), width - fixedWidth);
     return colorCellPart(marker, selected ? kSelectedMarkStyle : kHintStyle, selected) +
            colorCellPart(type, typeStyle(user->type), selected) +
            colorCellPart(" ", kHelpTextStyle, selected) +
@@ -437,8 +363,8 @@ std::string formatFormLine(const UserForm& form, std::size_t index, std::size_t 
 }
 
 void renderForm(const UserForm& form) {
-    const COORD size = consoleSize();
-    const std::size_t width = std::max<int>(size.X, 90);
+    const tundra_tui::Size size = terminalSize();
+    const std::size_t width = std::max<int>(size.width, 90);
     const std::size_t contentWidth = width > 2 ? width - 2 : width;
 
     std::cout << "\x1b[0m\x1b[2J\x1b[H\x1b[?25l";
@@ -480,9 +406,9 @@ void renderForm(const UserForm& form) {
 }
 
 void renderMain(const DataManager& dataManager, const UserManagerState& state) {
-    const COORD size = consoleSize();
-    const std::size_t width = std::max<int>(size.X, 90);
-    const std::size_t height = std::max<int>(size.Y, 18);
+    const tundra_tui::Size size = terminalSize();
+    const std::size_t width = std::max<int>(size.width, 90);
+    const std::size_t height = std::max<int>(size.height, 18);
     const std::size_t rows = height > 8 ? height - 8 : 10;
     const std::size_t usableWidth = width > 3 ? width - 3 : width;
     const std::size_t usersWidth = std::max<std::size_t>(30, usableWidth * 40 / 100);
@@ -495,14 +421,14 @@ void renderMain(const DataManager& dataManager, const UserManagerState& state) {
               << colorText(std::to_string(userCount(dataManager)) + " users", kPathStyle)
               << "\n";
     std::cout << colorText("user_data.dat", kPathStyle) << "\n";
-    std::cout << colorText(border(usersWidth, detailsWidth), kBorderStyle) << "\n";
+    std::cout << colorText(splitBorder(usersWidth, detailsWidth), kBorderStyle) << "\n";
     std::cout << colorText("|", kBorderStyle)
               << headerCell("Users", usersWidth)
               << colorText("|", kBorderStyle)
               << headerCell("Details", detailsWidth)
               << colorText("|", kBorderStyle)
               << "\n";
-    std::cout << colorText(border(usersWidth, detailsWidth), kBorderStyle) << "\n";
+    std::cout << colorText(splitBorder(usersWidth, detailsWidth), kBorderStyle) << "\n";
 
     const auto& users = dataManager.GetAllUsers();
     for (std::size_t rowIndex = 0; rowIndex < rows; ++rowIndex) {
@@ -525,7 +451,7 @@ void renderMain(const DataManager& dataManager, const UserManagerState& state) {
                   << "\n";
     }
 
-    std::cout << colorText(border(usersWidth, detailsWidth), kBorderStyle) << "\n";
+    std::cout << colorText(splitBorder(usersWidth, detailsWidth), kBorderStyle) << "\n";
     if (state.confirmDelete) {
         std::cout << colorText("Delete ", kWarningStyle)
                   << colorText(state.pendingDeleteName, kUserStyle)
@@ -557,35 +483,6 @@ void renderMain(const DataManager& dataManager, const UserManagerState& state) {
     std::cout << colorText("Status: ", kSectionStyle)
               << colorText(state.message, statusStyle(state.message))
               << std::flush;
-}
-
-KeyPress readKey() {
-    const int ch = _getch();
-    if (ch == 0 || ch == 224) {
-        const int ext = _getch();
-        switch (ext) {
-            case 72: return {Key::Up, '\0'};
-            case 80: return {Key::Down, '\0'};
-            case 75: return {Key::Left, '\0'};
-            case 77: return {Key::Right, '\0'};
-            case 71: return {Key::Home, '\0'};
-            case 79: return {Key::End, '\0'};
-            case 83: return {Key::Delete, '\0'};
-            default: return {Key::Unknown, '\0'};
-        }
-    }
-
-    switch (ch) {
-        case 13: return {Key::Enter, '\0'};
-        case 27: return {Key::Escape, '\0'};
-        case 8: return {Key::Backspace, '\0'};
-        case 9: return {Key::Tab, '\0'};
-        default:
-            if (std::isprint(static_cast<unsigned char>(ch))) {
-                return {Key::Character, static_cast<char>(ch)};
-            }
-            return {Key::Unknown, '\0'};
-    }
 }
 
 void moveUp(UserManagerState& state) {
@@ -979,11 +876,11 @@ bool handleMainKey(UserManagerState& state, DataManager& dataManager, const KeyP
 } // namespace
 
 void manage_users() {
-    set_title("User Management");
+    tundra_tui::set_title("User Management");
 
     std::ifstream check("user_data.dat");
     if (!check.good()) {
-        colorcout("red", "Error: user_data.dat not found.\n");
+        tundra_tui::colorcout("red", "Error: user_data.dat not found.\n");
         return;
     }
     check.close();
@@ -994,9 +891,9 @@ void manage_users() {
 
     bool running = true;
     while (running) {
-        const COORD size = consoleSize();
-        const std::size_t rows = std::max<int>(size.Y, 18) > 8
-            ? static_cast<std::size_t>(std::max<int>(size.Y, 18) - 8)
+        const tundra_tui::Size size = terminalSize();
+        const std::size_t rows = std::max<int>(size.height, 18) > 8
+            ? static_cast<std::size_t>(std::max<int>(size.height, 18) - 8)
             : 10;
         keepCursorVisible(state, dataManager, rows);
 

@@ -6,6 +6,8 @@
 #include "explorer_style.hpp"
 #include "explorer_text.hpp"
 
+#include "TundraTUI/text.hpp"
+
 #include <algorithm>
 #include <iostream>
 #include <sstream>
@@ -62,11 +64,11 @@ const char* previewLineStyle(const std::string& line) {
 }
 
 std::string headerCell(const std::string& title, std::size_t width) {
-    return colorText(trimToWidth(" " + title, width), kHeaderStyle);
+    return colorText(tundra_tui::fitText(" " + title, width), kHeaderStyle);
 }
 
 std::string previewCell(const std::string& text, std::size_t width) {
-    return colorText(trimToWidth(text, width), previewLineStyle(text));
+    return colorText(tundra_tui::fitText(text, width), previewLineStyle(text));
 }
 
 std::string border(std::size_t parentWidth, std::size_t currentWidth, std::size_t previewWidth) {
@@ -97,19 +99,6 @@ std::string formatParentEntry(const FileEntry& entry, bool current) {
            entry.name;
 }
 
-std::string fitText(const std::string& value, std::size_t width) {
-    if (value.size() <= width) {
-        return value;
-    }
-    if (width == 0) {
-        return "";
-    }
-
-    std::string fitted = value.substr(0, width);
-    fitted.back() = '.';
-    return fitted;
-}
-
 std::string formatParentCell(const FileEntry* entry, bool current, std::size_t width) {
     if (entry == nullptr) {
         return std::string(width, ' ');
@@ -119,10 +108,10 @@ std::string formatParentCell(const FileEntry* entry, bool current, std::size_t w
     const std::string badge = entry->isDirectory ? "[D] " : "    ";
     const std::size_t fixedWidth = marker.size() + badge.size();
     if (fixedWidth >= width) {
-        return colorCellPart(trimToWidth(formatParentEntry(*entry, current), width), entryNameStyle(*entry), current);
+        return colorCellPart(tundra_tui::fitText(formatParentEntry(*entry, current), width), entryNameStyle(*entry), current);
     }
 
-    const std::string name = fitText(entry->name, width - fixedWidth);
+    const std::string name = tundra_tui::trimToWidth(entry->name, width - fixedWidth);
     const std::size_t visibleWidth = fixedWidth + name.size();
     const std::string padding = visibleWidth < width ? std::string(width - visibleWidth, ' ') : "";
 
@@ -161,11 +150,11 @@ std::string formatCurrentCell(
     const std::size_t fixedWidth = prefix.size() + suffix.size();
 
     if (fixedWidth >= width) {
-        return colorCellPart(trimToWidth(formatCurrentEntry(*entry, selected), width), entryNameStyle(*entry), selected);
+        return colorCellPart(tundra_tui::fitText(formatCurrentEntry(*entry, selected), width), entryNameStyle(*entry), selected);
     }
 
     const std::size_t nameWidth = width - fixedWidth;
-    const std::string name = fitText(entry->name, nameWidth);
+    const std::string name = tundra_tui::trimToWidth(entry->name, nameWidth);
     const char* nameStyle = entryNameStyle(*entry);
     if (clipboardMatches(state, *entry)) {
         nameStyle = state.clipboard.mode == ClipboardMode::Copy ? kCopyStyle : kCutStyle;
@@ -192,7 +181,7 @@ void renderHelpSection(const std::string& title) {
 
 void renderHelpBinding(const std::string& keys, const std::string& description) {
     std::cout << "  "
-              << colorText(trimToWidth(keys, 22), kKeyStyle)
+              << colorText(tundra_tui::fitText(keys, 22), kKeyStyle)
               << colorText(description, kHelpTextStyle)
               << "\n";
 }
@@ -238,13 +227,6 @@ void renderHelp(const ExplorerState& state, const std::string& username, const s
     std::cout << colorText("Press h, q, Esc, or Enter to return.", kHintStyle) << std::flush;
 }
 
-std::string singleBorder(std::size_t width) {
-    if (width < 2) {
-        return "";
-    }
-    return "+" + std::string(width - 2, '-') + "+";
-}
-
 const char* detailValueStyle(const DetailLine& line) {
     const std::string normalized = toLowerCopy(line.value);
     if (normalized.rfind("no -", 0) == 0 ||
@@ -263,20 +245,20 @@ const char* detailValueStyle(const DetailLine& line) {
 
 std::string detailLineText(const DetailLine& line, std::size_t width) {
     if (line.section) {
-        return colorText(trimToWidth(" " + line.label, width), kHeaderStyle);
+        return colorText(tundra_tui::fitText(" " + line.label, width), kHeaderStyle);
     }
 
     const std::size_t labelWidth = std::min<std::size_t>(24, std::max<std::size_t>(12, width / 3));
     const std::size_t valueWidth = width > labelWidth + 1 ? width - labelWidth - 1 : 0;
-    return colorText(trimToWidth(line.label + ":", labelWidth), kKeyStyle) +
+    return colorText(tundra_tui::fitText(line.label + ":", labelWidth), kKeyStyle) +
            " " +
-           colorText(trimToWidth(line.value, valueWidth), detailValueStyle(line));
+           colorText(tundra_tui::fitText(line.value, valueWidth), detailValueStyle(line));
 }
 
 void renderDetails(const ExplorerState& state, const std::string& username, const std::string& usertype) {
-    const COORD size = consoleSize();
-    const std::size_t width = std::max<int>(size.X, 90);
-    const std::size_t height = std::max<int>(size.Y, 18);
+    const tundra_tui::Size size = consoleSize();
+    const std::size_t width = std::max<int>(size.width, 90);
+    const std::size_t height = std::max<int>(size.height, 18);
     const std::size_t contentWidth = width > 2 ? width - 2 : width;
     const std::size_t rows = detailVisibleRows(height);
     const std::size_t totalLines = state.detailLines.size();
@@ -291,7 +273,7 @@ void renderDetails(const ExplorerState& state, const std::string& username, cons
               << colorText(username, kUserStyle)
               << "\n";
     std::cout << colorText(state.detailName.empty() ? "(no selection)" : state.detailName, kPathStyle) << "\n";
-    std::cout << colorText(singleBorder(width), kBorderStyle) << "\n";
+    std::cout << colorText(tundra_tui::singleBorder(width), kBorderStyle) << "\n";
 
     for (std::size_t rowIndex = 0; rowIndex < rows; ++rowIndex) {
         const std::size_t detailIndex = scroll + rowIndex;
@@ -304,7 +286,7 @@ void renderDetails(const ExplorerState& state, const std::string& username, cons
                   << "\n";
     }
 
-    std::cout << colorText(singleBorder(width), kBorderStyle) << "\n";
+    std::cout << colorText(tundra_tui::singleBorder(width), kBorderStyle) << "\n";
     const std::string lineStatus = totalLines == 0
         ? "No detail lines"
         : "Lines " + std::to_string(scroll + 1) + "-" +
@@ -355,11 +337,11 @@ std::string formatSearchResultCell(
     const std::string relative = searchRelativePath(entry->path, state.search.rootPath);
     const std::size_t fixedWidth = marker.size() + hiddenMarker.size() + suffix.size();
     if (fixedWidth >= width) {
-        return colorCellPart(trimToWidth(marker + relative, width), entryNameStyle(*entry), selected);
+        return colorCellPart(tundra_tui::fitText(marker + relative, width), entryNameStyle(*entry), selected);
     }
 
     const std::size_t nameWidth = width - fixedWidth;
-    const std::string name = fitText(relative, nameWidth);
+    const std::string name = tundra_tui::trimToWidth(relative, nameWidth);
     const std::size_t visibleWidth = marker.size() + hiddenMarker.size() + name.size() + suffix.size();
     std::string cell =
         colorCellPart(marker, selected ? kSelectedMarkStyle : kHintStyle, selected) +
@@ -390,9 +372,9 @@ std::string searchStatusLine(const ExplorerState& state) {
 }
 
 void renderSearch(const ExplorerState& state, const std::string& username, const std::string& usertype) {
-    const COORD size = consoleSize();
-    const std::size_t width = std::max<int>(size.X, 90);
-    const std::size_t height = std::max<int>(size.Y, 18);
+    const tundra_tui::Size size = consoleSize();
+    const std::size_t width = std::max<int>(size.width, 90);
+    const std::size_t height = std::max<int>(size.height, 18);
     const std::size_t rows = height > 10 ? height - 10 : 8;
     const std::size_t usableWidth = width - 3;
     const std::size_t resultWidth = std::max<std::size_t>(38, usableWidth * 58 / 100);
@@ -422,7 +404,7 @@ void renderSearch(const ExplorerState& state, const std::string& username, const
     const std::size_t queryWidth = width > modeText.size() + 16
         ? width - modeText.size() - 16
         : width;
-    const std::string queryText = fitText(
+    const std::string queryText = tundra_tui::trimToWidth(
         state.search.query.empty() ? "(empty)" : state.search.query,
         queryWidth
     );
@@ -481,16 +463,8 @@ void renderSearch(const ExplorerState& state, const std::string& username, const
 
 }
 
-COORD consoleSize() {
-    CONSOLE_SCREEN_BUFFER_INFO info{};
-    HANDLE output = GetStdHandle(STD_OUTPUT_HANDLE);
-    if (output != INVALID_HANDLE_VALUE && GetConsoleScreenBufferInfo(output, &info)) {
-        return {
-            static_cast<SHORT>(info.srWindow.Right - info.srWindow.Left + 1),
-            static_cast<SHORT>(info.srWindow.Bottom - info.srWindow.Top + 1)
-        };
-    }
-    return {120, 30};
+tundra_tui::Size consoleSize() {
+    return tundra_tui::terminalSize();
 }
 
 std::size_t detailVisibleRows(std::size_t height) {
@@ -511,9 +485,9 @@ void render(const ExplorerState& state, const std::string& username, const std::
         return;
     }
 
-    const COORD size = consoleSize();
-    const std::size_t width = std::max<int>(size.X, 90);
-    const std::size_t height = std::max<int>(size.Y, 18);
+    const tundra_tui::Size size = consoleSize();
+    const std::size_t width = std::max<int>(size.width, 90);
+    const std::size_t height = std::max<int>(size.height, 18);
     const std::size_t rows = height > 8 ? height - 8 : 10;
     const std::size_t usableWidth = width - 4;
     const std::size_t parentWidth = std::max<std::size_t>(18, usableWidth * 24 / 100);

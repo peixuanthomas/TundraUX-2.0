@@ -1,38 +1,91 @@
-//Attention Windows only code.
+#include "TundraTUI/color.hpp"
 
-#include "color.hpp"
-#include "console_screen.hpp"
-#include <iostream>
-#include <string>
-#include <unordered_map>
-#include <thread>
-#include <chrono>
-#include <random>
-#include <vector>
-#include <conio.h>
+#include "TundraTUI/screen.hpp"
+
 #include <algorithm>
+#include <chrono>
+#include <cctype>
+#include <iostream>
+#include <random>
+#include <string>
+#include <thread>
+#include <unordered_map>
+#include <vector>
 
-std::unordered_map<std::string, std::string> colorMap = {
-    {"red", "\033[1;38;5;203m"},      // Warning/error messages
-    {"green", "\033[1;38;5;119m"},    // Success messages
-    {"yellow", "\033[1;38;5;220m"},   // Prompts/instructions
-    {"blue", "\033[38;5;39m"},        // Informational messages
-    {"magenta", "\033[1;38;5;213m"},  // Highlights/alerts
-    {"cyan", "\033[1;38;5;51m"},      // Titles/headings
-    {"white", "\033[38;5;254m"},      // Regular text
-    {"grey", "\033[38;5;245m"},       //Tips and less important text
+#ifdef _WIN32
+#include <conio.h>
+#else
+#include <termios.h>
+#include <unistd.h>
+#endif
+
+namespace tundra_tui {
+namespace {
+
+const std::unordered_map<std::string, std::string> colorMap = {
+    {"red", "\033[1;38;5;203m"},
+    {"green", "\033[1;38;5;119m"},
+    {"yellow", "\033[1;38;5;220m"},
+    {"blue", "\033[38;5;39m"},
+    {"magenta", "\033[1;38;5;213m"},
+    {"cyan", "\033[1;38;5;51m"},
+    {"white", "\033[38;5;254m"},
+    {"grey", "\033[38;5;245m"},
     {"reset", "\033[0m"},
-    {"RED", "\033[1;38;5;203m"},      // Warning/error messages
-    {"GREEN", "\033[1;38;5;119m"},    // Success messages
-    {"YELLOW", "\033[1;38;5;220m"},   // Prompts/instructions
-    {"BLUE", "\033[38;5;39m"},        // Informational messages
-    {"MAGENTA", "\033[1;38;5;213m"},  // Highlights/alerts
-    {"CYAN", "\033[1;38;5;51m"},      // Titles/headings
-    {"WHITE", "\033[38;5;254m"},      // Regular text
-    {"GREY", "\033[38;5;245m"},       //Tips and less important text
+    {"RED", "\033[1;38;5;203m"},
+    {"GREEN", "\033[1;38;5;119m"},
+    {"YELLOW", "\033[1;38;5;220m"},
+    {"BLUE", "\033[38;5;39m"},
+    {"MAGENTA", "\033[1;38;5;213m"},
+    {"CYAN", "\033[1;38;5;51m"},
+    {"WHITE", "\033[38;5;254m"},
+    {"GREY", "\033[38;5;245m"},
     {"ERROR", "\033[1;38;5;203m"},
     {"RESET", "\033[0m"}
 };
+
+int readChar() {
+#ifdef _WIN32
+    return _getch();
+#else
+    return std::cin.get();
+#endif
+}
+
+#ifndef _WIN32
+class HiddenInputMode {
+public:
+    HiddenInputMode() {
+        active = tcgetattr(STDIN_FILENO, &original) == 0;
+        if (!active) {
+            return;
+        }
+
+        termios raw = original;
+        raw.c_lflag &= static_cast<unsigned int>(~(ECHO | ICANON | ISIG));
+        raw.c_cc[VMIN] = 1;
+        raw.c_cc[VTIME] = 0;
+        if (tcsetattr(STDIN_FILENO, TCSAFLUSH, &raw) != 0) {
+            active = false;
+        }
+    }
+
+    ~HiddenInputMode() {
+        if (active) {
+            tcsetattr(STDIN_FILENO, TCSAFLUSH, &original);
+        }
+    }
+
+    HiddenInputMode(const HiddenInputMode&) = delete;
+    HiddenInputMode& operator=(const HiddenInputMode&) = delete;
+
+private:
+    termios original{};
+    bool active = false;
+};
+#endif
+
+}
 
 void colorcout(const std::string& color, const std::string& str) {
     if (color.empty()) {
@@ -91,8 +144,6 @@ std::vector<std::string> getDisplayTestColorNames() {
 }
 
 void rollcout(const std::string& color, const std::string& str) {
-    using namespace std;
-    // Check if string contains non-ASCII characters
     bool hasNonAscii = false;
     for (char c : str) {
         if (static_cast<unsigned char>(c) > 127) {
@@ -100,63 +151,68 @@ void rollcout(const std::string& color, const std::string& str) {
             break;
         }
     }
-    // If contains non-ASCII (non-English) characters, output directly
     if (hasNonAscii) {
         colorcout(color, str + "\n");
         return;
     }
-    // ANSI color map
-    const string resetSeq = "\033[0m";
-    string colorSeq;
+
+    const std::string resetSeq = "\033[0m";
+    std::string colorSeq;
     bool useColor = false;
     auto it = colorMap.find(color);
     if (it != colorMap.end()) {
         colorSeq = it->second;
         useColor = true;
     }
-    // Hide cursor
-    cout << "\x1b[?25l" << flush;
-    // Printable characters: ASCII 32 ~ 126
+
+    std::cout << "\x1b[?25l" << std::flush;
+
     auto isPrintable = [](unsigned char ch) {
         return ch >= 32 && ch <= 126;
     };
-    string printable;
+
+    std::string printable;
     for (int c = 32; c <= 126; ++c) {
         printable.push_back(static_cast<char>(c));
     }
-    // Random engine (seeded with time + thread id for better randomness in multi-thread)
-    static mt19937 rng(chrono::steady_clock::now().time_since_epoch().count() ^
-                       hash<thread::id>{}(this_thread::get_id()));
-    uniform_int_distribution<size_t> dist(0, printable.size() - 1);
-    // Current displayed string: each char starts from a random printable char
-    string curr(str.size(), ' ');
-    vector<bool> done(str.size(), false);
+
+    static std::mt19937 rng(
+        static_cast<unsigned int>(std::chrono::steady_clock::now().time_since_epoch().count()) ^
+        static_cast<unsigned int>(std::hash<std::thread::id>{}(std::this_thread::get_id()))
+    );
+    std::uniform_int_distribution<size_t> dist(0, printable.size() - 1);
+
+    std::string curr(str.size(), ' ');
+    std::vector<bool> done(str.size(), false);
     for (size_t i = 0; i < str.size(); ++i) {
         if (!isPrintable(static_cast<unsigned char>(str[i]))) {
-            done[i] = true;           // non-printable, mark as done
-            curr[i] = ' ';            // placeholder space to avoid outputting newlines etc.
+            done[i] = true;
+            curr[i] = ' ';
             continue;
         }
         curr[i] = printable[dist(rng)];
     }
-    // Helper: get next printable char (cyclic)
+
     auto nextPrintable = [&](char ch) -> char {
         auto pos = printable.find(ch);
-        if (pos == string::npos) return printable[0];
+        if (pos == std::string::npos) {
+            return printable[0];
+        }
         return printable[(pos + 1) % printable.size()];
     };
-    // First frame: print random initial state immediately
+
     if (useColor) {
-        cout << colorSeq << curr << resetSeq << '\r' << flush;
+        std::cout << colorSeq << curr << resetSeq << '\r' << std::flush;
     } else {
-        cout << curr << '\r' << flush;
+        std::cout << curr << '\r' << std::flush;
     }
-    // Rolling loop
+
     while (true) {
         bool allDone = true;
         for (size_t i = 0; i < str.size(); ++i) {
-            if (done[i]) continue;
-            // If not printable, mark done and set to space
+            if (done[i]) {
+                continue;
+            }
             if (!isPrintable(static_cast<unsigned char>(str[i]))) {
                 done[i] = true;
                 curr[i] = ' ';
@@ -169,39 +225,39 @@ void rollcout(const std::string& color, const std::string& str) {
                 done[i] = true;
             }
         }
-        this_thread::sleep_for(chrono::milliseconds(20));
+        std::this_thread::sleep_for(std::chrono::milliseconds(20));
         if (useColor) {
-            cout << colorSeq << curr << resetSeq << '\r' << flush;
+            std::cout << colorSeq << curr << resetSeq << '\r' << std::flush;
         } else {
-            cout << curr << '\r' << flush;
+            std::cout << curr << '\r' << std::flush;
         }
-        if (allDone) break;
+        if (allDone) {
+            break;
+        }
     }
-    // Final output with newline
+
     if (useColor) {
-        cout << colorSeq << str << resetSeq << endl;
+        std::cout << colorSeq << str << resetSeq << std::endl;
     } else {
-        cout << str << endl;
+        std::cout << str << std::endl;
     }
-    // Show cursor again
-    cout << "\x1b[?25h" << flush;
+    std::cout << "\x1b[?25h" << std::flush;
 }
 
 bool getYN(const std::string& prompt) {
-    using namespace std;
     while (true) {
         colorcout("yellow", prompt + " (y/n): ");
-        char ch = _getch();
-        cout << ch << endl;  // Echo the input character and newline
+        const int ch = readChar();
+        std::cout << static_cast<char>(ch) << std::endl;
         if (ch == 'y' || ch == 'Y') {
             std::cout << std::endl;
             return true;
-        } else if (ch == 'n' || ch == 'N') {
+        }
+        if (ch == 'n' || ch == 'N') {
             std::cout << std::endl;
             return false;
-        } else {
-            colorcout("red", "Invalid input. Please press 'y' or 'n'.\n");
         }
+        colorcout("red", "Invalid input. Please press 'y' or 'n'.\n");
     }
 }
 
@@ -213,8 +269,12 @@ void set_title(const std::string& console_title) {
     std::cout << "\033]0;" << console_title << "\007";
 }
 
-void Sleep(int milsec) {
-    std::this_thread::sleep_for(std::chrono::milliseconds(milsec));
+void sleepFor(int milliseconds) {
+    std::this_thread::sleep_for(std::chrono::milliseconds(milliseconds));
+}
+
+void Sleep(int milliseconds) {
+    sleepFor(milliseconds);
 }
 
 void pause() {
@@ -226,13 +286,16 @@ std::string getHiddenInput(const std::string& prompt, char symbol) {
     std::string input;
     const bool showSymbol = (symbol != '\0');
     colorcout("white", prompt);
+#ifndef _WIN32
+    HiddenInputMode hiddenInputMode;
+#endif
     while (true) {
-        int ch = _getch();
+        const int ch = readChar();
         if (ch == '\r' || ch == '\n') {
             std::cout << std::endl;
             break;
         }
-        if (ch == 8) { // backspace
+        if (ch == 8 || ch == 127) {
             if (!input.empty()) {
                 input.pop_back();
                 if (showSymbol) {
@@ -241,7 +304,7 @@ std::string getHiddenInput(const std::string& prompt, char symbol) {
             }
             continue;
         }
-        if (ch == 3) { // Ctrl+C
+        if (ch == 3) {
             std::cout << std::endl;
             input.clear();
             break;
@@ -254,7 +317,7 @@ std::string getHiddenInput(const std::string& prompt, char symbol) {
     return input;
 }
 
-void print_icon(){
+void print_icon() {
     colorcout("cyan", R"(
      _______              _           _    ___   _____
     |__   __|            | |         | |  | \ \ / /__ \
@@ -262,141 +325,113 @@ void print_icon(){
        | | | | | '_ \ / _` | '__/ _` | |  | | > <   / /
        | | |_| | | | | (_| | | | (_| | |__| |/ . \ / /_
        |_|\__,_|_| |_|\__,_|_|  \__,_|\____//_/ \_\____|
-                                                        
+
 )");
-    for(int i=0; i<=60; i++) colorcout("cyan","=");
+    for (int i = 0; i <= 60; i++) {
+        colorcout("cyan", "=");
+    }
     std::cout << std::endl;
 }
 
-//How to use this function:
-
-//Add thses lines before calling the function:
-//std::vector<std::string> commandHistory;
-//int historyIndex = -1;
-//const int MAX_HISTORY = 100;
-
-//Add thses in the main loop where you want to read input with history:
-/*
-    std::string line = readLineWithHistory(commandHistory, historyIndex);
-    if (line.empty()) continue;
-    if (commandHistory.empty() || commandHistory.back() != line) {
-        if (static_cast<int>(commandHistory.size()) >= MAX_HISTORY) {
-            commandHistory.erase(commandHistory.begin());
-        }
-        commandHistory.push_back(line);
-    }
-    historyIndex = -1;
-*/
 std::string readLineWithHistory(std::vector<std::string>& history, int& historyIndex) {
     std::string current;
-    std::string saved;  // Saves current input when navigating history
-    int cursorPos = 0;  // Track cursor position
+    std::string saved;
+    int cursorPos = 0;
 
     while (true) {
-        int ch = _getch();
+        const int ch = readChar();
         if (ch == '\r' || ch == '\n') {
-            // Enter: submit command
             std::cout << std::endl;
             return current;
-        } 
-        else if (ch == 8) {
-            // Backspace
+        }
+        if (ch == 8 || ch == 127) {
             if (cursorPos > 0) {
                 current.erase(cursorPos - 1, 1);
                 cursorPos--;
-                std::cout << "\b"; // Move back
-                // Re-print the rest of the line
+                std::cout << "\b";
                 for (size_t i = cursorPos; i < current.length(); ++i) {
                     std::cout << current[i];
                 }
-                std::cout << " "; // Erase last char
-                // Move cursor back to correct position
+                std::cout << " ";
                 for (size_t i = cursorPos; i < current.length() + 1; ++i) {
                     std::cout << "\b";
                 }
             }
         }
+#ifdef _WIN32
         else if (ch == 0 || ch == 224) {
-            // Extended key (arrow keys, etc.)
-            int ext = _getch();
-            
+            const int ext = readChar();
             if (ext == 72) {
-                // Up arrow: go to previous command in history
                 if (!history.empty()) {
-                    // Save current input when first pressing up
                     if (historyIndex == -1) {
                         saved = current;
                         historyIndex = static_cast<int>(history.size()) - 1;
                     } else if (historyIndex > 0) {
                         historyIndex--;
-                    }       
-                    
-                    // Move cursor to start
+                    }
+
                     while (cursorPos > 0) {
                         std::cout << "\b";
                         cursorPos--;
                     }
-                    // Clear line
-                    for (size_t i = 0; i < current.length(); ++i) std::cout << " ";
-                    for (size_t i = 0; i < current.length(); ++i) std::cout << "\b";
+                    for (size_t i = 0; i < current.length(); ++i) {
+                        std::cout << " ";
+                    }
+                    for (size_t i = 0; i < current.length(); ++i) {
+                        std::cout << "\b";
+                    }
 
-                    // Display history entry
                     current = history[historyIndex];
                     std::cout << current;
                     cursorPos = static_cast<int>(current.length());
                 }
-            }
-            else if (ext == 80) {
-                // Down arrow: go to next command in history
+            } else if (ext == 80) {
                 if (historyIndex != -1) {
-                    // Move cursor to start
                     while (cursorPos > 0) {
                         std::cout << "\b";
                         cursorPos--;
                     }
-                    // Clear line
-                    for (size_t i = 0; i < current.length(); ++i) std::cout << " ";
-                    for (size_t i = 0; i < current.length(); ++i) std::cout << "\b";
+                    for (size_t i = 0; i < current.length(); ++i) {
+                        std::cout << " ";
+                    }
+                    for (size_t i = 0; i < current.length(); ++i) {
+                        std::cout << "\b";
+                    }
 
                     if (historyIndex < static_cast<int>(history.size()) - 1) {
                         historyIndex++;
                         current = history[historyIndex];
                     } else {
-                        // Reached end of history, restore saved input
                         historyIndex = -1;
                         current = saved;
                     }
                     std::cout << current;
                     cursorPos = static_cast<int>(current.length());
                 }
-            }
-            else if (ext == 75) {
-                // Left arrow
+            } else if (ext == 75) {
                 if (cursorPos > 0) {
                     std::cout << "\b";
                     cursorPos--;
                 }
-            }
-            else if (ext == 77) {
-                // Right arrow
+            } else if (ext == 77) {
                 if (cursorPos < static_cast<int>(current.length())) {
                     std::cout << current[cursorPos];
                     cursorPos++;
                 }
             }
         }
-        else if (isprint(ch)) {
-            // Printable character
+#endif
+        else if (std::isprint(static_cast<unsigned char>(ch))) {
             current.insert(cursorPos, 1, static_cast<char>(ch));
-            // Print the rest of the line
             for (size_t i = cursorPos; i < current.length(); ++i) {
                 std::cout << current[i];
             }
             cursorPos++;
-            // Move cursor back to correct position
             for (size_t i = cursorPos; i < current.length(); ++i) {
                 std::cout << "\b";
             }
         }
     }
+}
+
 }

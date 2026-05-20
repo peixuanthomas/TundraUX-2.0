@@ -1,5 +1,7 @@
 #pragma once
 
+#include "TundraTUI/input.hpp"
+
 #include <cstdint>
 #include <filesystem>
 #include <string>
@@ -7,6 +9,9 @@
 
 namespace tundraux::explorer {
 namespace fs = std::filesystem;
+
+using tundra_tui::Key;
+using tundra_tui::KeyPress;
 
 struct FileEntry {
     std::string name;
@@ -77,26 +82,6 @@ struct ExplorerState {
     std::string username;
     std::string usertype;
     std::string message = "Ready";
-};
-
-enum class Key {
-    Unknown,
-    Character,
-    Enter,
-    Escape,
-    Backspace,
-    Up,
-    Down,
-    Left,
-    Right,
-    Home,
-    End,
-    Tab
-};
-
-struct KeyPress {
-    Key key = Key::Unknown;
-    char character = '\0';
 };
 
 }

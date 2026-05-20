@@ -26,9 +26,9 @@ void open(const std::string& username, const std::string& usertype) {
 
     bool running = true;
     while (running) {
-        const COORD size = consoleSize();
-        const std::size_t rows = std::max<int>(size.Y, 18) > 8
-            ? static_cast<std::size_t>(std::max<int>(size.Y, 18) - 8)
+        const tundra_tui::Size size = consoleSize();
+        const std::size_t rows = std::max<int>(size.height, 18) > 8
+            ? static_cast<std::size_t>(std::max<int>(size.height, 18) - 8)
             : 10;
         keepCursorVisible(state, rows);
         render(state, username, usertype);

@@ -7,37 +7,24 @@
 #include <string>
 #include <vector>
 
-#include <conio.h>
-#include <windows.h>
-
-#include "color.hpp"
-#include "console_screen.hpp"
-#include "explorer_style.hpp"
+#include "TundraTUI/color.hpp"
+#include "TundraTUI/input.hpp"
+#include "TundraTUI/render_engine.hpp"
+#include "TundraTUI/screen.hpp"
+#include "TundraTUI/style.hpp"
+#include "TundraTUI/text.hpp"
 
 namespace {
 
-namespace tui = tundraux::explorer;
+namespace tui = tundra_tui;
 
-enum class Key {
-    Unknown,
-    Character,
-    Enter,
-    Escape,
-    Backspace,
-    Delete,
-    Tab,
-    Up,
-    Down,
-    Home,
-    End,
-    F1,
-    F2
-};
-
-struct KeyPress {
-    Key key = Key::Unknown;
-    char character = '\0';
-};
+using tundra_tui::ConsoleScreenGuard;
+using tundra_tui::colorcout;
+using tundra_tui::fitText;
+using tundra_tui::Key;
+using tundra_tui::KeyPress;
+using tundra_tui::readKey;
+using tundra_tui::set_title;
 
 struct PasswordStatus {
     bool hasMinLength = false;
@@ -73,27 +60,6 @@ std::string trimCopy(std::string value) {
     return value.substr(first, last - first + 1);
 }
 
-std::string trimToWidth(const std::string& text, std::size_t width) {
-    if (text.size() <= width) {
-        return text;
-    }
-    if (width == 0) {
-        return "";
-    }
-    if (width <= 3) {
-        return text.substr(0, width);
-    }
-    return text.substr(0, width - 3) + "...";
-}
-
-std::string fitText(const std::string& text, std::size_t width) {
-    std::string fitted = trimToWidth(text, width);
-    if (fitted.size() < width) {
-        fitted += std::string(width - fitted.size(), ' ');
-    }
-    return fitted;
-}
-
 std::string maskText(const std::string& value) {
     if (value.empty()) {
         return "(empty)";
@@ -107,22 +73,6 @@ std::string passwordSummary(const std::string& value, bool showPassword) {
     }
     const std::string display = showPassword ? value : std::string(value.size(), '*');
     return display + " (" + std::to_string(value.size()) + " chars)";
-}
-
-COORD consoleSize() {
-    CONSOLE_SCREEN_BUFFER_INFO info{};
-    HANDLE output = GetStdHandle(STD_OUTPUT_HANDLE);
-    if (output != INVALID_HANDLE_VALUE && GetConsoleScreenBufferInfo(output, &info)) {
-        return {
-            static_cast<SHORT>(info.srWindow.Right - info.srWindow.Left + 1),
-            static_cast<SHORT>(info.srWindow.Bottom - info.srWindow.Top + 1)
-        };
-    }
-    return {120, 30};
-}
-
-std::string border(std::size_t leftWidth, std::size_t rightWidth) {
-    return "+" + std::string(leftWidth, '-') + "+" + std::string(rightWidth, '-') + "+";
 }
 
 std::string headerCell(const std::string& text, std::size_t width) {
@@ -348,9 +298,9 @@ void renderHelp() {
 }
 
 void renderSettings(const AccountSettingsState& state) {
-    const COORD size = consoleSize();
-    const std::size_t width = std::max<int>(size.X, 92);
-    const std::size_t height = std::max<int>(size.Y, 20);
+    const tui::Size size = tui::terminalSize();
+    const std::size_t width = std::max<int>(size.width, 92);
+    const std::size_t height = std::max<int>(size.height, 20);
     const std::size_t rows = height > 8 ? height - 8 : 12;
     const std::size_t usableWidth = width > 3 ? width - 3 : width;
     const std::size_t formWidth = std::max<std::size_t>(38, usableWidth * 45 / 100);
@@ -363,14 +313,14 @@ void renderSettings(const AccountSettingsState& state) {
               << tui::colorText(state.original.name, tui::kPathStyle)
               << "\n";
     std::cout << tui::colorText("user_data.dat", tui::kPathStyle) << "\n";
-    std::cout << tui::colorText(border(formWidth, detailsWidth), tui::kBorderStyle) << "\n";
+    std::cout << tui::colorText(tui::splitBorder(formWidth, detailsWidth), tui::kBorderStyle) << "\n";
     std::cout << tui::colorText("|", tui::kBorderStyle)
               << headerCell("Settings Form", formWidth)
               << tui::colorText("|", tui::kBorderStyle)
               << headerCell("Details", detailsWidth)
               << tui::colorText("|", tui::kBorderStyle)
               << "\n";
-    std::cout << tui::colorText(border(formWidth, detailsWidth), tui::kBorderStyle) << "\n";
+    std::cout << tui::colorText(tui::splitBorder(formWidth, detailsWidth), tui::kBorderStyle) << "\n";
 
     for (std::size_t rowIndex = 0; rowIndex < rows; ++rowIndex) {
         std::string formText = std::string(formWidth, ' ');
@@ -394,7 +344,7 @@ void renderSettings(const AccountSettingsState& state) {
                   << "\n";
     }
 
-    std::cout << tui::colorText(border(formWidth, detailsWidth), tui::kBorderStyle) << "\n";
+    std::cout << tui::colorText(tui::splitBorder(formWidth, detailsWidth), tui::kBorderStyle) << "\n";
     std::cout << tui::colorText("Up/Down", tui::kKeyStyle)
               << tui::colorText(" field | ", tui::kHintStyle)
               << tui::colorText("Tab", tui::kKeyStyle)
@@ -411,35 +361,6 @@ void renderSettings(const AccountSettingsState& state) {
     std::cout << tui::colorText("Status: ", tui::kSectionStyle)
               << tui::colorText(state.message, statusStyle(state.message))
               << std::flush;
-}
-
-KeyPress readKey() {
-    const int ch = _getch();
-    if (ch == 0 || ch == 224) {
-        const int ext = _getch();
-        switch (ext) {
-            case 72: return {Key::Up, '\0'};
-            case 80: return {Key::Down, '\0'};
-            case 71: return {Key::Home, '\0'};
-            case 79: return {Key::End, '\0'};
-            case 83: return {Key::Delete, '\0'};
-            case 59: return {Key::F1, '\0'};
-            case 60: return {Key::F2, '\0'};
-            default: return {Key::Unknown, '\0'};
-        }
-    }
-
-    switch (ch) {
-        case 13: return {Key::Enter, '\0'};
-        case 27: return {Key::Escape, '\0'};
-        case 8: return {Key::Backspace, '\0'};
-        case 9: return {Key::Tab, '\0'};
-        default:
-            if (std::isprint(static_cast<unsigned char>(ch))) {
-                return {Key::Character, static_cast<char>(ch)};
-            }
-            return {Key::Unknown, '\0'};
-    }
 }
 
 std::string& activeField(AccountSettingsState& state) {

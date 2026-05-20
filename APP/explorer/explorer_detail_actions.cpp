@@ -21,8 +21,8 @@ void beginShowDetails(ExplorerState& state) {
 }
 
 std::size_t maxDetailScroll(const ExplorerState& state) {
-    const COORD size = consoleSize();
-    const std::size_t height = std::max<int>(size.Y, 18);
+    const tundra_tui::Size size = consoleSize();
+    const std::size_t height = std::max<int>(size.height, 18);
     const std::size_t rows = detailVisibleRows(height);
     return state.detailLines.size() > rows ? state.detailLines.size() - rows : 0;
 }

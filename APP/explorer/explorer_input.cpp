@@ -3,38 +3,12 @@
 #include "explorer_actions.hpp"
 #include "explorer_directory.hpp"
 
-#include <cctype>
-#include <conio.h>
 #include <string>
 
 namespace tundraux::explorer {
 
 KeyPress readKey() {
-    const int ch = _getch();
-    if (ch == 0 || ch == 224) {
-        const int ext = _getch();
-        switch (ext) {
-            case 72: return {Key::Up, '\0'};
-            case 80: return {Key::Down, '\0'};
-            case 75: return {Key::Left, '\0'};
-            case 77: return {Key::Right, '\0'};
-            case 71: return {Key::Home, '\0'};
-            case 79: return {Key::End, '\0'};
-            default: return {Key::Unknown, '\0'};
-        }
-    }
-
-    switch (ch) {
-        case 13: return {Key::Enter, '\0'};
-        case 27: return {Key::Escape, '\0'};
-        case 8: return {Key::Backspace, '\0'};
-        case 9: return {Key::Tab, '\0'};
-        default:
-            if (std::isprint(ch)) {
-                return {Key::Character, static_cast<char>(ch)};
-            }
-            return {Key::Unknown, '\0'};
-    }
+    return tundra_tui::readKey();
 }
 
 bool handleDetailsKey(ExplorerState& state, const KeyPress& key) {

@@ -11,6 +11,9 @@ endif()
 
 option(TUNDRAUX_DEBUG_STARTUP "Start TundraUX2 in debug mode without logging in." ON)
 
+set(TUNDRATUI_BUILD_EXAMPLES ON CACHE BOOL "Build TundraTUI example programs.")
+add_subdirectory(TundraTUI)
+
 add_executable(${PROJECT_NAME})
 
 set(TUNDRAUX_CORE_SOURCES
@@ -50,8 +53,6 @@ set(TUNDRAUX_USER_SOURCES
 )
 
 set(TUNDRAUX_SYSTEM_SOURCES
-    SYSTEM/console/color.cpp
-    SYSTEM/console/console_screen.cpp
     SYSTEM/crypto/crypto.cpp
     SYSTEM/debug/debug.cpp
 )
@@ -77,6 +78,11 @@ target_include_directories(${PROJECT_NAME}
         ${PROJECT_SOURCE_DIR}/SYSTEM/console
         ${PROJECT_SOURCE_DIR}/SYSTEM/crypto
         ${PROJECT_SOURCE_DIR}/SYSTEM/debug
+)
+
+target_link_libraries(${PROJECT_NAME}
+    PRIVATE
+        TundraTUI::TundraTUI
 )
 
 target_compile_features(${PROJECT_NAME}

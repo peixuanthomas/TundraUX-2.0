@@ -1,4 +1,4 @@
-#include "console_screen.hpp"
+#include "TundraTUI/screen.hpp"
 
 #include <iostream>
 
@@ -7,6 +7,7 @@
 #include <vector>
 #endif
 
+namespace tundra_tui {
 namespace {
 int activeScreenGuardDepth = 0;
 }
@@ -144,4 +145,6 @@ void clearConsoleScreen() {
 
     std::cout << "\x1b[2J\x1b[H";
     std::cout.flush();
+}
+
 }

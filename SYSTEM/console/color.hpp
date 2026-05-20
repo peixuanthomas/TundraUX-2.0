@@ -1,17 +1,16 @@
 #pragma once
 
-#include <string>
-#include <vector>
+#include "TundraTUI/color.hpp"
 
-void colorcout(const std::string& color, const std::string& message);
-bool hasConsoleColor(const std::string& color);
-std::vector<std::string> getDisplayTestColorNames();
-void rollcout(const std::string& color, const std::string& str);
-bool getYN(const std::string& prompt);
-void clear_screen();
-void set_title(const std::string& console_title);
-void Sleep(int milsec);
-void pause();
-std::string getHiddenInput(const std::string& prompt, char symbol);
-void print_icon();
-std::string readLineWithHistory(std::vector<std::string> &history, int &historyIndex);
+using tundra_tui::clear_screen;
+using tundra_tui::colorcout;
+using tundra_tui::getDisplayTestColorNames;
+using tundra_tui::getHiddenInput;
+using tundra_tui::getYN;
+using tundra_tui::hasConsoleColor;
+using tundra_tui::pause;
+using tundra_tui::print_icon;
+using tundra_tui::readLineWithHistory;
+using tundra_tui::rollcout;
+using tundra_tui::set_title;
+using tundra_tui::Sleep;
