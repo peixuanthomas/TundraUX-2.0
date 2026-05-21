@@ -307,7 +307,7 @@ std::string getHiddenInput(const std::string& prompt, char symbol) {
             }
             continue;
         }
-        if (ch == 3) {
+        if (ch == 27 || ch == 3) {
             emitKeyAudit({Key::Escape, '\0'}, true);
             std::cout << std::endl;
             input.clear();
@@ -449,6 +449,8 @@ std::string readLineWithHistory(std::vector<std::string>& history, int& historyI
             for (size_t i = cursorPos; i < current.length(); ++i) {
                 std::cout << "\b";
             }
+        } else {
+            emitKeyAudit({Key::Unknown, '\0'}, false);
         }
     }
 }
