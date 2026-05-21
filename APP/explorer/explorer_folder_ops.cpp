@@ -1,5 +1,6 @@
 #include "explorer_folder_ops.hpp"
 
+#include "audit_log.hpp"
 #include "explorer_directory.hpp"
 #include "explorer_navigation.hpp"
 #include "explorer_style.hpp"
@@ -10,6 +11,13 @@
 #include <system_error>
 
 namespace tundraux::explorer {
+namespace {
+
+void setAuditUser(const ExplorerState& state) {
+    tundraux::audit::setCurrentUser(USER{state.usertype, state.username, "", "", 0});
+}
+
+}
 
 void beginCreateFolder(ExplorerState& state) {
     state.creatingFolder = true;
@@ -21,24 +29,44 @@ void createFolderFromInput(ExplorerState& state) {
     const std::string folderName = trimCopy(state.newFolderName);
     if (!isValidFolderName(folderName)) {
         state.message = redMessage("Invalid folder name.");
+        setAuditUser(state);
+        tundraux::audit::logEvent(
+            "explorer",
+            "mkdir denied name=" + folderName + " reason=invalid folder name"
+        );
         return;
     }
 
     const fs::path target = state.currentPath / fs::u8path(folderName);
     if (!isPathInsideRoot(target, state.rootPath)) {
         state.message = redMessage("Cannot create outside explorer root.");
+        setAuditUser(state);
+        tundraux::audit::logEvent(
+            "explorer",
+            "mkdir denied path=" + pathToDisplayString(target) + " reason=outside root"
+        );
         return;
     }
 
     std::error_code error;
     if (fs::exists(target, error)) {
         state.message = redMessage("Folder already exists: " + folderName);
+        setAuditUser(state);
+        tundraux::audit::logEvent(
+            "explorer",
+            "mkdir failure path=" + pathToDisplayString(target) + " reason=already exists"
+        );
         return;
     }
 
     fs::create_directory(target, error);
     if (error) {
         state.message = redMessage("Create folder failed: " + error.message());
+        setAuditUser(state);
+        tundraux::audit::logEvent(
+            "explorer",
+            "mkdir failure path=" + pathToDisplayString(target) + " reason=" + error.message()
+        );
         return;
     }
 
@@ -47,6 +75,8 @@ void createFolderFromInput(ExplorerState& state) {
     refresh(state);
     selectPath(state, target);
     state.message = "Created folder " + folderName;
+    setAuditUser(state);
+    tundraux::audit::logEvent("explorer", "mkdir success path=" + pathToDisplayString(target));
 }
 
 void handleCreateFolderInput(ExplorerState& state, const KeyPress& key) {

@@ -1,5 +1,7 @@
 #include "account_settings.hpp"
 
+#include "audit_log.hpp"
+
 #include <algorithm>
 #include <cctype>
 #include <fstream>
@@ -373,9 +375,14 @@ std::string& activeField(AccountSettingsState& state) {
 }
 
 bool saveSettings(AccountSettingsState& state, USER& currentUser) {
+    tundraux::audit::setCurrentUser(USER{currentUser.type, currentUser.name, "", "", 0});
     const std::string validationError = validateSettings(state);
     if (!validationError.empty()) {
         state.message = validationError;
+        tundraux::audit::logEvent(
+            "manage",
+            "account settings update failure user=" + currentUser.name + " reason=" + validationError
+        );
         return false;
     }
 
@@ -388,6 +395,10 @@ bool saveSettings(AccountSettingsState& state, USER& currentUser) {
     DataManager dataManager("user_data.dat");
     if (!dataManager.UpdateUser(state.original.name, updated)) {
         state.message = "Failed to update user info.";
+        tundraux::audit::logEvent(
+            "manage",
+            "account settings update failure user=" + currentUser.name + " reason=update user_data.dat failed"
+        );
         return false;
     }
 
@@ -398,6 +409,8 @@ bool saveSettings(AccountSettingsState& state, USER& currentUser) {
     state.passwordHint = updated.password_hint;
     state.saved = true;
     state.message = "Settings saved. Press Enter or Esc to return.";
+    tundraux::audit::setCurrentUser(USER{updated.type, updated.name, "", "", 0});
+    tundraux::audit::logEvent("manage", "account settings update success user=" + updated.name);
     return true;
 }
 

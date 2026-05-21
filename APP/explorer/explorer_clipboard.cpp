@@ -1,5 +1,6 @@
 #include "explorer_clipboard.hpp"
 
+#include "audit_log.hpp"
 #include "explorer_directory.hpp"
 #include "explorer_navigation.hpp"
 #include "explorer_permissions.hpp"
@@ -11,6 +12,10 @@
 
 namespace tundraux::explorer {
 namespace {
+
+void setAuditUser(const ExplorerState& state) {
+    tundraux::audit::setCurrentUser(USER{state.usertype, state.username, "", "", 0});
+}
 
 bool copyClipboardItem(const ClipboardState& clipboard, const fs::path& target, std::error_code& error) {
     if (clipboard.isDirectory) {
@@ -54,12 +59,21 @@ void markClipboard(ExplorerState& state, ClipboardMode mode) {
     const FileEntry* entry = selectedEntry(state);
     if (entry == nullptr) {
         state.message = "Nothing selected";
+        setAuditUser(state);
+        tundraux::audit::logEvent("explorer", "clipboard source failure mode=none reason=nothing selected");
         return;
     }
 
     const std::string permissionError = deletePermissionError(state, *entry);
     if (!permissionError.empty()) {
         state.message = redMessage(permissionError);
+        setAuditUser(state);
+        tundraux::audit::logEvent(
+            "explorer",
+            "clipboard source denied mode=" +
+                std::string(mode == ClipboardMode::Copy ? "copy" : "cut") +
+                " path=" + pathToDisplayString(entry->path) + " reason=" + permissionError
+        );
         return;
     }
 
@@ -67,6 +81,13 @@ void markClipboard(ExplorerState& state, ClipboardMode mode) {
     state.clipboard.path = entry->path;
     state.clipboard.name = entry->name;
     state.clipboard.isDirectory = entry->isDirectory;
+    setAuditUser(state);
+    tundraux::audit::logEvent(
+        "explorer",
+        "clipboard source success mode=" +
+            std::string(mode == ClipboardMode::Copy ? "copy" : "cut") +
+            " path=" + pathToDisplayString(entry->path)
+    );
     state.message = mode == ClipboardMode::Copy
         ? "Copied " + entry->name
         : "Cut " + entry->name;
@@ -75,12 +96,21 @@ void markClipboard(ExplorerState& state, ClipboardMode mode) {
 void pasteClipboard(ExplorerState& state) {
     if (state.clipboard.mode == ClipboardMode::None) {
         state.message = "Clipboard is empty";
+        setAuditUser(state);
+        tundraux::audit::logEvent("explorer", "paste failure reason=clipboard empty");
         return;
     }
 
+    const std::string sourcePath = pathToDisplayString(state.clipboard.path);
+    const std::string mode = state.clipboard.mode == ClipboardMode::Copy ? "copy" : "cut";
     std::error_code error;
     if (!fs::exists(state.clipboard.path, error)) {
         state.message = redMessage("Clipboard source no longer exists.");
+        setAuditUser(state);
+        tundraux::audit::logEvent(
+            "explorer",
+            "paste failure mode=" + mode + " source=" + sourcePath + " reason=source missing"
+        );
         state.clipboard = {};
         return;
     }
@@ -91,11 +121,21 @@ void pasteClipboard(ExplorerState& state) {
     sourceEntry.isDirectory = fs::is_directory(state.clipboard.path, error);
     if (error) {
         state.message = redMessage("Clipboard source check failed: " + error.message());
+        setAuditUser(state);
+        tundraux::audit::logEvent(
+            "explorer",
+            "paste failure mode=" + mode + " source=" + sourcePath + " reason=" + error.message()
+        );
         return;
     }
     const std::string permissionError = deletePermissionError(state, sourceEntry);
     if (!permissionError.empty()) {
         state.message = redMessage(permissionError);
+        setAuditUser(state);
+        tundraux::audit::logEvent(
+            "explorer",
+            "paste denied mode=" + mode + " source=" + sourcePath + " reason=" + permissionError
+        );
         return;
     }
 
@@ -104,17 +144,35 @@ void pasteClipboard(ExplorerState& state) {
         state.clipboard = {};
         refresh(state);
         state.message = "Cut cancelled: item is already here";
+        setAuditUser(state);
+        tundraux::audit::logEvent(
+            "explorer",
+            "paste denied mode=" + mode + " source=" + sourcePath +
+                " destination=" + pathToDisplayString(requestedTarget) + " reason=already in destination"
+        );
         return;
     }
 
     fs::path target = uniquePasteTarget(requestedTarget);
     if (!isPathInsideRoot(target, state.rootPath)) {
         state.message = redMessage("Cannot paste outside explorer root.");
+        setAuditUser(state);
+        tundraux::audit::logEvent(
+            "explorer",
+            "paste denied mode=" + mode + " source=" + sourcePath +
+                " destination=" + pathToDisplayString(target) + " reason=outside root"
+        );
         return;
     }
 
     if (state.clipboard.isDirectory && isPathInsideRoot(target, state.clipboard.path)) {
         state.message = redMessage("Cannot paste a directory into itself.");
+        setAuditUser(state);
+        tundraux::audit::logEvent(
+            "explorer",
+            "paste denied mode=" + mode + " source=" + sourcePath +
+                " destination=" + pathToDisplayString(target) + " reason=directory into itself"
+        );
         return;
     }
 
@@ -136,6 +194,12 @@ void pasteClipboard(ExplorerState& state) {
 
     if (error) {
         state.message = redMessage("Paste failed: " + error.message());
+        setAuditUser(state);
+        tundraux::audit::logEvent(
+            "explorer",
+            "paste failure mode=" + mode + " source=" + sourcePath +
+                " destination=" + pathToDisplayString(target) + " reason=" + error.message()
+        );
         return;
     }
 
@@ -144,6 +208,12 @@ void pasteClipboard(ExplorerState& state) {
     refresh(state);
     selectPath(state, target);
     state.message = "Pasted " + pastedName;
+    setAuditUser(state);
+    tundraux::audit::logEvent(
+        "explorer",
+        "paste success mode=" + mode + " source=" + sourcePath +
+            " destination=" + pathToDisplayString(target)
+    );
 }
 
 }

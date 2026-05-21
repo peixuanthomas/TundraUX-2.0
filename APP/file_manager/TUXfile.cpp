@@ -1,5 +1,6 @@
 //Attention: windows only code.
 #include "TUXfile.hpp"
+#include "audit_log.hpp"
 #include <fstream>
 #include <stdexcept>
 #include <string>
@@ -76,6 +77,39 @@ USER currentUser;
 static bool g_lastTuxReadOk = true;
 const size_t MAX_TUX_STRING_LEN  = 1024;
 const size_t MAX_TUX_CONTENT_LEN = 16 * 1024 * 1024;
+
+static void setAuditContextFromCurrentUser() {
+    tundraux::audit::setCurrentUser(USER{currentUser.type, currentUser.name, "", "", 0});
+}
+
+static void logTuxOperation(
+    const std::string& operation,
+    const std::string& status,
+    const std::string& path,
+    const std::string& reason = ""
+) {
+    setAuditContextFromCurrentUser();
+    std::string detail = operation + " " + status + " path=" + path;
+    if (!reason.empty()) {
+        detail += " reason=" + reason;
+    }
+    tundraux::audit::logEvent("tuxfile", detail);
+}
+
+static void logTuxTransferOperation(
+    const std::string& operation,
+    const std::string& status,
+    const std::string& sourcePath,
+    const std::string& destinationPath,
+    const std::string& reason = ""
+) {
+    setAuditContextFromCurrentUser();
+    std::string detail = operation + " " + status + " source=" + sourcePath + " destination=" + destinationPath;
+    if (!reason.empty()) {
+        detail += " reason=" + reason;
+    }
+    tundraux::audit::logEvent("tuxfile", detail);
+}
 
 static bool hasPrivilege() {
     std::string t = currentUser.type;
@@ -507,15 +541,18 @@ void createTuxFile(const std::string& filename) {
     std::string path;
     if (!tryResolveTuxPath(filename, path)) {
         printInvalidTuxPath();
+        logTuxOperation("create", "denied", filename, "invalid path");
         return;
     }
     if (std::filesystem::exists(path)) {
         if (!can_modify_tux_file(path, currentUser.name, currentUser.type)) {
             colorcout("RED","Access denied: You cannot overwrite this file\n");
+            logTuxOperation("create", "denied", path, "cannot overwrite");
             return;
         }
         if (!getYN("File already exists, overwrite?")) {
             colorcout("YELLOW","Cancelled\n");
+            logTuxOperation("create", "denied", path, "overwrite cancelled");
             return;
         }
     }
@@ -524,13 +561,19 @@ void createTuxFile(const std::string& filename) {
     if (fp.has_parent_path()) {
         std::error_code ec;
         std::filesystem::create_directories(fp.parent_path(), ec);
-        if (ec) { colorcout("RED","Failed to create directory: "+ec.message()+"\n"); return; }
+        if (ec) {
+            colorcout("RED","Failed to create directory: "+ec.message()+"\n");
+            logTuxOperation("create", "failure", path, ec.message());
+            return;
+        }
     }
     auto now = std::chrono::system_clock::to_time_t(std::chrono::system_clock::now());
     FileMetadata meta{currentUser.name,currentUser.name,now,now};
     if (!writeTuxFile(path,"",meta)) {
+        logTuxOperation("create", "failure", path, "write failed");
         return;
     }
+    logTuxOperation("create", "success", path);
     colorcout("GREEN","Created empty file: "+filename+"\n\n");
 }
 
@@ -565,19 +608,23 @@ int open_tux_file_in_editor(
     currentUser.type = currentUsertype;
 
     if (!std::filesystem::exists(tuxPath)) {
+        logTuxOperation("edit", "failure", tuxPath, "not found");
         return 1;
     }
 
     auto [oldContent, meta] = readFullTuxFile(tuxPath);
     if (!g_lastTuxReadOk) {
+        logTuxOperation("edit", "failure", tuxPath, "corrupted file");
         return 2;
     }
     const bool canRead = canReadTuxMetadata(meta, currentUser.name, currentUser.type);
     if (!canRead) {
+        logTuxOperation("edit", "denied", tuxPath, "cannot read");
         return 3;
     }
     const bool canModify = canModifyTuxMetadata(meta, currentUser.name, currentUser.type);
     if (!canModify && !allowReadOnly) {
+        logTuxOperation("edit", "denied", tuxPath, "cannot modify");
         return 3;
     }
 
@@ -585,6 +632,7 @@ int open_tux_file_in_editor(
     std::error_code ec;
     std::filesystem::create_directories(tempDir, ec);
     if (ec) {
+        logTuxOperation("edit", "failure", tuxPath, "failed to create temp directory");
         return 4;
     }
     ScopedTuxTempFiles tempCleanup(tempDir);
@@ -611,6 +659,7 @@ int open_tux_file_in_editor(
     {
         std::ofstream tempFile(tempPath, std::ios::binary);
         if (!tempFile) {
+            logTuxOperation("edit", "failure", tuxPath, "failed to create temp file");
             return 5;
         }
         tempFile << oldContent;
@@ -622,6 +671,7 @@ int open_tux_file_in_editor(
     {
         std::ifstream tempFile(tempPath, std::ios::binary);
         if (!tempFile) {
+            logTuxOperation("edit", "failure", tuxPath, "failed to read temp file");
             return 6;
         }
         std::ostringstream buffer;
@@ -634,8 +684,10 @@ int open_tux_file_in_editor(
         meta.lastEditor = currentUser.name;
         meta.modifyTime = now;
         if (!writeTuxFile(tuxPath, newContent, meta)) {
+            logTuxOperation("edit", "failure", tuxPath, "write failed");
             return 8;
         }
+        logTuxOperation("edit", "success", tuxPath);
     }
 
     return canModify ? editorResult : 7;
@@ -646,13 +698,23 @@ void editTuxFile(const std::string& filename) {
     std::string path;
     if (!tryResolveTuxPath(filename, path)) {
         printInvalidTuxPath();
+        logTuxOperation("edit", "denied", filename, "invalid path");
         return;
     }
-    if (!std::filesystem::exists(path)) { colorcout("RED","Not found: "+filename+"\n"); return; }
+    if (!std::filesystem::exists(path)) {
+        colorcout("RED","Not found: "+filename+"\n");
+        logTuxOperation("edit", "failure", path, "not found");
+        return;
+    }
     auto [oldContent, meta] = readFullTuxFile(path);
-    if (!g_lastTuxReadOk) { colorcout("RED","File corrupted, abort editing\n\n"); return; }
+    if (!g_lastTuxReadOk) {
+        colorcout("RED","File corrupted, abort editing\n\n");
+        logTuxOperation("edit", "failure", path, "corrupted file");
+        return;
+    }
     if (!canModifyTuxMetadata(meta, currentUser.name, currentUser.type)) {
         colorcout("RED","Access denied: You are not the creator of this file\n");
+        logTuxOperation("edit", "denied", path, "not creator");
         return;
     }
 
@@ -663,6 +725,7 @@ void editTuxFile(const std::string& filename) {
         std::filesystem::create_directories(tempDir, ec);
         if (ec) {
             colorcout("RED","Failed to create temp directory\n\n");
+            logTuxOperation("edit", "failure", path, "failed to create temp directory");
             return;
         }
     }
@@ -721,6 +784,7 @@ void editTuxFile(const std::string& filename) {
             newContent = oss.str();
         } else {
             colorcout("RED","Failed to read temp file\n\n");
+            logTuxOperation("edit", "failure", path, "failed to read temp file");
             return;
         }
     }
@@ -731,8 +795,10 @@ void editTuxFile(const std::string& filename) {
         meta.lastEditor = currentUser.name;
         meta.modifyTime = now;
         if (!writeTuxFile(path, newContent, meta)) {
+            logTuxOperation("edit", "failure", path, "write failed");
             return;
         }
+        logTuxOperation("edit", "success", path);
     }
 }
 
@@ -742,17 +808,31 @@ void deleteTuxFile(const std::string& filename) {
     std::string path;
     if (!tryResolveTuxPath(filename, path)) {
         printInvalidTuxPath();
+        logTuxOperation("delete", "denied", filename, "invalid path");
         return;
     }
-    if (!std::filesystem::exists(path)) { colorcout("RED","Not found: "+filename+"\n"); return; }
+    if (!std::filesystem::exists(path)) {
+        colorcout("RED","Not found: "+filename+"\n");
+        logTuxOperation("delete", "failure", path, "not found");
+        return;
+    }
     if (!can_modify_tux_file(path, currentUser.name, currentUser.type)) {
         colorcout("RED","Access denied: You cannot delete this file\n");
+        logTuxOperation("delete", "denied", path, "access denied");
         return;
     }
     if (getYN("Confirm delete "+filename)) {
-        if (std::filesystem::remove(path)) colorcout("GREEN","Deleted\n\n");
-        else colorcout("RED","Delete failed\n\n");
-    } else colorcout("YELLOW","Cancelled\n\n");
+        if (std::filesystem::remove(path)) {
+            colorcout("GREEN","Deleted\n\n");
+            logTuxOperation("delete", "success", path);
+        } else {
+            colorcout("RED","Delete failed\n\n");
+            logTuxOperation("delete", "failure", path, "remove failed");
+        }
+    } else {
+        colorcout("YELLOW","Cancelled\n\n");
+        logTuxOperation("delete", "denied", path, "cancelled");
+    }
 }
 
 // ---------- Rename ----------
@@ -761,12 +841,22 @@ void renameTuxFile(const std::string& oldname, const std::string& newname) {
     std::string op, np;
     if (!tryResolveTuxPath(oldname, op) || !tryResolveTuxPath(newname, np)) {
         printInvalidTuxPath();
+        logTuxTransferOperation("rename", "denied", oldname, newname, "invalid path");
         return;
     }
-    if (!std::filesystem::exists(op)) { colorcout("RED","Not found: "+oldname+"\n"); return; }
-    if (std::filesystem::exists(np)) { colorcout("RED","Target already exists: "+newname+"\n"); return; }
+    if (!std::filesystem::exists(op)) {
+        colorcout("RED","Not found: "+oldname+"\n");
+        logTuxTransferOperation("rename", "failure", op, np, "source not found");
+        return;
+    }
+    if (std::filesystem::exists(np)) {
+        colorcout("RED","Target already exists: "+newname+"\n");
+        logTuxTransferOperation("rename", "failure", op, np, "target exists");
+        return;
+    }
     if (!can_modify_tux_file(op, currentUser.name, currentUser.type)) {
         colorcout("RED","Access denied: You cannot rename this file\n");
+        logTuxTransferOperation("rename", "denied", op, np, "access denied");
         return;
     }
     // Create target parent directories if needed
@@ -774,14 +864,20 @@ void renameTuxFile(const std::string& oldname, const std::string& newname) {
     if (nfp.has_parent_path()) {
         std::error_code ec;
         std::filesystem::create_directories(nfp.parent_path(), ec);
-        if (ec) { colorcout("RED","Failed to create directory: "+ec.message()+"\n"); return; }
+        if (ec) {
+            colorcout("RED","Failed to create directory: "+ec.message()+"\n");
+            logTuxTransferOperation("rename", "failure", op, np, ec.message());
+            return;
+        }
     }
     std::error_code ec;
     std::filesystem::rename(op, np, ec);
     if (ec) {
         colorcout("RED","Rename failed: "+ec.message()+"\n");
+        logTuxTransferOperation("rename", "failure", op, np, ec.message());
         return;
     }
+    logTuxTransferOperation("rename", "success", op, np);
     colorcout("GREEN","Renamed: "+oldname+" -> "+newname+"\n\n");
 }
 
@@ -791,13 +887,23 @@ void makeTuxDir(const std::string& dirname) {
     std::string path;
     if (!tryResolveDirectoryPath(dirname, path)) {
         colorcout("YELLOW","Invalid name. Use alphanumeric, '-', '_', and '/' for nested dirs.\n");
+        logTuxOperation("mkdir", "denied", dirname, "invalid path");
         return;
     }
-    if (std::filesystem::exists(path)) { colorcout("YELLOW","Already exists: "+dirname+"\n"); return; }
+    if (std::filesystem::exists(path)) {
+        colorcout("YELLOW","Already exists: "+dirname+"\n");
+        logTuxOperation("mkdir", "failure", path, "already exists");
+        return;
+    }
     std::error_code ec;
     std::filesystem::create_directories(path, ec);
-    if (ec) colorcout("RED","Failed to create directory: "+ec.message()+"\n");
-    else colorcout("GREEN","Created directory: "+dirname+"\n\n");
+    if (ec) {
+        colorcout("RED","Failed to create directory: "+ec.message()+"\n");
+        logTuxOperation("mkdir", "failure", path, ec.message());
+    } else {
+        colorcout("GREEN","Created directory: "+dirname+"\n\n");
+        logTuxOperation("mkdir", "success", path);
+    }
 }
 
 // ---------- Remove Directory ----------
@@ -806,35 +912,65 @@ void removeTuxDir(const std::string& dirname) {
     std::string path;
     if (!tryResolveDirectoryPath(dirname, path)) {
         colorcout("YELLOW","Invalid name. Use alphanumeric, '-', '_', and '/' for nested dirs.\n");
+        logTuxOperation("rmdir", "denied", dirname, "invalid path");
         return;
     }
-    if (!std::filesystem::exists(path)) { colorcout("RED","Not found: "+dirname+"\n"); return; }
-    if (!std::filesystem::is_directory(path)) { colorcout("RED","Not a directory: "+dirname+"\n"); return; }
+    if (!std::filesystem::exists(path)) {
+        colorcout("RED","Not found: "+dirname+"\n");
+        logTuxOperation("rmdir", "failure", path, "not found");
+        return;
+    }
+    if (!std::filesystem::is_directory(path)) {
+        colorcout("RED","Not a directory: "+dirname+"\n");
+        logTuxOperation("rmdir", "failure", path, "not a directory");
+        return;
+    }
     if (directory_has_protected_tux_files(path, currentUser.name, currentUser.type)) {
         colorcout("RED","Access denied: Directory contains files you cannot modify\n");
+        logTuxOperation("rmdir", "denied", path, "contains protected files");
         return;
     }
     if (!std::filesystem::is_empty(path)) {
         if (!getYN("Directory is not empty, remove all contents?")) {
-            colorcout("YELLOW","Cancelled\n\n"); return;
+            colorcout("YELLOW","Cancelled\n\n");
+            logTuxOperation("rmdir", "denied", path, "cancelled");
+            return;
         }
     }
     std::error_code ec;
     std::filesystem::remove_all(path, ec);
-    if (ec) colorcout("RED","Failed to remove: "+ec.message()+"\n");
-    else colorcout("GREEN","Removed directory: "+dirname+"\n\n");
+    if (ec) {
+        colorcout("RED","Failed to remove: "+ec.message()+"\n");
+        logTuxOperation("rmdir", "failure", path, ec.message());
+    } else {
+        colorcout("GREEN","Removed directory: "+dirname+"\n\n");
+        logTuxOperation("rmdir", "success", path);
+    }
 }
 
 // ---------- Copy ----------
 void copyTuxFile(const std::string& src, const std::string& dst) {
     if (src.empty() || dst.empty()) { colorcout("RED","Usage: cp <src> <dst>\n"); return; }
     std::string srcPath;
-    if (!tryResolveTuxPath(src, srcPath)) { colorcout("YELLOW","Invalid source path.\n"); return; }
-    if (!std::filesystem::exists(srcPath)) { colorcout("RED","Not found: "+src+"\n"); return; }
+    if (!tryResolveTuxPath(src, srcPath)) {
+        colorcout("YELLOW","Invalid source path.\n");
+        logTuxTransferOperation("copy", "denied", src, dst, "invalid source path");
+        return;
+    }
+    if (!std::filesystem::exists(srcPath)) {
+        colorcout("RED","Not found: "+src+"\n");
+        logTuxTransferOperation("copy", "failure", srcPath, dst, "source not found");
+        return;
+    }
     auto [content, meta] = readFullTuxFile(srcPath);
-    if (!g_lastTuxReadOk) { colorcout("RED","File corrupted, copy aborted\n\n"); return; }
+    if (!g_lastTuxReadOk) {
+        colorcout("RED","File corrupted, copy aborted\n\n");
+        logTuxTransferOperation("copy", "failure", srcPath, dst, "source corrupted");
+        return;
+    }
     if (!canModifyTuxMetadata(meta, currentUser.name, currentUser.type)) {
         colorcout("RED","Access denied: You cannot copy this file\n");
+        logTuxTransferOperation("copy", "denied", srcPath, dst, "access denied");
         return;
     }
 
@@ -846,26 +982,40 @@ void copyTuxFile(const std::string& src, const std::string& dst) {
         dstPath = (std::filesystem::path(dstAsDir) / (stem + ".TUX")).string();
         if (!isPathInsideRoot(dstPath, filesRootPath())) {
             colorcout("RED","Access denied: Destination is outside Files\n");
+            logTuxTransferOperation("copy", "denied", srcPath, dstPath, "destination outside Files");
             return;
         }
         displayDst = dst + "/" + stem;
     } else {
-        if (!tryResolveTuxPath(dst, dstPath)) { colorcout("YELLOW","Invalid destination path.\n"); return; }
+        if (!tryResolveTuxPath(dst, dstPath)) {
+            colorcout("YELLOW","Invalid destination path.\n");
+            logTuxTransferOperation("copy", "denied", srcPath, dst, "invalid destination path");
+            return;
+        }
         displayDst = dst;
     }
 
     if (std::filesystem::exists(dstPath)) {
         if (!can_modify_tux_file(dstPath, currentUser.name, currentUser.type)) {
             colorcout("RED","Access denied: You cannot overwrite the destination file\n");
+            logTuxTransferOperation("copy", "denied", srcPath, dstPath, "cannot overwrite destination");
             return;
         }
-        if (!getYN("File already exists, overwrite?")) { colorcout("YELLOW","Cancelled\n\n"); return; }
+        if (!getYN("File already exists, overwrite?")) {
+            colorcout("YELLOW","Cancelled\n\n");
+            logTuxTransferOperation("copy", "denied", srcPath, dstPath, "overwrite cancelled");
+            return;
+        }
     }
     std::filesystem::path fp(dstPath);
     if (fp.has_parent_path()) {
         std::error_code ec;
         std::filesystem::create_directories(fp.parent_path(), ec);
-        if (ec) { colorcout("RED","Failed to create directory: "+ec.message()+"\n"); return; }
+        if (ec) {
+            colorcout("RED","Failed to create directory: "+ec.message()+"\n");
+            logTuxTransferOperation("copy", "failure", srcPath, dstPath, ec.message());
+            return;
+        }
     }
     auto now = std::chrono::system_clock::to_time_t(std::chrono::system_clock::now());
     meta.creator = currentUser.name;
@@ -873,8 +1023,10 @@ void copyTuxFile(const std::string& src, const std::string& dst) {
     meta.createTime = now;
     meta.modifyTime = now;
     if (!writeTuxFile(dstPath, content, meta)) {
+        logTuxTransferOperation("copy", "failure", srcPath, dstPath, "write failed");
         return;
     }
+    logTuxTransferOperation("copy", "success", srcPath, dstPath);
     colorcout("GREEN","Copied: "+src+" -> "+displayDst+"\n\n");
 }
 
@@ -882,10 +1034,19 @@ void copyTuxFile(const std::string& src, const std::string& dst) {
 void moveTuxFile(const std::string& src, const std::string& dst) {
     if (src.empty() || dst.empty()) { colorcout("RED","Usage: mv <src> <dst>\n"); return; }
     std::string srcPath;
-    if (!tryResolveTuxPath(src, srcPath)) { colorcout("YELLOW","Invalid source path.\n"); return; }
-    if (!std::filesystem::exists(srcPath)) { colorcout("RED","Not found: "+src+"\n"); return; }
+    if (!tryResolveTuxPath(src, srcPath)) {
+        colorcout("YELLOW","Invalid source path.\n");
+        logTuxTransferOperation("move", "denied", src, dst, "invalid source path");
+        return;
+    }
+    if (!std::filesystem::exists(srcPath)) {
+        colorcout("RED","Not found: "+src+"\n");
+        logTuxTransferOperation("move", "failure", srcPath, dst, "source not found");
+        return;
+    }
     if (!can_modify_tux_file(srcPath, currentUser.name, currentUser.type)) {
         colorcout("RED","Access denied: You cannot move this file\n");
+        logTuxTransferOperation("move", "denied", srcPath, dst, "access denied");
         return;
     }
 
@@ -897,24 +1058,42 @@ void moveTuxFile(const std::string& src, const std::string& dst) {
         dstPath = (std::filesystem::path(dstAsDir) / basename).string();
         if (!isPathInsideRoot(dstPath, filesRootPath())) {
             colorcout("RED","Access denied: Destination is outside Files\n");
+            logTuxTransferOperation("move", "denied", srcPath, dstPath, "destination outside Files");
             return;
         }
         displayDst = dst + "/" + std::filesystem::path(srcPath).stem().string();
     } else {
-        if (!tryResolveTuxPath(dst, dstPath)) { colorcout("YELLOW","Invalid destination path.\n"); return; }
+        if (!tryResolveTuxPath(dst, dstPath)) {
+            colorcout("YELLOW","Invalid destination path.\n");
+            logTuxTransferOperation("move", "denied", srcPath, dst, "invalid destination path");
+            return;
+        }
         displayDst = dst;
     }
 
-    if (std::filesystem::exists(dstPath)) { colorcout("RED","Target already exists: "+dst+"\n"); return; }
+    if (std::filesystem::exists(dstPath)) {
+        colorcout("RED","Target already exists: "+dst+"\n");
+        logTuxTransferOperation("move", "failure", srcPath, dstPath, "target exists");
+        return;
+    }
     std::filesystem::path nfp(dstPath);
     if (nfp.has_parent_path()) {
         std::error_code ec;
         std::filesystem::create_directories(nfp.parent_path(), ec);
-        if (ec) { colorcout("RED","Failed to create directory: "+ec.message()+"\n"); return; }
+        if (ec) {
+            colorcout("RED","Failed to create directory: "+ec.message()+"\n");
+            logTuxTransferOperation("move", "failure", srcPath, dstPath, ec.message());
+            return;
+        }
     }
     std::error_code ec;
     std::filesystem::rename(srcPath, dstPath, ec);
-    if (ec) { colorcout("RED","Move failed: "+ec.message()+"\n"); return; }
+    if (ec) {
+        colorcout("RED","Move failed: "+ec.message()+"\n");
+        logTuxTransferOperation("move", "failure", srcPath, dstPath, ec.message());
+        return;
+    }
+    logTuxTransferOperation("move", "success", srcPath, dstPath);
     colorcout("GREEN","Moved: "+src+" -> "+displayDst+"\n\n");
 }
 
@@ -961,25 +1140,40 @@ void exportTuxFile(const std::string& filename) {
     std::string safeStem;
     if (!tryResolveTuxPath(filename, tuxPath, &safeStem)) {
         printInvalidTuxPath();
+        logTuxOperation("export", "denied", filename, "invalid path");
         return;
     }
-    if (!std::filesystem::exists(tuxPath)) { colorcout("RED","Not found: "+filename+"\n"); return; }
+    if (!std::filesystem::exists(tuxPath)) {
+        colorcout("RED","Not found: "+filename+"\n");
+        logTuxOperation("export", "failure", tuxPath, "source not found");
+        return;
+    }
     auto [content, meta] = readFullTuxFile(tuxPath);
-    if (!g_lastTuxReadOk) { colorcout("RED","File corrupted, export aborted\n\n"); return; }
+    if (!g_lastTuxReadOk) {
+        colorcout("RED","File corrupted, export aborted\n\n");
+        logTuxOperation("export", "failure", tuxPath, "source corrupted");
+        return;
+    }
     std::string txtPath;
     if (!tryResolveTextPath(safeStem, txtPath)) {
         printInvalidTuxPath();
+        logTuxOperation("export", "denied", safeStem, "invalid export path");
         return;
     }
     const std::string txtName = safeStem + ".txt";
     if (std::filesystem::exists(txtPath)) {
         if (!getYN("TXT already exists, overwrite?")) {
             colorcout("YELLOW","Cancelled\n\n");
+            logTuxOperation("export", "denied", txtPath, "overwrite cancelled");
             return;
         }
     }
     std::ofstream out(txtPath);
-    if (!out) { colorcout("RED","Failed to create TXT\n\n"); return; }
+    if (!out) {
+        colorcout("RED","Failed to create TXT\n\n");
+        logTuxOperation("export", "failure", txtPath, "create TXT failed");
+        return;
+    }
     std::tm ct{}, mt{};
     localtime_s(&ct, &meta.createTime);
     localtime_s(&mt, &meta.modifyTime);
@@ -994,6 +1188,7 @@ void exportTuxFile(const std::string& filename) {
     out << "=== End of Metadata ===\n\n";
     out << content;
     out.close();
+    logTuxOperation("export", "success", txtPath);
     colorcout("GREEN","Exported as: "+txtName+"\n\n");
 }
 
@@ -1004,31 +1199,40 @@ void importTxtFile(const std::string& filename) {
     std::string safeStem;
     if (!tryResolveTextPath(filename, txtPath, &safeStem)) {
         colorcout("YELLOW","Invalid TXT path. Use alphanumeric, '-', '_', and '/' for subfolders.\n");
+        logTuxOperation("import", "denied", filename, "invalid TXT path");
         return;
     }
     const std::string txt = safeStem + ".txt";
-    if (!std::filesystem::exists(txtPath)) { colorcout("RED","TXT not found: "+txt+"\n"); return; }
+    if (!std::filesystem::exists(txtPath)) {
+        colorcout("RED","TXT not found: "+txt+"\n");
+        logTuxOperation("import", "failure", txtPath, "TXT not found");
+        return;
+    }
     std::ifstream in(txtPath);
-    if (!in) { colorcout("RED","Failed to read TXT\n\n"); return; }
+    if (!in) {
+        colorcout("RED","Failed to read TXT\n\n");
+        logTuxOperation("import", "failure", txtPath, "read TXT failed");
+        return;
+    }
     FileMetadata meta{};
     std::string line, content; int lineNum=0; bool header=false, ended=false;
     while (std::getline(in,line)) {
         ++lineNum;
-        if (lineNum==1) { if (line!="=== TundraUX File Metadata ===") { colorcout("RED","Missing metadata header\n"); return; } header=true; continue; }
+        if (lineNum==1) { if (line!="=== TundraUX File Metadata ===") { colorcout("RED","Missing metadata header\n"); logTuxOperation("import", "failure", txtPath, "missing metadata header"); return; } header=true; continue; }
         if (!ended) {
             if (line=="=== End of Metadata ===") { ended=true; continue; }
             auto pos = line.find(": ");
-            if (pos==std::string::npos) { colorcout("RED","Invalid metadata format\n"); return; }
+            if (pos==std::string::npos) { colorcout("RED","Invalid metadata format\n"); logTuxOperation("import", "failure", txtPath, "invalid metadata format"); return; }
             std::string field=line.substr(0,pos), val=line.substr(pos+2);
             if (field=="Creator") meta.creator=val;
             else if (field=="Last Editor") meta.lastEditor=val;
             else if (field=="Create Time") {
                 std::tm tm{}; std::istringstream ss(val); ss>>std::get_time(&tm,"%Y-%m-%d %H:%M:%S");
-                if (ss.fail()) { colorcout("RED","Invalid time format\n"); return; }
+                if (ss.fail()) { colorcout("RED","Invalid time format\n"); logTuxOperation("import", "failure", txtPath, "invalid create time"); return; }
                 meta.createTime = std::mktime(&tm);
             } else if (field=="Modify Time") {
                 std::tm tm{}; std::istringstream ss(val); ss>>std::get_time(&tm,"%Y-%m-%d %H:%M:%S");
-                if (ss.fail()) { colorcout("RED","Invalid time format\n"); return; }
+                if (ss.fail()) { colorcout("RED","Invalid time format\n"); logTuxOperation("import", "failure", txtPath, "invalid modify time"); return; }
                 meta.modifyTime = std::mktime(&tm);
             }
         } else {
@@ -1037,25 +1241,31 @@ void importTxtFile(const std::string& filename) {
         }
     }
     if (!header || !ended || meta.creator.empty() || meta.lastEditor.empty() || meta.createTime==0 || meta.modifyTime==0) {
-        colorcout("RED","Metadata missing or incomplete\n\n"); return;
+        colorcout("RED","Metadata missing or incomplete\n\n");
+        logTuxOperation("import", "failure", txtPath, "metadata incomplete");
+        return;
     }
     std::string tuxPath;
     if (!tryResolveTuxPath(safeStem, tuxPath)) {
         printInvalidTuxPath();
+        logTuxOperation("import", "denied", safeStem, "invalid TUX destination");
         return;
     }
     const std::string tuxName = safeStem + ".TUX";
     if (std::filesystem::exists(tuxPath)) {
         if (!getYN("TUX already exists, overwrite?")) {
             colorcout("YELLOW","Cancelled\n\n");
+            logTuxOperation("import", "denied", tuxPath, "overwrite cancelled");
             return;
         }
     }
     meta.lastEditor = currentUser.name;
     meta.modifyTime = std::chrono::system_clock::to_time_t(std::chrono::system_clock::now());
     if (!writeTuxFile(tuxPath, content, meta)) {
+        logTuxOperation("import", "failure", tuxPath, "write failed");
         return;
     }
+    logTuxOperation("import", "success", tuxPath);
     colorcout("GREEN","Imported as: "+tuxName+"\n\n");
 }
 

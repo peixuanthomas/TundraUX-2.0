@@ -1,23 +1,37 @@
 #include "explorer_detail_actions.hpp"
 
+#include "audit_log.hpp"
 #include "explorer_details.hpp"
 #include "explorer_render.hpp"
 #include "explorer_style.hpp"
+#include "explorer_text.hpp"
 
 #include <algorithm>
 
 namespace tundraux::explorer {
+namespace {
+
+void setAuditUser(const ExplorerState& state) {
+    tundraux::audit::setCurrentUser(USER{state.usertype, state.username, "", "", 0});
+}
+
+}
 
 void beginShowDetails(ExplorerState& state) {
     if (state.entries.empty() || state.cursor >= state.entries.size()) {
         state.message = redMessage("Nothing selected");
+        setAuditUser(state);
+        tundraux::audit::logEvent("explorer", "details denied reason=nothing selected");
         return;
     }
 
+    const FileEntry& entry = state.entries[state.cursor];
     state.detailLines = buildDetailLines(state);
-    state.detailName = state.entries[state.cursor].name;
+    state.detailName = entry.name;
     state.detailScroll = 0;
     state.showDetails = true;
+    setAuditUser(state);
+    tundraux::audit::logEvent("explorer", "details success path=" + pathToDisplayString(entry.path));
 }
 
 std::size_t maxDetailScroll(const ExplorerState& state) {
