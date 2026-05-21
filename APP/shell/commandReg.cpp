@@ -89,34 +89,37 @@ bool tryExecuteRegisteredCommand(
         if (!hasCommandPermission(cmd.requiredUserType, currentUser.type)) {
             tundraux::audit::logEvent("command", "denied " + inputCommand);
             colorcout("red", "Access Denied.\n");
-        } else if (cmd.name == "help") {
-            colorcout("cyan", "Available commands:\n");
-            const auto sortedCommands = sortedCommandsForHelp(commands);
-            for (const auto* helpCmd : sortedCommands) {
-                if (helpCmd->hidden ||
-                    !hasCommandPermission(helpCmd->requiredUserType, currentUser.type)) {
-                    continue;
-                }
-                colorcout("white", " - " + helpCmd->usage + ": " + helpCmd->description + "\n");
-            }
-        } else if (cmd.name == "dbg:help") {
-            colorcout("cyan", "Available debug commands:\n");
-            const auto sortedCommands = sortedCommandsForHelp(commands);
-            for (const auto* helpCmd : sortedCommands) {
-                if (helpCmd->name.rfind("dbg:", 0) != 0 ||
-                    !hasCommandPermission(helpCmd->requiredUserType, currentUser.type)) {
-                    continue;
-                }
-                colorcout("white", " - " + helpCmd->usage + ": " + helpCmd->description + "\n");
-            }
         } else {
-            try {
-                tundraux::audit::logEvent("command", "execute " + inputCommand);
-                cmd.handler(input);
-            } catch (const std::exception& ex) {
-                colorcout("red", "Command failed: " + std::string(ex.what()) + "\n");
-            } catch (...) {
-                colorcout("red", "Command failed due to an unknown error.\n");
+            tundraux::audit::logEvent("command", "execute " + inputCommand);
+
+            if (cmd.name == "help") {
+                colorcout("cyan", "Available commands:\n");
+                const auto sortedCommands = sortedCommandsForHelp(commands);
+                for (const auto* helpCmd : sortedCommands) {
+                    if (helpCmd->hidden ||
+                        !hasCommandPermission(helpCmd->requiredUserType, currentUser.type)) {
+                        continue;
+                    }
+                    colorcout("white", " - " + helpCmd->usage + ": " + helpCmd->description + "\n");
+                }
+            } else if (cmd.name == "dbg:help") {
+                colorcout("cyan", "Available debug commands:\n");
+                const auto sortedCommands = sortedCommandsForHelp(commands);
+                for (const auto* helpCmd : sortedCommands) {
+                    if (helpCmd->name.rfind("dbg:", 0) != 0 ||
+                        !hasCommandPermission(helpCmd->requiredUserType, currentUser.type)) {
+                        continue;
+                    }
+                    colorcout("white", " - " + helpCmd->usage + ": " + helpCmd->description + "\n");
+                }
+            } else {
+                try {
+                    cmd.handler(input);
+                } catch (const std::exception& ex) {
+                    colorcout("red", "Command failed: " + std::string(ex.what()) + "\n");
+                } catch (...) {
+                    colorcout("red", "Command failed due to an unknown error.\n");
+                }
             }
         }
         return true;
