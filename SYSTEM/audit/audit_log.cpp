@@ -274,10 +274,19 @@ void logKeyPress(const tundra_tui::KeyPress& key, bool sensitive) {
     switch (key.key) {
         case tundra_tui::Key::Character: {
             const unsigned char ch = static_cast<unsigned char>(key.character);
-            if (std::isprint(ch)) {
-                detail = "Character '";
-                detail.push_back(static_cast<char>(ch));
-                detail.push_back('\'');
+            if (ch >= 1 && ch <= 26) {
+                detail = "Ctrl+";
+                detail.push_back(static_cast<char>('A' + (ch - 1)));
+            } else if (std::isprint(ch)) {
+                if (ch == '\\') {
+                    detail = "Character '\\\\'";
+                } else if (ch == '\'') {
+                    detail = "Character \"'\"";
+                } else {
+                    detail = "Character '";
+                    detail.push_back(static_cast<char>(ch));
+                    detail.push_back('\'');
+                }
             } else {
                 detail = "Unknown";
             }

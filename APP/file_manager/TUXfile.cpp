@@ -1360,6 +1360,7 @@ void file_editor(const std::string& currentUsername, const std::string& currentU
                 if (!tryResolveDirectoryPath(dstDir, dstDirPath) ||
                     !std::filesystem::is_directory(dstDirPath)) {
                     colorcout("RED","Destination must be an existing directory for batch move: "+dstDir+"\n");
+                    logTuxTransferOperation("move", "denied", "(batch)", dstDir, "invalid batch destination directory");
                 }
                 else { for (size_t i = 0; i+1 < args.size(); ++i) moveTuxFile(args[i], dstDir); }
             }
@@ -1375,6 +1376,7 @@ void file_editor(const std::string& currentUsername, const std::string& currentU
                 if (!tryResolveDirectoryPath(dstDir, dstDirPath) ||
                     !std::filesystem::is_directory(dstDirPath)) {
                     colorcout("RED","Destination must be an existing directory for batch copy: "+dstDir+"\n");
+                    logTuxTransferOperation("copy", "denied", "(batch)", dstDir, "invalid batch destination directory");
                 }
                 else { for (size_t i = 0; i+1 < args.size(); ++i) copyTuxFile(args[i], dstDir); }
             }
@@ -1384,12 +1386,22 @@ void file_editor(const std::string& currentUsername, const std::string& currentU
         else if (cmd=="mkdir" || cmd=="md") { std::string d; std::getline(iss>>std::ws, d); makeTuxDir(d); }
         else if (cmd=="rmdir" || cmd=="rd") { std::string d; std::getline(iss>>std::ws, d); removeTuxDir(d); }
         else if (cmd=="ex" || cmd=="export") {
-            if (!hasPrivilege()) { colorcout("RED","Access denied: You don't have the required privileges\n"); continue; }
-            std::string f; std::getline(iss>>std::ws, f); exportTuxFile(f);
+            std::string f; std::getline(iss>>std::ws, f);
+            if (!hasPrivilege()) {
+                colorcout("RED","Access denied: You don't have the required privileges\n");
+                logTuxOperation("export", "denied", f.empty() ? "(empty)" : f, "insufficient privilege");
+                continue;
+            }
+            exportTuxFile(f);
         }
         else if (cmd=="im" || cmd=="import") {
-            if (!hasPrivilege()) { colorcout("RED","Access denied: You don't have the required privileges\n"); continue; }
-            std::string f; std::getline(iss>>std::ws, f); importTxtFile(f);
+            std::string f; std::getline(iss>>std::ws, f);
+            if (!hasPrivilege()) {
+                colorcout("RED","Access denied: You don't have the required privileges\n");
+                logTuxOperation("import", "denied", f.empty() ? "(empty)" : f, "insufficient privilege");
+                continue;
+            }
+            importTxtFile(f);
         }
         else if (cmd=="m" || cmd=="meta" || cmd=="metadata" || cmd=="info") {
             if (!hasPrivilege()) { colorcout("RED","Access denied: You don't have the required privileges\n"); continue; }

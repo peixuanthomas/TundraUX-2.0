@@ -176,6 +176,10 @@ void pasteClipboard(ExplorerState& state) {
         return;
     }
 
+    bool cutFallbackCreatedDestination = false;
+    bool cutFallbackSourceRemovalFailed = false;
+    std::string cutFallbackRemoveFailureReason;
+
     if (state.clipboard.mode == ClipboardMode::Copy) {
         copyClipboardItem(state.clipboard, target, error);
     } else {
@@ -183,10 +187,15 @@ void pasteClipboard(ExplorerState& state) {
         if (error) {
             error.clear();
             if (copyClipboardItem(state.clipboard, target, error)) {
+                cutFallbackCreatedDestination = true;
                 if (state.clipboard.isDirectory) {
                     fs::remove_all(state.clipboard.path, error);
                 } else {
                     fs::remove(state.clipboard.path, error);
+                }
+                if (error) {
+                    cutFallbackSourceRemovalFailed = true;
+                    cutFallbackRemoveFailureReason = error.message();
                 }
             }
         }
@@ -195,6 +204,15 @@ void pasteClipboard(ExplorerState& state) {
     if (error) {
         state.message = redMessage("Paste failed: " + error.message());
         setAuditUser(state);
+        if (cutFallbackCreatedDestination && cutFallbackSourceRemovalFailed) {
+            tundraux::audit::logEvent(
+                "explorer",
+                "paste partial mode=" + mode + " source=" + sourcePath +
+                    " destination=" + pathToDisplayString(target) +
+                    " mutation=destination created source_remove=failed reason=" +
+                    cutFallbackRemoveFailureReason
+            );
+        }
         tundraux::audit::logEvent(
             "explorer",
             "paste failure mode=" + mode + " source=" + sourcePath +
