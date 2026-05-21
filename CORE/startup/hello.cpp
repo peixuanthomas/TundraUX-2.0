@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cctype>
+#include <cstdint>
 #include <fstream>
 #include <iostream>
 #include <string>
@@ -366,10 +367,12 @@ bool createAdminUser(const SetupState& state, std::string& error) {
         return false;
     }
 
-    const int version = 2;
+    const int version = 21;
+    const std::uint8_t strictValue = 0;
     const std::size_t userCount = 1;
     const int failedCount = 0;
     outFile.write(reinterpret_cast<const char*>(&version), sizeof(version));
+    outFile.write(reinterpret_cast<const char*>(&strictValue), sizeof(strictValue));
     outFile.write(reinterpret_cast<const char*>(&userCount), sizeof(userCount));
     writeString(outFile, "admin");
     writeString(outFile, trimCopy(state.username));

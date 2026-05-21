@@ -5,6 +5,7 @@
 #include <string>
 #include "crypto.hpp"
 #include <cstdio>
+#include <cstdint>
 #include <fstream>
 #include <iostream>
 #include <iomanip>
@@ -43,14 +44,40 @@ void struct_file() {
     };
     int version = 0;
     size_t userCount = 0;
+    std::uint8_t strictValue = 0;
     in.read(reinterpret_cast<char*>(&version), sizeof(version));
-    in.read(reinterpret_cast<char*>(&userCount), sizeof(userCount));
     if (!in) {
         colorcout("red", "Error: Failed to read header\n");
         return;
     }
-    colorcout("white", std::to_string(version) + "\n");
-    colorcout("white", std::to_string(userCount) + "\n");
+
+    if (version == 21) {
+        in.read(reinterpret_cast<char*>(&strictValue), sizeof(strictValue));
+        in.read(reinterpret_cast<char*>(&userCount), sizeof(userCount));
+        if (!in) {
+            colorcout("red", "Error: Failed to read header\n");
+            return;
+        }
+        if (strictValue != 0 && strictValue != 1) {
+            colorcout("red", "Error: Invalid strict flag in user_data.dat header\n");
+            return;
+        }
+        colorcout("white", std::to_string(version) + "\n");
+        colorcout("white", "strict=" + std::to_string(static_cast<int>(strictValue)) + "\n");
+        colorcout("white", std::to_string(userCount) + "\n");
+    } else if (version == 2) {
+        in.read(reinterpret_cast<char*>(&userCount), sizeof(userCount));
+        if (!in) {
+            colorcout("red", "Error: Failed to read header\n");
+            return;
+        }
+        colorcout("white", std::to_string(version) + "\n");
+        colorcout("white", std::to_string(userCount) + "\n");
+    } else {
+        colorcout("red", "Error: Unsupported user_data.dat version in struct_file\n");
+        return;
+    }
+
     for (size_t i = 0; i < userCount; ++i) {
         std::string type, name, encPass, hint;
         if (!readString(type) || !readString(name) || !readString(encPass) || !readString(hint)) {

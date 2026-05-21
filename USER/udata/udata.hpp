@@ -23,8 +23,11 @@ class DataManager {
         bool ComparePassword(const std::string& name, const std::string& password);
         const std::vector<USER>& GetAllUsers() const;
         const std::vector<std::string> GetAllUsernames() const;
+        bool GetStrictMode() const;
+        bool SetStrictMode(bool enabled);
     private:
         std::vector<USER> userDataList;
+        bool strictMode_ = false;
         std::string filename_;
         void LoadUsersFromFile();
         bool SaveUsersToFile();

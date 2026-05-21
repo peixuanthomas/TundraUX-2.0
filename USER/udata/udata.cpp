@@ -22,6 +22,8 @@ namespace {
 constexpr size_t MAX_USER_COUNT = 10000;
 constexpr size_t MAX_USER_STRING_LENGTH = 1024 * 1024;
 constexpr std::uintmax_t MAX_USER_DATA_FILE_SIZE = 64 * 1024 * 1024;
+constexpr int USER_DATA_VERSION_2_0 = 2;
+constexpr int USER_DATA_VERSION_2_1 = 21;
 
 bool readExact(std::ifstream& file, void* data, std::streamsize size, const std::string& label) {
     file.read(reinterpret_cast<char*>(data), size);
@@ -288,6 +290,20 @@ const std::vector<std::string> DataManager::GetAllUsernames() const {
     return usernames;
 }
 
+bool DataManager::GetStrictMode() const {
+    return strictMode_;
+}
+
+bool DataManager::SetStrictMode(bool enabled) {
+    const bool previousStrictMode = strictMode_;
+    strictMode_ = enabled;
+    if (!SaveUsersToFile()) {
+        strictMode_ = previousStrictMode;
+        return false;
+    }
+    return true;
+}
+
 void DataManager::LoadUsersFromFile() {
     std::ifstream inFile(filename_, std::ios::binary);
     if (!inFile) {
@@ -306,15 +322,32 @@ void DataManager::LoadUsersFromFile() {
     if (!readExact(inFile, &version, sizeof(version), "user data version")) {
         return;
     }
-    if (version != 2) {
+
+    bool loadedStrictMode = false;
+    size_t userCount = 0;
+    if (version == USER_DATA_VERSION_2_0) {
+        loadedStrictMode = false;
+        if (!readExact(inFile, &userCount, sizeof(userCount), "user count")) {
+            return;
+        }
+    } else if (version == USER_DATA_VERSION_2_1) {
+        std::uint8_t strictValue = 0;
+        if (!readExact(inFile, &strictValue, sizeof(strictValue), "strict mode value")) {
+            return;
+        }
+        if (strictValue != 0 && strictValue != 1) {
+            colorcout("red", "Error: Invalid strict mode value in user data file.\n");
+            return;
+        }
+        loadedStrictMode = (strictValue == 1);
+        if (!readExact(inFile, &userCount, sizeof(userCount), "user count")) {
+            return;
+        }
+    } else {
         colorcout("red", "Error: Unsupported user data file version.\n");
         return;
     }
 
-    size_t userCount = 0;
-    if (!readExact(inFile, &userCount, sizeof(userCount), "user count")) {
-        return;
-    }
     if (userCount > MAX_USER_COUNT) {
         colorcout("red", "Error: User count exceeds maximum supported value.\n");
         return;
@@ -348,6 +381,7 @@ void DataManager::LoadUsersFromFile() {
         return;
     }
 
+    strictMode_ = loadedStrictMode;
     userDataList = std::move(tempUserDataList);
 }
 
@@ -367,8 +401,10 @@ bool DataManager::SaveUsersToFile() {
         return false;
     }
 
-    int version = 2;
+    int version = USER_DATA_VERSION_2_1;
+    const std::uint8_t strictValue = strictMode_ ? 1 : 0;
     outFile.write(reinterpret_cast<const char*>(&version), sizeof(version));
+    outFile.write(reinterpret_cast<const char*>(&strictValue), sizeof(strictValue));
 
     size_t userCount = userDataList.size();
     outFile.write(reinterpret_cast<const char*>(&userCount), sizeof(userCount));
@@ -455,8 +491,10 @@ void createfile() {
         return;
     }
 
-    int version = 2;
+    int version = USER_DATA_VERSION_2_1;
+    const std::uint8_t strictValue = 0;
     file.write(reinterpret_cast<const char*>(&version), sizeof(version));
+    file.write(reinterpret_cast<const char*>(&strictValue), sizeof(strictValue));
     size_t userCount = 1;
     file.write(reinterpret_cast<const char*>(&userCount), sizeof(userCount));
     USER placeholder = {
