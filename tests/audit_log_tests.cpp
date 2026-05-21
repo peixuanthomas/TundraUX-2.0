@@ -11,11 +11,19 @@
 #include <string>
 #include <vector>
 
-int run_editor(const std::string&, const std::string&) {
-    return 0;
-}
-
 namespace {
+
+std::vector<std::string> g_editorViewLines;
+
+std::vector<std::string> readTextLines(const std::filesystem::path& path) {
+    std::vector<std::string> lines;
+    std::ifstream in(path, std::ios::binary);
+    std::string line;
+    while (std::getline(in, line)) {
+        lines.push_back(line);
+    }
+    return lines;
+}
 
 void writeString(std::ofstream& out, const std::string& value) {
     const std::size_t length = value.size();
@@ -51,7 +59,19 @@ bool containsLineFragment(const std::vector<std::string>& lines, const std::stri
     });
 }
 
+std::string lineContaining(const std::vector<std::string>& lines, const std::string& fragment) {
+    const auto found = std::find_if(lines.begin(), lines.end(), [&](const std::string& line) {
+        return line.find(fragment) != std::string::npos;
+    });
+    return found == lines.end() ? std::string{} : *found;
+}
+
 } // namespace
+
+int run_editor(const std::string& filepath, const std::string&) {
+    g_editorViewLines = readTextLines(filepath);
+    return 0;
+}
 
 int main() {
     namespace fs = std::filesystem;
@@ -105,6 +125,42 @@ int main() {
     }
     if (!containsLineFragment(lines, "Character 'x'")) {
         std::cerr << "non-sensitive character detail was not logged\n";
+        return 1;
+    }
+
+    tundraux::audit::logEvent("explorer", "open Logs/audit.tlog");
+    tundraux::audit::logEvent("key", "Character 'z'");
+
+    g_editorViewLines.clear();
+    const int openResult = tundraux::audit::openTlogInEditor(
+        tundraux::audit::startupLogPath().string(),
+        "audit-test.tlog",
+        "tester",
+        "admin"
+    );
+    if (openResult != 0) {
+        std::cerr << "failed to open audit log in editor: " << openResult << "\n";
+        return 1;
+    }
+
+    const std::string explorerLine = lineContaining(g_editorViewLines, "explorer");
+    const std::string keyLine = lineContaining(g_editorViewLines, "Character 'z'");
+    if (explorerLine.empty() || keyLine.empty()) {
+        std::cerr << "editor view did not include expected audit records\n";
+        return 1;
+    }
+
+    const std::size_t explorerCategory = explorerLine.find("explorer");
+    const std::size_t keyCategory = keyLine.find("key");
+    const std::size_t explorerDetail = explorerLine.find("open Logs/audit.tlog");
+    const std::size_t keyDetail = keyLine.find("Character 'z'");
+    if (explorerCategory == std::string::npos || keyCategory == std::string::npos ||
+        explorerDetail == std::string::npos || keyDetail == std::string::npos) {
+        std::cerr << "editor view did not preserve category or detail text\n";
+        return 1;
+    }
+    if (explorerCategory != keyCategory || explorerDetail != keyDetail) {
+        std::cerr << "editor view columns are not aligned\n";
         return 1;
     }
 

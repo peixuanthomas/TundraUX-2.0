@@ -210,6 +210,92 @@ std::string userFieldValue(const std::string& value) {
     return value.empty() ? "(none)" : value;
 }
 
+struct TlogDisplayRecord {
+    bool structured = false;
+    std::string original;
+    std::string timestamp;
+    std::string user;
+    std::string type;
+    std::string category;
+    std::string detail;
+};
+
+std::vector<std::string> splitAuditFields(const std::string& line) {
+    std::vector<std::string> fields;
+    std::size_t start = 0;
+    while (true) {
+        const std::size_t separator = line.find(" | ", start);
+        if (separator == std::string::npos) {
+            fields.push_back(line.substr(start));
+            break;
+        }
+        fields.push_back(line.substr(start, separator - start));
+        start = separator + 3;
+    }
+    return fields;
+}
+
+TlogDisplayRecord parseTlogDisplayRecord(const std::string& line) {
+    TlogDisplayRecord record;
+    record.original = line;
+
+    const std::vector<std::string> fields = splitAuditFields(line);
+    if (fields.size() != 5) {
+        return record;
+    }
+
+    record.structured = true;
+    record.timestamp = fields[0];
+    record.user = fields[1];
+    record.type = fields[2];
+    record.category = fields[3];
+    record.detail = fields[4];
+    return record;
+}
+
+std::string rightPad(std::string value, std::size_t width) {
+    if (value.size() < width) {
+        value.append(width - value.size(), ' ');
+    }
+    return value;
+}
+
+std::vector<std::string> formatTlogLinesForEditor(const std::vector<std::string>& lines) {
+    std::vector<TlogDisplayRecord> records;
+    records.reserve(lines.size());
+
+    std::size_t userWidth = 0;
+    std::size_t typeWidth = 0;
+    std::size_t categoryWidth = 0;
+
+    for (const std::string& line : lines) {
+        TlogDisplayRecord record = parseTlogDisplayRecord(line);
+        if (record.structured) {
+            userWidth = std::max(userWidth, record.user.size());
+            typeWidth = std::max(typeWidth, record.type.size());
+            categoryWidth = std::max(categoryWidth, record.category.size());
+        }
+        records.push_back(record);
+    }
+
+    std::vector<std::string> formatted;
+    formatted.reserve(records.size());
+    for (const TlogDisplayRecord& record : records) {
+        if (!record.structured) {
+            formatted.push_back(record.original);
+            continue;
+        }
+        formatted.push_back(
+            record.timestamp + " | " +
+            rightPad(record.user, userWidth) + " | " +
+            rightPad(record.type, typeWidth) + " | " +
+            rightPad(record.category, categoryWidth) + " | " +
+            record.detail
+        );
+    }
+    return formatted;
+}
+
 } // namespace
 
 void initialize() {
@@ -439,10 +525,11 @@ int openTlogInEditor(
     }
 
     std::string readError;
-    const std::vector<std::string> lines = readTlogPlaintext(path, readError);
+    const std::vector<std::string> rawLines = readTlogPlaintext(path, readError);
     if (!readError.empty()) {
         return 2;
     }
+    const std::vector<std::string> lines = formatTlogLinesForEditor(rawLines);
 
     try {
         const std::filesystem::path sourcePath(path);
