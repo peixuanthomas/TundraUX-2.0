@@ -27,6 +27,39 @@ bool g_strictModeEnabled = false;
 USER g_currentUser = {"guest", "", "", "", 0};
 std::filesystem::path g_startupLogPath;
 
+class ScopedFileRemoval {
+public:
+    explicit ScopedFileRemoval(std::filesystem::path path)
+        : path_(path) {}
+
+    ~ScopedFileRemoval() {
+        std::error_code error;
+        std::filesystem::remove(path_, error);
+    }
+
+    ScopedFileRemoval(const ScopedFileRemoval&) = delete;
+    ScopedFileRemoval& operator=(const ScopedFileRemoval&) = delete;
+
+private:
+    std::filesystem::path path_;
+};
+
+class ScopedCurrentUserRestore {
+public:
+    ScopedCurrentUserRestore()
+        : previous_(g_currentUser) {}
+
+    ~ScopedCurrentUserRestore() {
+        g_currentUser = previous_;
+    }
+
+    ScopedCurrentUserRestore(const ScopedCurrentUserRestore&) = delete;
+    ScopedCurrentUserRestore& operator=(const ScopedCurrentUserRestore&) = delete;
+
+private:
+    USER previous_;
+};
+
 std::string lowerCopy(std::string value) {
     std::transform(value.begin(), value.end(), value.begin(), [](unsigned char ch) {
         return static_cast<char>(std::tolower(ch));
@@ -388,6 +421,7 @@ int openTlogInEditor(
     const std::string& username,
     const std::string& usertype
 ) {
+    (void)username;
     if (!isPrivileged(usertype)) {
         return 3;
     }
@@ -412,6 +446,7 @@ int openTlogInEditor(
             stem = "audit";
         }
         std::filesystem::path tempPath = tempDir / (stem + "-view.log");
+        ScopedFileRemoval tempFileGuard(tempPath);
 
         {
             std::ofstream out(tempPath, std::ios::binary | std::ios::trunc);
@@ -431,18 +466,7 @@ int openTlogInEditor(
 
         const std::string effectiveDisplayName =
             displayName.empty() ? sourcePath.filename().string() : displayName;
-        const int editorResult = run_editor(tempPath.string(), effectiveDisplayName);
-
-        std::error_code removeError;
-        std::filesystem::remove(tempPath, removeError);
-
-        if (editorResult == 0) {
-            USER logUser = {usertype, username, "", "", 0};
-            setCurrentUser(logUser);
-            logEvent("audit", "Viewed TLOG: " + sourcePath.filename().string());
-        }
-
-        return editorResult;
+        return run_editor(tempPath.string(), effectiveDisplayName);
     } catch (...) {
         return 4;
     }
@@ -464,8 +488,7 @@ bool exportTlogToPlaintext(
     try {
         const std::filesystem::path logsRoot = logsRootPath();
         const std::filesystem::path inputCandidate(inputPath);
-        const std::filesystem::path resolvedInput = normalizeBoundaryPath(
-            inputCandidate.is_absolute() ? inputCandidate : (logsRoot / inputCandidate));
+        const std::filesystem::path resolvedInput = normalizeBoundaryPath(inputCandidate);
 
         if (lowerCopy(resolvedInput.extension().string()) != ".tlog") {
             message = "Input must have .tlog extension.";
@@ -522,11 +545,14 @@ bool exportTlogToPlaintext(
             return false;
         }
 
-        USER logUser = {usertype, username, "", "", 0};
-        setCurrentUser(logUser);
-        logEvent(
-            "audit",
-            "Exported TLOG " + resolvedInput.filename().string() + " -> " + outputPath.filename().string());
+        {
+            ScopedCurrentUserRestore restoreUser;
+            g_currentUser = {usertype, username, "", "", 0};
+            logEvent(
+                "audit",
+                "Exported TLOG " + resolvedInput.filename().string() + " -> " +
+                    outputPath.filename().string());
+        }
 
         message = "Exported to " + outputPath.string();
         return true;
