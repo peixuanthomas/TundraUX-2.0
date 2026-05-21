@@ -186,6 +186,20 @@ void renderHelpBinding(const std::string& keys, const std::string& description) 
               << "\n";
 }
 
+void renderFooterHints(const std::vector<tundra_tui::FooterHint>& hints, tundra_tui::Size terminalSize) {
+    const auto visibleHints = tundra_tui::fitFooterHints(hints, terminalSize);
+    for (std::size_t index = 0; index < visibleHints.size(); ++index) {
+        if (index > 0) {
+            std::cout << colorText(" | ", kHintStyle);
+        }
+        std::cout << colorText(visibleHints[index].key, kKeyStyle);
+        if (!visibleHints[index].label.empty()) {
+            std::cout << colorText(" " + visibleHints[index].label, kHintStyle);
+        }
+    }
+    std::cout << "\n";
+}
+
 void renderHelp(const ExplorerState& state, const std::string& username, const std::string& usertype) {
     std::cout << "\x1b[0m\x1b[2J\x1b[H\x1b[?25l";
     std::cout << colorText("TundraUX Explorer Help", kTitleStyle)
@@ -208,6 +222,7 @@ void renderHelp(const ExplorerState& state, const std::string& username, const s
 
     renderHelpSection("File operations");
     renderHelpBinding("c", "Copy selected file or folder, shown in green until paste");
+    renderHelpBinding("y", "Copy selected file or folder name to the system clipboard");
     renderHelpBinding("x", "Cut selected file or folder, shown in grey until paste");
     renderHelpBinding("p", "Paste into current directory");
     std::cout << "\n";
@@ -564,29 +579,23 @@ void render(const ExplorerState& state, const std::string& username, const std::
                   << colorText(state.newFolderName, kInputStyle)
                   << std::flush;
     } else {
-        std::cout << colorText("Enter", kKeyStyle)
-                  << colorText(" open | ", kHintStyle)
-                  << colorText("Backspace", kKeyStyle)
-                  << colorText(" parent | ", kHintStyle)
-                  << colorText("n", kKeyStyle)
-                  << colorText(" mkdir | ", kHintStyle)
-                  << colorText("c", kKeyStyle)
-                  << colorText(" copy | ", kHintStyle)
-                  << colorText("x", kKeyStyle)
-                  << colorText(" cut | ", kHintStyle)
-                  << colorText("p", kKeyStyle)
-                  << colorText(" paste | ", kHintStyle)
-                  << colorText("d", kKeyStyle)
-                  << colorText(" delete | ", kHintStyle)
-                  << colorText("s", kKeyStyle)
-                  << colorText(" search | ", kHintStyle)
-                  << colorText("i", kKeyStyle)
-                  << colorText(" info | ", kHintStyle)
-                  << colorText("h", kKeyStyle)
-                  << colorText(" help | ", kHintStyle)
-                  << colorText("q", kKeyStyle)
-                  << colorText(" quit", kHintStyle)
-                  << "\n";
+        renderFooterHints(
+            {
+                {"Enter", "open"},
+                {"Backspace", "parent"},
+                {"y", "name"},
+                {"c", "copy"},
+                {"p", "paste"},
+                {"h", "help"},
+                {"q", "quit"},
+                {"n", "mkdir"},
+                {"x", "cut"},
+                {"d", "delete"},
+                {"s", "search"},
+                {"i", "info"}
+            },
+            size
+        );
         const std::string selectedPermissionStatus = selectedTuxPermissionStatus(state);
         const std::string statusMessage = selectedPermissionStatus.empty()
             ? state.message

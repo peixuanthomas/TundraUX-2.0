@@ -147,6 +147,57 @@ target_compile_features(explorer_permissions_tests
 
 add_test(NAME explorer_permissions_tests COMMAND explorer_permissions_tests)
 
+add_executable(explorer_clipboard_tests
+    tests/explorer_clipboard_tests.cpp
+    APP/explorer/explorer_clipboard.cpp
+    APP/explorer/explorer_directory.cpp
+    APP/explorer/explorer_navigation.cpp
+    APP/explorer/explorer_permissions.cpp
+    APP/explorer/explorer_text.cpp
+    SYSTEM/audit/audit_log.cpp
+    SYSTEM/crypto/crypto.cpp
+    USER/udata/udata.cpp
+)
+
+target_include_directories(explorer_clipboard_tests
+    PRIVATE
+        ${PROJECT_SOURCE_DIR}/APP/editor
+        ${PROJECT_SOURCE_DIR}/APP/explorer
+        ${PROJECT_SOURCE_DIR}/APP/file_manager
+        ${PROJECT_SOURCE_DIR}/SYSTEM/audit
+        ${PROJECT_SOURCE_DIR}/SYSTEM/console
+        ${PROJECT_SOURCE_DIR}/SYSTEM/crypto
+        ${PROJECT_SOURCE_DIR}/USER/udata
+)
+
+target_link_libraries(explorer_clipboard_tests
+    PRIVATE
+        TundraTUI::TundraTUI
+)
+
+target_compile_features(explorer_clipboard_tests
+    PRIVATE
+        cxx_std_17
+)
+
+add_test(NAME explorer_clipboard_tests COMMAND explorer_clipboard_tests)
+
+add_executable(tundratui_footer_hint_tests
+    tests/tundratui_footer_hint_tests.cpp
+)
+
+target_link_libraries(tundratui_footer_hint_tests
+    PRIVATE
+        TundraTUI::TundraTUI
+)
+
+target_compile_features(tundratui_footer_hint_tests
+    PRIVATE
+        cxx_std_17
+)
+
+add_test(NAME tundratui_footer_hint_tests COMMAND tundratui_footer_hint_tests)
+
 if(TUNDRAUX_DEBUG_STARTUP)
     target_compile_definitions(${PROJECT_NAME}
         PRIVATE

@@ -137,6 +137,10 @@ bool handleKey(ExplorerState& state, const KeyPress& key) {
                 case 'C':
                     markClipboard(state, ClipboardMode::Copy);
                     break;
+                case 'y':
+                case 'Y':
+                    copySelectedFileNameToSystemClipboard(state);
+                    break;
                 case 'x':
                 case 'X':
                     markClipboard(state, ClipboardMode::Cut);

@@ -12,6 +12,11 @@
 #endif
 
 namespace tundra_tui {
+namespace {
+
+constexpr std::size_t kFooterSeparatorWidth = 3;
+
+}
 
 RenderEngine::RenderEngine(std::ostream& outputStream)
     : output(&outputStream) {}
@@ -65,6 +70,48 @@ Size terminalSize() {
     }
 #endif
     return {120, 30};
+}
+
+std::size_t footerHintWidth(const FooterHint& hint) {
+    if (hint.key.empty()) {
+        return hint.label.size();
+    }
+    if (hint.label.empty()) {
+        return hint.key.size();
+    }
+    return hint.key.size() + 1 + hint.label.size();
+}
+
+std::vector<FooterHint> fitFooterHints(
+    const std::vector<FooterHint>& hints,
+    Size terminal,
+    std::size_t reservedWidth
+) {
+    if (terminal.width <= 0 || terminal.height <= 0) {
+        return {};
+    }
+
+    const std::size_t availableWidth = static_cast<std::size_t>(terminal.width);
+    if (reservedWidth >= availableWidth) {
+        return {};
+    }
+
+    const std::size_t contentWidth = availableWidth - reservedWidth;
+    std::vector<FooterHint> visible;
+    std::size_t usedWidth = 0;
+
+    for (const FooterHint& hint : hints) {
+        const std::size_t hintWidth = footerHintWidth(hint);
+        const std::size_t separatorWidth = visible.empty() ? 0 : kFooterSeparatorWidth;
+        if (hintWidth == 0 || usedWidth + separatorWidth + hintWidth > contentWidth) {
+            break;
+        }
+
+        visible.push_back(hint);
+        usedWidth += separatorWidth + hintWidth;
+    }
+
+    return visible;
 }
 
 }

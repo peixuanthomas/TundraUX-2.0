@@ -9,6 +9,7 @@
 
 #include <string>
 #include <system_error>
+#include <windows.h>
 
 namespace tundraux::explorer {
 namespace {
@@ -25,6 +26,62 @@ bool copyClipboardItem(const ClipboardState& clipboard, const fs::path& target, 
 
     fs::copy_file(clipboard.path, target, error);
     return !error;
+}
+
+std::string win32Failure(const char* action) {
+    return std::string(action) + " failed (" + std::to_string(GetLastError()) + ")";
+}
+
+bool writeUtf8TextToSystemClipboard(const std::string& text, std::string& error) {
+    const int wideLength = MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, text.c_str(), -1, nullptr, 0);
+    if (wideLength <= 0) {
+        error = win32Failure("UTF-8 conversion");
+        return false;
+    }
+
+    HGLOBAL memory = GlobalAlloc(GMEM_MOVEABLE, static_cast<SIZE_T>(wideLength) * sizeof(wchar_t));
+    if (memory == nullptr) {
+        error = win32Failure("GlobalAlloc");
+        return false;
+    }
+
+    wchar_t* buffer = static_cast<wchar_t*>(GlobalLock(memory));
+    if (buffer == nullptr) {
+        error = win32Failure("GlobalLock");
+        GlobalFree(memory);
+        return false;
+    }
+
+    const int converted = MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, text.c_str(), -1, buffer, wideLength);
+    GlobalUnlock(memory);
+    if (converted <= 0) {
+        error = win32Failure("UTF-8 conversion");
+        GlobalFree(memory);
+        return false;
+    }
+
+    if (!OpenClipboard(nullptr)) {
+        error = win32Failure("OpenClipboard");
+        GlobalFree(memory);
+        return false;
+    }
+
+    if (!EmptyClipboard()) {
+        error = win32Failure("EmptyClipboard");
+        CloseClipboard();
+        GlobalFree(memory);
+        return false;
+    }
+
+    if (SetClipboardData(CF_UNICODETEXT, memory) == nullptr) {
+        error = win32Failure("SetClipboardData");
+        CloseClipboard();
+        GlobalFree(memory);
+        return false;
+    }
+
+    CloseClipboard();
+    return true;
 }
 
 }
@@ -232,6 +289,42 @@ void pasteClipboard(ExplorerState& state) {
         "paste success mode=" + mode + " source=" + sourcePath +
             " destination=" + pathToDisplayString(target)
     );
+}
+
+bool copySelectedFileName(ExplorerState& state, SystemClipboardWriter writer) {
+    const FileEntry* entry = selectedEntry(state);
+    if (entry == nullptr) {
+        state.message = "Nothing selected";
+        setAuditUser(state);
+        tundraux::audit::logEvent("explorer", "copy file name failure reason=nothing selected");
+        return false;
+    }
+
+    std::string error;
+    if (writer == nullptr || !writer(entry->name, error)) {
+        if (error.empty()) {
+            error = "clipboard writer unavailable";
+        }
+        state.message = redMessage("Could not copy file name: " + error);
+        setAuditUser(state);
+        tundraux::audit::logEvent(
+            "explorer",
+            "copy file name failure path=" + pathToDisplayString(entry->path) + " reason=" + error
+        );
+        return false;
+    }
+
+    state.message = "Copied file name: " + entry->name;
+    setAuditUser(state);
+    tundraux::audit::logEvent(
+        "explorer",
+        "copy file name success path=" + pathToDisplayString(entry->path)
+    );
+    return true;
+}
+
+void copySelectedFileNameToSystemClipboard(ExplorerState& state) {
+    copySelectedFileName(state, writeUtf8TextToSystemClipboard);
 }
 
 }

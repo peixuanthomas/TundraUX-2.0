@@ -1,13 +1,20 @@
 #pragma once
 
 #include <iosfwd>
+#include <cstddef>
 #include <string>
+#include <vector>
 
 namespace tundra_tui {
 
 struct Size {
     int width = 0;
     int height = 0;
+};
+
+struct FooterHint {
+    std::string key;
+    std::string label;
 };
 
 class RenderEngine {
@@ -28,5 +35,11 @@ private:
 };
 
 Size terminalSize();
+std::size_t footerHintWidth(const FooterHint& hint);
+std::vector<FooterHint> fitFooterHints(
+    const std::vector<FooterHint>& hints,
+    Size terminal,
+    std::size_t reservedWidth = 0
+);
 
 }
