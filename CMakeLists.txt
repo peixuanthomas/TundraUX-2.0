@@ -53,6 +53,7 @@ set(TUNDRAUX_USER_SOURCES
 )
 
 set(TUNDRAUX_SYSTEM_SOURCES
+    SYSTEM/audit/audit_log.cpp
     SYSTEM/crypto/crypto.cpp
     SYSTEM/debug/debug.cpp
 )
@@ -75,6 +76,7 @@ target_include_directories(${PROJECT_NAME}
         ${PROJECT_SOURCE_DIR}/APP/shell
         ${PROJECT_SOURCE_DIR}/USER/account
         ${PROJECT_SOURCE_DIR}/USER/udata
+        ${PROJECT_SOURCE_DIR}/SYSTEM/audit
         ${PROJECT_SOURCE_DIR}/SYSTEM/console
         ${PROJECT_SOURCE_DIR}/SYSTEM/crypto
         ${PROJECT_SOURCE_DIR}/SYSTEM/debug
