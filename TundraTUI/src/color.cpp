@@ -1,5 +1,6 @@
 #include "TundraTUI/color.hpp"
 
+#include "TundraTUI/input.hpp"
 #include "TundraTUI/screen.hpp"
 
 #include <algorithm>
@@ -292,10 +293,12 @@ std::string getHiddenInput(const std::string& prompt, char symbol) {
     while (true) {
         const int ch = readChar();
         if (ch == '\r' || ch == '\n') {
+            emitKeyAudit({Key::Enter, '\0'}, true);
             std::cout << std::endl;
             break;
         }
         if (ch == 8 || ch == 127) {
+            emitKeyAudit({Key::Backspace, '\0'}, true);
             if (!input.empty()) {
                 input.pop_back();
                 if (showSymbol) {
@@ -305,10 +308,12 @@ std::string getHiddenInput(const std::string& prompt, char symbol) {
             continue;
         }
         if (ch == 3) {
+            emitKeyAudit({Key::Escape, '\0'}, true);
             std::cout << std::endl;
             input.clear();
             break;
         }
+        emitKeyAudit({Key::Character, static_cast<char>(ch)}, true);
         input.push_back(static_cast<char>(ch));
         if (showSymbol) {
             std::cout << symbol;
@@ -341,10 +346,12 @@ std::string readLineWithHistory(std::vector<std::string>& history, int& historyI
     while (true) {
         const int ch = readChar();
         if (ch == '\r' || ch == '\n') {
+            emitKeyAudit({Key::Enter, '\0'}, false);
             std::cout << std::endl;
             return current;
         }
         if (ch == 8 || ch == 127) {
+            emitKeyAudit({Key::Backspace, '\0'}, false);
             if (cursorPos > 0) {
                 current.erase(cursorPos - 1, 1);
                 cursorPos--;
@@ -361,6 +368,17 @@ std::string readLineWithHistory(std::vector<std::string>& history, int& historyI
 #ifdef _WIN32
         else if (ch == 0 || ch == 224) {
             const int ext = readChar();
+            KeyPress keyPress{Key::Unknown, '\0'};
+            if (ext == 72) {
+                keyPress.key = Key::Up;
+            } else if (ext == 80) {
+                keyPress.key = Key::Down;
+            } else if (ext == 75) {
+                keyPress.key = Key::Left;
+            } else if (ext == 77) {
+                keyPress.key = Key::Right;
+            }
+            emitKeyAudit(keyPress, false);
             if (ext == 72) {
                 if (!history.empty()) {
                     if (historyIndex == -1) {
@@ -422,6 +440,7 @@ std::string readLineWithHistory(std::vector<std::string>& history, int& historyI
         }
 #endif
         else if (std::isprint(static_cast<unsigned char>(ch))) {
+            emitKeyAudit({Key::Character, static_cast<char>(ch)}, false);
             current.insert(cursorPos, 1, static_cast<char>(ch));
             for (size_t i = cursorPos; i < current.length(); ++i) {
                 std::cout << current[i];

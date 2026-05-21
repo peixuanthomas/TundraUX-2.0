@@ -13,6 +13,8 @@
 namespace tundra_tui {
 namespace {
 
+KeyAuditSink g_keyAuditSink = nullptr;
+
 #ifndef _WIN32
 class RawTerminalMode {
 public:
@@ -146,56 +148,83 @@ KeyPress decodeEscapeSequence() {
 
 }
 
+void setKeyAuditSink(KeyAuditSink sink) {
+    g_keyAuditSink = sink;
+}
+
+void emitKeyAudit(const KeyPress& key, bool sensitive) {
+    if (g_keyAuditSink == nullptr) {
+        return;
+    }
+    g_keyAuditSink(key, sensitive);
+}
+
 KeyPress readKey() {
+    KeyPress result{Key::Unknown, '\0'};
 #ifdef _WIN32
     const int ch = _getch();
     if (ch == 0 || ch == 224) {
         const int ext = _getch();
         switch (ext) {
-            case 72: return {Key::Up, '\0'};
-            case 80: return {Key::Down, '\0'};
-            case 75: return {Key::Left, '\0'};
-            case 77: return {Key::Right, '\0'};
-            case 71: return {Key::Home, '\0'};
-            case 79: return {Key::End, '\0'};
-            case 73: return {Key::PageUp, '\0'};
-            case 81: return {Key::PageDown, '\0'};
-            case 83: return {Key::Delete, '\0'};
-            case 59: return {Key::F1, '\0'};
-            case 60: return {Key::F2, '\0'};
-            default: return {Key::Unknown, '\0'};
+            case 72: result = {Key::Up, '\0'}; break;
+            case 80: result = {Key::Down, '\0'}; break;
+            case 75: result = {Key::Left, '\0'}; break;
+            case 77: result = {Key::Right, '\0'}; break;
+            case 71: result = {Key::Home, '\0'}; break;
+            case 79: result = {Key::End, '\0'}; break;
+            case 73: result = {Key::PageUp, '\0'}; break;
+            case 81: result = {Key::PageDown, '\0'}; break;
+            case 83: result = {Key::Delete, '\0'}; break;
+            case 59: result = {Key::F1, '\0'}; break;
+            case 60: result = {Key::F2, '\0'}; break;
+            default: result = {Key::Unknown, '\0'}; break;
         }
+        emitKeyAudit(result, false);
+        return result;
     }
 #else
     RawTerminalMode rawMode;
     const int ch = readByte();
     if (ch < 0) {
-        return {Key::Unknown, '\0'};
+        emitKeyAudit(result, false);
+        return result;
     }
     if (ch == 27) {
-        return decodeEscapeSequence();
+        result = decodeEscapeSequence();
+        emitKeyAudit(result, false);
+        return result;
     }
 #endif
 
     switch (ch) {
         case 13:
         case 10:
-            return {Key::Enter, '\0'};
+            result = {Key::Enter, '\0'};
+            break;
         case 27:
-            return {Key::Escape, '\0'};
+            result = {Key::Escape, '\0'};
+            break;
         case 8:
         case 127:
-            return {Key::Backspace, '\0'};
+            result = {Key::Backspace, '\0'};
+            break;
         case 9:
-            return {Key::Tab, '\0'};
+            result = {Key::Tab, '\0'};
+            break;
         case 3:
-            return {Key::Escape, '\0'};
+            result = {Key::Escape, '\0'};
+            break;
         default:
             if (std::isprint(static_cast<unsigned char>(ch))) {
-                return {Key::Character, static_cast<char>(ch)};
+                result = {Key::Character, static_cast<char>(ch)};
+            } else {
+                result = {Key::Unknown, '\0'};
             }
-            return {Key::Unknown, '\0'};
+            break;
     }
+
+    emitKeyAudit(result, false);
+    return result;
 }
 
 }

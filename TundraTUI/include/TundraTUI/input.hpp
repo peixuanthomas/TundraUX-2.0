@@ -27,6 +27,10 @@ struct KeyPress {
     char character = '\0';
 };
 
+using KeyAuditSink = void(*)(const KeyPress& key, bool sensitive);
+
 KeyPress readKey();
+void setKeyAuditSink(KeyAuditSink sink);
+void emitKeyAudit(const KeyPress& key, bool sensitive = false);
 
 }
