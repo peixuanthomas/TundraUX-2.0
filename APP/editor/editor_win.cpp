@@ -14,6 +14,7 @@
 #include <chrono>
 #include <direct.h>
 #include <cerrno>
+#include "TundraTUI/input.hpp"
 #include "console_screen.hpp"
 #include "editor_win.hpp"
 
@@ -133,6 +134,47 @@ static std::string normalizePath(const std::string& input) {
         return path;
     }
     return "Files/" + path;
+}
+
+static tundra_tui::KeyPress mapEditorAuditKey(int value) {
+    using tundra_tui::Key;
+    using tundra_tui::KeyPress;
+
+    switch (value) {
+        case KEY_UP_SPECIAL:
+            return {Key::Up, '\0'};
+        case KEY_DOWN_SPECIAL:
+            return {Key::Down, '\0'};
+        case KEY_LEFT_SPECIAL:
+            return {Key::Left, '\0'};
+        case KEY_RIGHT_SPECIAL:
+            return {Key::Right, '\0'};
+        case KEY_HOME_SPECIAL:
+            return {Key::Home, '\0'};
+        case KEY_END_SPECIAL:
+            return {Key::End, '\0'};
+        case KEY_PPAGE_SPECIAL:
+            return {Key::PageUp, '\0'};
+        case KEY_NPAGE_SPECIAL:
+            return {Key::PageDown, '\0'};
+        case KEY_DC_SPECIAL:
+            return {Key::Delete, '\0'};
+        case KEY_ENTER_SPECIAL:
+            return {Key::Enter, '\0'};
+        case KEY_BACKSPACE_SPECIAL:
+            return {Key::Backspace, '\0'};
+        case '\t':
+            return {Key::Tab, '\0'};
+        case 27:
+            return {Key::Escape, '\0'};
+        default:
+            break;
+    }
+
+    if ((value >= 1 && value <= 26) || (value >= 32 && value < 127)) {
+        return {Key::Character, static_cast<char>(value)};
+    }
+    return {Key::Unknown, '\0'};
 }
 
 // ---- End of path utilities ----
@@ -310,32 +352,44 @@ public:
             if (ir.EventType == KEY_EVENT && ir.Event.KeyEvent.bKeyDown) {
                 KEY_EVENT_RECORD& key = ir.Event.KeyEvent;
                 char ch = key.uChar.AsciiChar;
+                auto emitAndReturn = [](int value) {
+                    tundra_tui::emitKeyAudit(mapEditorAuditKey(value), false);
+                    return value;
+                };
 
                 if (ch >= 1 && ch <= 26 && key.wVirtualKeyCode != VK_RETURN &&
                     key.wVirtualKeyCode != VK_BACK && key.wVirtualKeyCode != VK_TAB &&
                     key.wVirtualKeyCode != VK_ESCAPE) {
-                    return ch;
+                    return emitAndReturn(ch);
                 }
 
                 switch (key.wVirtualKeyCode) {
-                    case VK_UP:     return KEY_UP_SPECIAL;
-                    case VK_DOWN:   return KEY_DOWN_SPECIAL;
-                    case VK_LEFT:   return KEY_LEFT_SPECIAL;
-                    case VK_RIGHT:  return KEY_RIGHT_SPECIAL;
-                    case VK_HOME:   return KEY_HOME_SPECIAL;
-                    case VK_END:    return KEY_END_SPECIAL;
-                    case VK_PRIOR:  return KEY_PPAGE_SPECIAL;
-                    case VK_NEXT:   return KEY_NPAGE_SPECIAL;
-                    case VK_DELETE: return KEY_DC_SPECIAL;
-                    case VK_RETURN: return KEY_ENTER_SPECIAL;
-                    case VK_BACK:   return KEY_BACKSPACE_SPECIAL;
-                    case VK_TAB:    return '\t';
-                    case VK_ESCAPE: return 27;
+                    case VK_UP:     return emitAndReturn(KEY_UP_SPECIAL);
+                    case VK_DOWN:   return emitAndReturn(KEY_DOWN_SPECIAL);
+                    case VK_LEFT:   return emitAndReturn(KEY_LEFT_SPECIAL);
+                    case VK_RIGHT:  return emitAndReturn(KEY_RIGHT_SPECIAL);
+                    case VK_HOME:   return emitAndReturn(KEY_HOME_SPECIAL);
+                    case VK_END:    return emitAndReturn(KEY_END_SPECIAL);
+                    case VK_PRIOR:  return emitAndReturn(KEY_PPAGE_SPECIAL);
+                    case VK_NEXT:   return emitAndReturn(KEY_NPAGE_SPECIAL);
+                    case VK_DELETE: return emitAndReturn(KEY_DC_SPECIAL);
+                    case VK_RETURN: return emitAndReturn(KEY_ENTER_SPECIAL);
+                    case VK_BACK:   return emitAndReturn(KEY_BACKSPACE_SPECIAL);
+                    case VK_TAB:    return emitAndReturn('\t');
+                    case VK_ESCAPE: return emitAndReturn(27);
+                    case VK_F1:
+                        tundra_tui::emitKeyAudit({tundra_tui::Key::F1, '\0'}, false);
+                        continue;
+                    case VK_F2:
+                        tundra_tui::emitKeyAudit({tundra_tui::Key::F2, '\0'}, false);
+                        continue;
                 }
 
                 if (ch >= 32 && ch < 127) {
-                    return ch;
+                    return emitAndReturn(ch);
                 }
+
+                tundra_tui::emitKeyAudit({tundra_tui::Key::Unknown, '\0'}, false);
             }
         }
     }

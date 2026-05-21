@@ -249,6 +249,17 @@ bool getYN(const std::string& prompt) {
     while (true) {
         colorcout("yellow", prompt + " (y/n): ");
         const int ch = readChar();
+        if (ch == '\r' || ch == '\n') {
+            emitKeyAudit({Key::Enter, '\0'}, false);
+        } else if (ch == 8 || ch == 127) {
+            emitKeyAudit({Key::Backspace, '\0'}, false);
+        } else if (ch == 3 || ch == 27) {
+            emitKeyAudit({Key::Escape, '\0'}, false);
+        } else if (std::isprint(static_cast<unsigned char>(ch))) {
+            emitKeyAudit({Key::Character, static_cast<char>(ch)}, false);
+        } else {
+            emitKeyAudit({Key::Unknown, '\0'}, false);
+        }
         std::cout << static_cast<char>(ch) << std::endl;
         if (ch == 'y' || ch == 'Y') {
             std::cout << std::endl;
