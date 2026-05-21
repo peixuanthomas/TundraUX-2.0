@@ -78,6 +78,7 @@ struct UserManagerState {
     bool showPassword = false;
     bool formOpen = false;
     bool confirmDelete = false;
+    bool forceExit = false;
     UserForm form;
     std::string pendingDeleteName;
     std::string message = "Ready";
@@ -216,6 +217,53 @@ bool nameExists(const DataManager& dataManager, const std::string& name, const s
         }
     }
     return false;
+}
+
+bool isDebugType(const std::string& type) {
+    return toLowerCopy(type) == "debug";
+}
+
+bool isAdminOrDebugType(const std::string& type) {
+    const std::string normalized = toLowerCopy(type);
+    return normalized == "admin" || normalized == "debug";
+}
+
+bool syncCurrentUserAfterMutation(USER& currentUser, std::string& message) {
+    if (isDebugType(currentUser.type)) {
+        tundraux::audit::setCurrentUser(currentUser);
+        return true;
+    }
+
+    const std::string lookupName = currentUser.name;
+    bool found = false;
+    USER refreshed = {"guest", "", "", "", 0};
+
+    if (!lookupName.empty()) {
+        try {
+            DataManager refreshedData("user_data.dat");
+            const auto& users = refreshedData.GetAllUsers();
+            const auto it = std::find_if(users.begin(), users.end(), [&](const USER& user) {
+                return user.name == lookupName;
+            });
+            if (it != users.end()) {
+                refreshed = *it;
+                found = true;
+            }
+        } catch (...) {
+            found = false;
+        }
+    }
+
+    if (!found || refreshed.count > 7 || !isAdminOrDebugType(refreshed.type)) {
+        currentUser = {"guest", "", "", "", 0};
+        tundraux::audit::setCurrentUser(currentUser);
+        message = "Your account lost management privileges. Returning to shell.";
+        return false;
+    }
+
+    currentUser = refreshed;
+    tundraux::audit::setCurrentUser(currentUser);
+    return true;
 }
 
 void clampCursor(UserManagerState& state, const DataManager& dataManager) {
@@ -614,7 +662,7 @@ std::string validateForm(const UserForm& form, const DataManager& dataManager, U
     return "";
 }
 
-void saveForm(UserManagerState& state, DataManager& dataManager, const USER& currentUser) {
+void saveForm(UserManagerState& state, DataManager& dataManager, USER& currentUser) {
     USER user;
     const std::string error = validateForm(state.form, dataManager, user);
     if (!error.empty()) {
@@ -634,8 +682,10 @@ void saveForm(UserManagerState& state, DataManager& dataManager, const USER& cur
     if (ok) {
         state.formOpen = false;
         selectUserByName(state, dataManager, user.name);
-        tundraux::audit::setCurrentUser(currentUser);
         tundraux::audit::logEvent("manage-users", std::string(state.form.editing ? "edit " : "create ") + user.name);
+        if (!syncCurrentUserAfterMutation(currentUser, state.message)) {
+            state.forceExit = true;
+        }
     } else {
         state.form.error = state.message;
     }
@@ -655,7 +705,7 @@ void toggleType(UserForm& form) {
     form.type = toLowerCopy(form.type) == "admin" ? "user" : "admin";
 }
 
-void handleFormKey(UserManagerState& state, DataManager& dataManager, const USER& currentUser, const KeyPress& key) {
+void handleFormKey(UserManagerState& state, DataManager& dataManager, USER& currentUser, const KeyPress& key) {
     UserForm& form = state.form;
     form.error.clear();
 
@@ -726,7 +776,7 @@ void handleFormKey(UserManagerState& state, DataManager& dataManager, const USER
     }
 }
 
-void deleteSelected(UserManagerState& state, DataManager& dataManager, const USER& currentUser) {
+void deleteSelected(UserManagerState& state, DataManager& dataManager, USER& currentUser) {
     const USER* user = selectedUser(dataManager, state);
     if (user == nullptr) {
         state.message = "No user selected.";
@@ -744,15 +794,17 @@ void deleteSelected(UserManagerState& state, DataManager& dataManager, const USE
     if (dataManager.RemoveUser(name)) {
         state.message = "User deleted: " + name;
         clampCursor(state, dataManager);
-        tundraux::audit::setCurrentUser(currentUser);
         tundraux::audit::logEvent("manage-users", "delete " + name);
+        if (!syncCurrentUserAfterMutation(currentUser, state.message)) {
+            state.forceExit = true;
+        }
     } else {
         state.message = "Failed to delete user.";
     }
     state.confirmDelete = false;
 }
 
-void disableSelected(UserManagerState& state, DataManager& dataManager, const USER& currentUser) {
+void disableSelected(UserManagerState& state, DataManager& dataManager, USER& currentUser) {
     const USER* user = selectedUser(dataManager, state);
     if (user == nullptr) {
         state.message = "No user selected.";
@@ -769,14 +821,16 @@ void disableSelected(UserManagerState& state, DataManager& dataManager, const US
     if (dataManager.UpdateUser(name, updated)) {
         state.message = "User disabled: " + name;
         selectUserByName(state, dataManager, name);
-        tundraux::audit::setCurrentUser(currentUser);
         tundraux::audit::logEvent("manage-users", "disable " + name);
+        if (!syncCurrentUserAfterMutation(currentUser, state.message)) {
+            state.forceExit = true;
+        }
     } else {
         state.message = "Failed to disable user.";
     }
 }
 
-void resetSelected(UserManagerState& state, DataManager& dataManager, const USER& currentUser) {
+void resetSelected(UserManagerState& state, DataManager& dataManager, USER& currentUser) {
     const USER* user = selectedUser(dataManager, state);
     if (user == nullptr) {
         state.message = "No user selected.";
@@ -788,15 +842,17 @@ void resetSelected(UserManagerState& state, DataManager& dataManager, const USER
     const std::string name = updated.name;
     if (dataManager.UpdateUser(name, updated)) {
         state.message = "Login count reset: " + name;
-        tundraux::audit::setCurrentUser(currentUser);
         tundraux::audit::logEvent("manage-users", "reset " + name);
+        if (!syncCurrentUserAfterMutation(currentUser, state.message)) {
+            state.forceExit = true;
+        }
     } else {
         state.message = "Failed to reset count.";
     }
     selectUserByName(state, dataManager, name);
 }
 
-bool handleMainKey(UserManagerState& state, DataManager& dataManager, const USER& currentUser, const KeyPress& key) {
+bool handleMainKey(UserManagerState& state, DataManager& dataManager, USER& currentUser, const KeyPress& key) {
     if (state.showHelp) {
         if (key.key == Key::Escape || key.key == Key::Enter ||
             (key.key == Key::Character &&
@@ -804,12 +860,12 @@ bool handleMainKey(UserManagerState& state, DataManager& dataManager, const USER
               key.character == 'q' || key.character == 'Q'))) {
             state.showHelp = false;
         }
-        return true;
+        return !state.forceExit;
     }
 
     if (state.formOpen) {
         handleFormKey(state, dataManager, currentUser, key);
-        return true;
+        return !state.forceExit;
     }
 
     if (state.confirmDelete) {
@@ -817,14 +873,14 @@ bool handleMainKey(UserManagerState& state, DataManager& dataManager, const USER
             (key.key == Key::Character && (key.character == 'n' || key.character == 'N'))) {
             state.confirmDelete = false;
             state.message = "Delete cancelled.";
-            return true;
+            return !state.forceExit;
         }
         if (key.key == Key::Enter ||
             (key.key == Key::Character && (key.character == 'y' || key.character == 'Y'))) {
             deleteSelected(state, dataManager, currentUser);
-            return true;
+            return !state.forceExit;
         }
-        return true;
+        return !state.forceExit;
     }
 
     switch (key.key) {
@@ -919,39 +975,7 @@ bool handleMainKey(UserManagerState& state, DataManager& dataManager, const USER
             break;
     }
 
-    return true;
-}
-
-void refreshCurrentUserAfterManagement(USER& currentUser) {
-    const std::string lookupName = currentUser.name;
-    USER refreshedUser = {"guest", "", "", "", 0};
-    bool foundActiveUser = false;
-
-    if (!lookupName.empty()) {
-        try {
-            DataManager refreshedData("user_data.dat");
-            const auto& users = refreshedData.GetAllUsers();
-            const auto it = std::find_if(users.begin(), users.end(), [&](const USER& user) {
-                return user.name == lookupName;
-            });
-            if (it != users.end() && it->count <= 7) {
-                refreshedUser = *it;
-                foundActiveUser = true;
-            }
-        } catch (...) {
-            foundActiveUser = false;
-        }
-    }
-
-    if (!foundActiveUser) {
-        currentUser = {"guest", "", "", "", 0};
-    } else if (currentUser.type != refreshedUser.type ||
-               currentUser.name != refreshedUser.name ||
-               currentUser.count != refreshedUser.count) {
-        currentUser = refreshedUser;
-    }
-
-    tundraux::audit::setCurrentUser(currentUser);
+    return !state.forceExit;
 }
 
 } // namespace
@@ -962,7 +986,7 @@ void manage_users(USER& currentUser) {
     std::ifstream check("user_data.dat");
     if (!check.good()) {
         tundra_tui::colorcout("red", "Error: user_data.dat not found.\n");
-        refreshCurrentUserAfterManagement(currentUser);
+        tundraux::audit::setCurrentUser(currentUser);
         return;
     }
     check.close();
@@ -990,5 +1014,5 @@ void manage_users(USER& currentUser) {
         running = handleMainKey(state, dataManager, currentUser, readKey());
     }
 
-    refreshCurrentUserAfterManagement(currentUser);
+    tundraux::audit::setCurrentUser(currentUser);
 }
