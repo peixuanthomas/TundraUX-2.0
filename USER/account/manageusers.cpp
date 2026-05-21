@@ -7,6 +7,7 @@
 #include "TundraTUI/screen.hpp"
 #include "TundraTUI/style.hpp"
 #include "TundraTUI/text.hpp"
+#include "audit_log.hpp"
 #include "udata.hpp"
 
 #include <algorithm>
@@ -189,14 +190,23 @@ const USER* selectedUser(const DataManager& dataManager, const UserManagerState&
     return &users[state.cursor];
 }
 
-std::size_t adminCount(const DataManager& dataManager) {
+std::size_t activeAdminCount(const DataManager& dataManager, const std::string& excludingName = "") {
     std::size_t count = 0;
     for (const auto& user : dataManager.GetAllUsers()) {
-        if (toLowerCopy(user.type) == "admin") {
+        if (user.name == excludingName) {
+            continue;
+        }
+        if (toLowerCopy(user.type) == "admin" && user.count <= 7) {
             ++count;
         }
     }
     return count;
+}
+
+bool isOnlyActiveAdmin(const DataManager& dataManager, const USER& user) {
+    return toLowerCopy(user.type) == "admin" &&
+           user.count <= 7 &&
+           activeAdminCount(dataManager, user.name) == 0;
 }
 
 bool nameExists(const DataManager& dataManager, const std::string& name, const std::string& exceptName = "") {
@@ -286,6 +296,7 @@ std::vector<DetailLine> buildDetailLines(const USER* user, bool showPassword) {
         {"Actions", "", true},
         {"Enter / e", "Edit selected user", false},
         {"r", "Reset failed attempts", false},
+        {"x", "Disable selected user", false},
         {"d", "Delete selected user", false}
     };
 }
@@ -310,6 +321,7 @@ void renderHelp() {
     renderHelpBinding("Enter or e", "Edit the selected user");
     renderHelpBinding("d", "Delete the selected user after confirmation");
     renderHelpBinding("r", "Reset failed login attempts");
+    renderHelpBinding("x", "Disable the selected user");
     renderHelpBinding("p", "Show or hide the password in details");
     std::cout << "\n";
 
@@ -472,6 +484,8 @@ void renderMain(const DataManager& dataManager, const UserManagerState& state) {
                   << colorText(" delete | ", kHintStyle)
                   << colorText("r", kKeyStyle)
                   << colorText(" reset | ", kHintStyle)
+                  << colorText("x", kKeyStyle)
+                  << colorText(" disable | ", kHintStyle)
                   << colorText("p", kKeyStyle)
                   << colorText(state.showPassword ? " hide password | " : " show password | ", kHintStyle)
                   << colorText("h", kKeyStyle)
@@ -576,8 +590,8 @@ std::string validateForm(const UserForm& form, const DataManager& dataManager, U
     if (!parseCount(form.count, user.count)) {
         return "Failed count must be a number.";
     }
-    if (user.count < 0 || user.count > 7) {
-        return "Failed count must be between 0 and 7.";
+    if (user.count < 0 || user.count > 8) {
+        return "Failed count must be between 0 and 8.";
     }
 
     if (form.editing) {
@@ -590,16 +604,17 @@ std::string validateForm(const UserForm& form, const DataManager& dataManager, U
         }
         if (oldUser != nullptr &&
             toLowerCopy(oldUser->type) == "admin" &&
-            user.type != "admin" &&
-            adminCount(dataManager) <= 1) {
-            return "At least one admin user is required.";
+            oldUser->count <= 7 &&
+            (user.type != "admin" || user.count > 7) &&
+            activeAdminCount(dataManager, oldUser->name) == 0) {
+            return "At least one active admin user is required.";
         }
     }
 
     return "";
 }
 
-void saveForm(UserManagerState& state, DataManager& dataManager) {
+void saveForm(UserManagerState& state, DataManager& dataManager, const USER& currentUser) {
     USER user;
     const std::string error = validateForm(state.form, dataManager, user);
     if (!error.empty()) {
@@ -619,6 +634,8 @@ void saveForm(UserManagerState& state, DataManager& dataManager) {
     if (ok) {
         state.formOpen = false;
         selectUserByName(state, dataManager, user.name);
+        tundraux::audit::setCurrentUser(currentUser);
+        tundraux::audit::logEvent("manage-users", std::string(state.form.editing ? "edit " : "create ") + user.name);
     } else {
         state.form.error = state.message;
     }
@@ -638,7 +655,7 @@ void toggleType(UserForm& form) {
     form.type = toLowerCopy(form.type) == "admin" ? "user" : "admin";
 }
 
-void handleFormKey(UserManagerState& state, DataManager& dataManager, const KeyPress& key) {
+void handleFormKey(UserManagerState& state, DataManager& dataManager, const USER& currentUser, const KeyPress& key) {
     UserForm& form = state.form;
     form.error.clear();
 
@@ -682,7 +699,7 @@ void handleFormKey(UserManagerState& state, DataManager& dataManager, const KeyP
             }
             break;
         case Key::Enter:
-            saveForm(state, dataManager);
+            saveForm(state, dataManager, currentUser);
             break;
         case Key::Character:
             if (form.field == 1) {
@@ -709,7 +726,7 @@ void handleFormKey(UserManagerState& state, DataManager& dataManager, const KeyP
     }
 }
 
-void deleteSelected(UserManagerState& state, DataManager& dataManager) {
+void deleteSelected(UserManagerState& state, DataManager& dataManager, const USER& currentUser) {
     const USER* user = selectedUser(dataManager, state);
     if (user == nullptr) {
         state.message = "No user selected.";
@@ -717,23 +734,49 @@ void deleteSelected(UserManagerState& state, DataManager& dataManager) {
         return;
     }
 
-    const std::string name = user->name;
-    if (toLowerCopy(user->type) == "admin" && adminCount(dataManager) <= 1) {
-        state.message = "At least one admin user is required.";
+    if (isOnlyActiveAdmin(dataManager, *user)) {
+        state.message = "At least one active admin user is required.";
         state.confirmDelete = false;
         return;
     }
 
+    const std::string name = user->name;
     if (dataManager.RemoveUser(name)) {
         state.message = "User deleted: " + name;
         clampCursor(state, dataManager);
+        tundraux::audit::setCurrentUser(currentUser);
+        tundraux::audit::logEvent("manage-users", "delete " + name);
     } else {
         state.message = "Failed to delete user.";
     }
     state.confirmDelete = false;
 }
 
-void resetSelected(UserManagerState& state, DataManager& dataManager) {
+void disableSelected(UserManagerState& state, DataManager& dataManager, const USER& currentUser) {
+    const USER* user = selectedUser(dataManager, state);
+    if (user == nullptr) {
+        state.message = "No user selected.";
+        return;
+    }
+    if (isOnlyActiveAdmin(dataManager, *user)) {
+        state.message = "At least one active admin user is required.";
+        return;
+    }
+
+    USER updated = *user;
+    updated.count = 8;
+    const std::string name = updated.name;
+    if (dataManager.UpdateUser(name, updated)) {
+        state.message = "User disabled: " + name;
+        selectUserByName(state, dataManager, name);
+        tundraux::audit::setCurrentUser(currentUser);
+        tundraux::audit::logEvent("manage-users", "disable " + name);
+    } else {
+        state.message = "Failed to disable user.";
+    }
+}
+
+void resetSelected(UserManagerState& state, DataManager& dataManager, const USER& currentUser) {
     const USER* user = selectedUser(dataManager, state);
     if (user == nullptr) {
         state.message = "No user selected.";
@@ -745,13 +788,15 @@ void resetSelected(UserManagerState& state, DataManager& dataManager) {
     const std::string name = updated.name;
     if (dataManager.UpdateUser(name, updated)) {
         state.message = "Login count reset: " + name;
+        tundraux::audit::setCurrentUser(currentUser);
+        tundraux::audit::logEvent("manage-users", "reset " + name);
     } else {
         state.message = "Failed to reset count.";
     }
     selectUserByName(state, dataManager, name);
 }
 
-bool handleMainKey(UserManagerState& state, DataManager& dataManager, const KeyPress& key) {
+bool handleMainKey(UserManagerState& state, DataManager& dataManager, const USER& currentUser, const KeyPress& key) {
     if (state.showHelp) {
         if (key.key == Key::Escape || key.key == Key::Enter ||
             (key.key == Key::Character &&
@@ -763,7 +808,7 @@ bool handleMainKey(UserManagerState& state, DataManager& dataManager, const KeyP
     }
 
     if (state.formOpen) {
-        handleFormKey(state, dataManager, key);
+        handleFormKey(state, dataManager, currentUser, key);
         return true;
     }
 
@@ -776,7 +821,7 @@ bool handleMainKey(UserManagerState& state, DataManager& dataManager, const KeyP
         }
         if (key.key == Key::Enter ||
             (key.key == Key::Character && (key.character == 'y' || key.character == 'Y'))) {
-            deleteSelected(state, dataManager);
+            deleteSelected(state, dataManager, currentUser);
             return true;
         }
         return true;
@@ -849,7 +894,11 @@ bool handleMainKey(UserManagerState& state, DataManager& dataManager, const KeyP
                     break;
                 case 'r':
                 case 'R':
-                    resetSelected(state, dataManager);
+                    resetSelected(state, dataManager, currentUser);
+                    break;
+                case 'x':
+                case 'X':
+                    disableSelected(state, dataManager, currentUser);
                     break;
                 case 'p':
                 case 'P':
@@ -875,7 +924,7 @@ bool handleMainKey(UserManagerState& state, DataManager& dataManager, const KeyP
 
 } // namespace
 
-void manage_users() {
+void manage_users(const USER& currentUser) {
     tundra_tui::set_title("User Management");
 
     std::ifstream check("user_data.dat");
@@ -905,6 +954,6 @@ void manage_users() {
             renderMain(dataManager, state);
         }
 
-        running = handleMainKey(state, dataManager, readKey());
+        running = handleMainKey(state, dataManager, currentUser, readKey());
     }
 }

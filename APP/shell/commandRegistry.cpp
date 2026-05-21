@@ -65,7 +65,7 @@ std::vector<RegisteredCommand> buildNewCommandRegistry(USER& currentUser) {
             "manageuser",
             "Open user management interface",
             {"manageusers"},
-            handleManageUsersCommand,
+            [&currentUser](const std::string& input) { handleManageUsersCommand(input, currentUser); },
             "admin,debug",
             false
         },

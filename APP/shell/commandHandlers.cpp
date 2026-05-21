@@ -191,8 +191,8 @@ void handleInfoCommand(const std::string&) {
     colorcout("cyan", "TundraUX 2.0 " + std::string(BUILD) + "\n");
 }
 
-void handleManageUsersCommand(const std::string&) {
-    manage_users();
+void handleManageUsersCommand(const std::string&, USER& currentUser) {
+    manage_users(currentUser);
 }
 
 void handleEditCommand(const std::string& input) {

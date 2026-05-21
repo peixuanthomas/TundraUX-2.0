@@ -2,4 +2,4 @@
 
 #include "udata.hpp"
 
-void manage_users();
+void manage_users(const USER& currentUser);
