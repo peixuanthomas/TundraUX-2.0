@@ -212,6 +212,11 @@ void handleEditCommand(const std::string& input) {
         colorcout("yellow", "Use TUXfile to open .TUX files.\n");
         return;
     }
+    if (lowerFilename.size() >= 5 &&
+        lowerFilename.substr(lowerFilename.size() - 5) == ".tlog") {
+        colorcout("yellow", "Use explorer or export log to inspect encrypted audit logs.\n");
+        return;
+    }
     fs::path requestedPath(filename);
     if (requestedPath.is_absolute() || hasUnsafePathPart(requestedPath)) {
         colorcout("red", "Access Denied.\n");

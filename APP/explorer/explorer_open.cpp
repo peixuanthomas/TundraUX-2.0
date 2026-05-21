@@ -1,6 +1,7 @@
 #include "explorer_open.hpp"
 
 #include "TUXfile.hpp"
+#include "audit_log.hpp"
 #include "editor.hpp"
 #include "explorer_directory.hpp"
 #include "explorer_navigation.hpp"
@@ -58,6 +59,24 @@ void openSelected(ExplorerState& state) {
             state.message = redMessage("Failed to save TUX file.");
         } else {
             state.message = redMessage("Failed to decrypt and open TUX file.");
+        }
+        return;
+    }
+    if (extensionOf(selected.path) == ".tlog") {
+        std::cout << "\x1b[?25h" << std::flush;
+        const int result = tundraux::audit::openTlogInEditor(
+            pathToDisplayString(selected.path),
+            selected.name,
+            state.username,
+            state.usertype
+        );
+        std::cout << "\x1b[?25l" << std::flush;
+        if (result == 0) {
+            state.message = "Opened audit log " + selected.name;
+        } else if (result == 3) {
+            state.message = redMessage("Access denied: only admin or debug can open audit logs.");
+        } else {
+            state.message = redMessage("Failed to decrypt audit log.");
         }
         return;
     }

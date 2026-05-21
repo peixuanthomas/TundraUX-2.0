@@ -60,6 +60,9 @@ std::string fileTypeDescription(const FileEntry& entry) {
     if (extension == ".dat") {
         return "User data file";
     }
+    if (extension == ".tlog") {
+        return "Encrypted audit log";
+    }
     if (extension == ".md") {
         return "Markdown text file";
     }

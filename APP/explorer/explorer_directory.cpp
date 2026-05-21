@@ -189,6 +189,9 @@ std::vector<std::string> previewFile(const fs::path& path) {
     if (extensionOf(path) == ".tux") {
         return {"Encrypted TUX file.", "Press Enter to decrypt and edit."};
     }
+    if (extensionOf(path) == ".tlog") {
+        return {"Encrypted audit log.", "Admin/debug can press Enter to decrypt and view."};
+    }
     if (extensionOf(path) == ".dat") {
         return {"User data file."};
     }
