@@ -92,6 +92,61 @@ target_compile_features(${PROJECT_NAME}
         cxx_std_17
 )
 
+enable_testing()
+
+add_executable(audit_log_tests
+    tests/audit_log_tests.cpp
+    SYSTEM/audit/audit_log.cpp
+    SYSTEM/crypto/crypto.cpp
+    USER/udata/udata.cpp
+)
+
+target_include_directories(audit_log_tests
+    PRIVATE
+        ${PROJECT_SOURCE_DIR}/APP/editor
+        ${PROJECT_SOURCE_DIR}/SYSTEM/audit
+        ${PROJECT_SOURCE_DIR}/SYSTEM/console
+        ${PROJECT_SOURCE_DIR}/SYSTEM/crypto
+        ${PROJECT_SOURCE_DIR}/USER/udata
+)
+
+target_link_libraries(audit_log_tests
+    PRIVATE
+        TundraTUI::TundraTUI
+)
+
+target_compile_features(audit_log_tests
+    PRIVATE
+        cxx_std_17
+)
+
+add_test(NAME audit_log_tests COMMAND audit_log_tests)
+
+add_executable(explorer_permissions_tests
+    tests/explorer_permissions_tests.cpp
+    APP/explorer/explorer_directory.cpp
+    APP/explorer/explorer_permissions.cpp
+    APP/explorer/explorer_text.cpp
+)
+
+target_include_directories(explorer_permissions_tests
+    PRIVATE
+        ${PROJECT_SOURCE_DIR}/APP/explorer
+        ${PROJECT_SOURCE_DIR}/APP/file_manager
+)
+
+target_link_libraries(explorer_permissions_tests
+    PRIVATE
+        TundraTUI::TundraTUI
+)
+
+target_compile_features(explorer_permissions_tests
+    PRIVATE
+        cxx_std_17
+)
+
+add_test(NAME explorer_permissions_tests COMMAND explorer_permissions_tests)
+
 if(TUNDRAUX_DEBUG_STARTUP)
     target_compile_definitions(${PROJECT_NAME}
         PRIVATE

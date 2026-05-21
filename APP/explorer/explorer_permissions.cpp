@@ -13,8 +13,14 @@ std::string deletePermissionError(const ExplorerState& state, const FileEntry& e
         if (!entry.isDirectory && extension == ".dat") {
             return "User data files are debug-only.";
         }
+        if (!entry.isDirectory && extension == ".tlog") {
+            return "Audit log files are debug-only.";
+        }
         if (entry.isDirectory && directoryContainsExtension(entry.path, ".dat")) {
             return "Folders containing user data files are debug-only.";
+        }
+        if (entry.isDirectory && directoryContainsExtension(entry.path, ".tlog")) {
+            return "Folders containing audit log files are debug-only.";
         }
     }
 

@@ -269,10 +269,13 @@ void logEvent(const std::string& category, const std::string& detail) {
 }
 
 void logKeyPress(const tundra_tui::KeyPress& key, bool sensitive) {
-    (void)sensitive;
     std::string detail;
     switch (key.key) {
         case tundra_tui::Key::Character: {
+            if (sensitive) {
+                detail = "Character [redacted]";
+                break;
+            }
             const unsigned char ch = static_cast<unsigned char>(key.character);
             if (ch >= 1 && ch <= 26) {
                 detail = "Ctrl+";
