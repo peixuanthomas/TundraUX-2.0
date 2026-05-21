@@ -148,7 +148,7 @@ std::vector<RegisteredCommand> buildNewCommandRegistry(USER& currentUser) {
             "edit [filename]",
             "Open the text editor",
             {},
-            handleEditCommand,
+            [&currentUser](const std::string& input) { handleEditCommand(input, currentUser); },
             "admin,user,debug",
             false,
             true

@@ -35,11 +35,13 @@ void openSelected(ExplorerState& state) {
         refresh(state);
         return;
     }
+    const std::string selectedPath = pathToDisplayString(selected.path);
 
     if (extensionOf(selected.path) == ".tux") {
+        tundraux::audit::logEvent("explorer", "open " + selectedPath);
         std::cout << "\x1b[?25h" << std::flush;
         const int result = open_tux_file_in_editor(
-            pathToDisplayString(selected.path),
+            selectedPath,
             selected.name,
             state.username,
             state.usertype,
@@ -63,9 +65,10 @@ void openSelected(ExplorerState& state) {
         return;
     }
     if (extensionOf(selected.path) == ".tlog") {
+        tundraux::audit::logEvent("explorer", "open " + selectedPath);
         std::cout << "\x1b[?25h" << std::flush;
         const int result = tundraux::audit::openTlogInEditor(
-            pathToDisplayString(selected.path),
+            selectedPath,
             selected.name,
             state.username,
             state.usertype
@@ -86,8 +89,9 @@ void openSelected(ExplorerState& state) {
     }
 
     if (opensWithEditor(selected.path)) {
+        tundraux::audit::logEvent("explorer", "open " + selectedPath);
         std::cout << "\x1b[?25h" << std::flush;
-        const int result = run_editor(pathToDisplayString(selected.path), selected.name);
+        const int result = run_editor(selectedPath, selected.name);
         std::cout << "\x1b[?25l" << std::flush;
         state.message = result == 0
             ? "Edited " + selected.name
@@ -96,6 +100,7 @@ void openSelected(ExplorerState& state) {
         return;
     }
 
+    tundraux::audit::logEvent("explorer", "open " + selectedPath);
     const HINSTANCE result = ShellExecuteW(
         nullptr,
         L"open",

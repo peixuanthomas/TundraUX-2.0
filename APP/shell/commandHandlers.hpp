@@ -16,7 +16,7 @@ void handleListUserCommand(const std::string& input);
 void handleTuxFileCommand(const std::string& input, USER& currentUser);
 void handleInfoCommand(const std::string& input);
 void handleManageUsersCommand(const std::string& input, USER& currentUser);
-void handleEditCommand(const std::string& input);
+void handleEditCommand(const std::string& input, USER& currentUser);
 void handleExplorerCommand(const std::string& input, USER& currentUser);
 void handleWhoamiCommand(const USER& currentUser);
 void handleStrictCommand(const std::string& input, USER& currentUser);

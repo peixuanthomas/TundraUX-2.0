@@ -90,6 +90,7 @@ void handleLoginCommand(const std::string& input, USER& currentUser) {
         colorcout("yellow", "Usage: login <username>\n");
         return;
     }
+    tundraux::audit::logEvent("login", "attempt " + username);
     DataManager dataManager("user_data.dat");
     const auto &users = dataManager.GetAllUsers();
     auto it = std::find_if(users.begin(), users.end(),
@@ -98,12 +99,14 @@ void handleLoginCommand(const std::string& input, USER& currentUser) {
 
     if (it == users.end())
     {
+        tundraux::audit::logEvent("login", "not-found " + username);
         colorcout("red", "User not found: " + username + "\n");
         return;
     }
     // disable user when count > 7
     if (it->count > 7)
     {
+        tundraux::audit::logEvent("login", "locked " + username);
         colorcout("red", "User disabled due to too many failed attempts.\n");
         return;
     }
@@ -114,6 +117,8 @@ void handleLoginCommand(const std::string& input, USER& currentUser) {
         updated.count = 0; // reset fail count on success
         dataManager.UpdateUser(username, updated);
         currentUser = updated;
+        tundraux::audit::setCurrentUser(currentUser);
+        tundraux::audit::logEvent("login", "success " + username);
         rollcout("green", "Welcome, " + currentUser.name + "!");
     }
     else
@@ -121,6 +126,7 @@ void handleLoginCommand(const std::string& input, USER& currentUser) {
         USER updated = *it;
         updated.count += 1; // add fail count on failure
         dataManager.UpdateUser(username, updated);
+        tundraux::audit::logEvent("login", "failure " + username + " count=" + std::to_string(updated.count));
         colorcout("red", "Incorrect password for user " + username + ".\n");
         colorcout("red", "Failed attempts: " + std::to_string(updated.count) + "\n");
         colorcout("blue", "Password Hint: " + (it->password_hint.empty() ? "(none)" : it->password_hint) + "\n");
@@ -168,6 +174,7 @@ void handleLogoutCommand(const std::string&, USER& currentUser) {
         colorcout("yellow", "No user is currently logged in.\n");
         return;
     }
+    tundraux::audit::logEvent("logout", currentUser.name);
     colorcout("green", "User " + currentUser.name + " logged out successfully.\n");
     currentUser = {
         "guest",
@@ -176,6 +183,7 @@ void handleLogoutCommand(const std::string&, USER& currentUser) {
         "",
         0
     };
+    tundraux::audit::setCurrentUser(currentUser);
 }
 
 void handleListUserCommand(const std::string&) {
@@ -195,11 +203,13 @@ void handleManageUsersCommand(const std::string&, USER& currentUser) {
     manage_users(currentUser);
 }
 
-void handleEditCommand(const std::string& input) {
+void handleEditCommand(const std::string& input, USER& currentUser) {
+    tundraux::audit::setCurrentUser(currentUser);
     std::istringstream iss(input);
     std::string cmd, filename;
     iss >> cmd >> filename;
     if (filename.empty()) {
+        tundraux::audit::logEvent("editor", "open (empty)");
         run_editor("", "");
         return;
     }
@@ -236,10 +246,13 @@ void handleEditCommand(const std::string& input) {
         colorcout("red", "Error: File not found: " + path + "\n");
         return;
     }
+    tundraux::audit::logEvent("editor", "open " + path);
     run_editor(path, filename);
 }
 
 void handleExplorerCommand(const std::string&, USER& currentUser) {
+    tundraux::audit::setCurrentUser(currentUser);
+    tundraux::audit::logEvent("explorer", "open");
     open_explorer(currentUser.name, currentUser.type);
 }
 
