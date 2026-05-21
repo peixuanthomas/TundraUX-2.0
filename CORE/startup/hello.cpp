@@ -2,11 +2,13 @@
 
 #include <algorithm>
 #include <cctype>
+#include <cstdio>
 #include <cstdint>
 #include <fstream>
 #include <iostream>
 #include <string>
 #include <vector>
+#include <windows.h>
 
 #include "crypto.hpp"
 #include "TundraTUI/color.hpp"
@@ -361,9 +363,12 @@ void writeString(std::ofstream& outFile, const std::string& value) {
 }
 
 bool createAdminUser(const SetupState& state, std::string& error) {
-    std::ofstream outFile("user_data.dat", std::ios::binary | std::ios::trunc);
+    const std::string finalFilename = "user_data.dat";
+    const std::string tempFilename = finalFilename + ".tmp";
+
+    std::ofstream outFile(tempFilename, std::ios::binary | std::ios::trunc);
     if (!outFile) {
-        error = "Unable to create user_data.dat.";
+        error = "Unable to create temporary user data file.";
         return false;
     }
 
@@ -379,18 +384,36 @@ bool createAdminUser(const SetupState& state, std::string& error) {
     writeString(outFile, encrypt(state.password));
     writeString(outFile, trimCopy(state.passwordHint));
     outFile.write(reinterpret_cast<const char*>(&failedCount), sizeof(failedCount));
-    outFile.close();
 
+    outFile.flush();
     if (outFile.fail() || outFile.bad()) {
-        error = "Failed to write user_data.dat.";
+        outFile.close();
+        std::remove(tempFilename.c_str());
+        error = "Failed to write temporary user data file.";
         return false;
     }
 
-    DataManager dataManager("user_data.dat");
+    outFile.close();
+    if (outFile.fail() || outFile.bad()) {
+        std::remove(tempFilename.c_str());
+        error = "Failed to finalize temporary user data file.";
+        return false;
+    }
+
+    DataManager dataManager(tempFilename);
     const auto& users = dataManager.GetAllUsers();
     if (users.size() != 1 || users.front().name != trimCopy(state.username) ||
         users.front().type != "admin") {
+        std::remove(tempFilename.c_str());
         error = "Created user data did not verify.";
+        return false;
+    }
+    if (!MoveFileExA(
+            tempFilename.c_str(),
+            finalFilename.c_str(),
+            MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH)) {
+        std::remove(tempFilename.c_str());
+        error = "Failed to replace user_data.dat.";
         return false;
     }
 

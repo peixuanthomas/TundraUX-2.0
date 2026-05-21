@@ -6,6 +6,7 @@
 #include "crypto.hpp"
 #include <cstdio>
 #include <cstdint>
+#include <exception>
 #include <fstream>
 #include <iostream>
 #include <iomanip>
@@ -14,6 +15,9 @@
 #include <algorithm>
 
 namespace {
+constexpr size_t MAX_USER_COUNT = 10000;
+constexpr size_t MAX_USER_STRING_LENGTH = 1024 * 1024;
+
 void print_display_test_line(const std::string& colorName) {
     colorcout(colorName, "Display test: " + colorName + "\n");
 }
@@ -38,9 +42,18 @@ void struct_file() {
         size_t len = 0;
         in.read(reinterpret_cast<char*>(&len), sizeof(len));
         if (!in) return false;
-        out.resize(len);
-        if (len > 0) in.read(&out[0], len);
-        return in.good();
+        if (len > MAX_USER_STRING_LENGTH) {
+            colorcout("red", "Error: User string length exceeds maximum supported value\n");
+            return false;
+        }
+        try {
+            out.assign(len, '\0');
+        } catch (const std::exception&) {
+            colorcout("red", "Error: Unable to allocate memory for user string\n");
+            return false;
+        }
+        if (len > 0) in.read(&out[0], static_cast<std::streamsize>(len));
+        return static_cast<bool>(in);
     };
     int version = 0;
     size_t userCount = 0;
@@ -75,6 +88,11 @@ void struct_file() {
         colorcout("white", std::to_string(userCount) + "\n");
     } else {
         colorcout("red", "Error: Unsupported user_data.dat version in struct_file\n");
+        return;
+    }
+
+    if (userCount > MAX_USER_COUNT) {
+        colorcout("red", "Error: User count exceeds maximum supported value\n");
         return;
     }
 
