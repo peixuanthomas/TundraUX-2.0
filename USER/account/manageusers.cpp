@@ -922,14 +922,47 @@ bool handleMainKey(UserManagerState& state, DataManager& dataManager, const USER
     return true;
 }
 
+void refreshCurrentUserAfterManagement(USER& currentUser) {
+    const std::string lookupName = currentUser.name;
+    USER refreshedUser = {"guest", "", "", "", 0};
+    bool foundActiveUser = false;
+
+    if (!lookupName.empty()) {
+        try {
+            DataManager refreshedData("user_data.dat");
+            const auto& users = refreshedData.GetAllUsers();
+            const auto it = std::find_if(users.begin(), users.end(), [&](const USER& user) {
+                return user.name == lookupName;
+            });
+            if (it != users.end() && it->count <= 7) {
+                refreshedUser = *it;
+                foundActiveUser = true;
+            }
+        } catch (...) {
+            foundActiveUser = false;
+        }
+    }
+
+    if (!foundActiveUser) {
+        currentUser = {"guest", "", "", "", 0};
+    } else if (currentUser.type != refreshedUser.type ||
+               currentUser.name != refreshedUser.name ||
+               currentUser.count != refreshedUser.count) {
+        currentUser = refreshedUser;
+    }
+
+    tundraux::audit::setCurrentUser(currentUser);
+}
+
 } // namespace
 
-void manage_users(const USER& currentUser) {
+void manage_users(USER& currentUser) {
     tundra_tui::set_title("User Management");
 
     std::ifstream check("user_data.dat");
     if (!check.good()) {
         tundra_tui::colorcout("red", "Error: user_data.dat not found.\n");
+        refreshCurrentUserAfterManagement(currentUser);
         return;
     }
     check.close();
@@ -956,4 +989,6 @@ void manage_users(const USER& currentUser) {
 
         running = handleMainKey(state, dataManager, currentUser, readKey());
     }
+
+    refreshCurrentUserAfterManagement(currentUser);
 }

@@ -75,7 +75,7 @@ void struct_file() {
             colorcout("red", "Error: Invalid strict flag in user_data.dat header\n");
             return;
         }
-        colorcout("white", std::to_string(version) + "\n");
+        colorcout("white", "2.1 (marker=21)\n");
         colorcout("white", "strict=" + std::to_string(static_cast<int>(strictValue)) + "\n");
         colorcout("white", std::to_string(userCount) + "\n");
     } else if (version == 2) {

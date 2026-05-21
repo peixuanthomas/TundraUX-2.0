@@ -295,9 +295,14 @@ void handleStrictCommand(const std::string& input, USER& currentUser) {
         return;
     }
 
-    tundraux::audit::refreshStrictMode();
     tundraux::audit::setCurrentUser(currentUser);
-    tundraux::audit::logEvent("strict", enabled ? "enabled" : "disabled");
+    if (enabled) {
+        tundraux::audit::refreshStrictMode();
+        tundraux::audit::logEvent("strict", "enabled");
+    } else {
+        tundraux::audit::logEvent("strict", "disabled");
+        tundraux::audit::refreshStrictMode();
+    }
     colorcout("green", enabled ? "Strict mode enabled.\n" : "Strict mode disabled.\n");
 }
 
