@@ -1,6 +1,7 @@
 /build
 /build-*
 /.vscode
+/.worktrees
 TundraUX 2.0.code-workspace
 memory.md
 todo
