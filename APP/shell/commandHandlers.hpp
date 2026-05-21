@@ -19,3 +19,5 @@ void handleManageUsersCommand(const std::string& input);
 void handleEditCommand(const std::string& input);
 void handleExplorerCommand(const std::string& input, USER& currentUser);
 void handleWhoamiCommand(const USER& currentUser);
+void handleStrictCommand(const std::string& input, USER& currentUser);
+void handleExportCommand(const std::string& input, USER& currentUser);

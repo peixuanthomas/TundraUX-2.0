@@ -124,6 +124,26 @@ std::vector<RegisteredCommand> buildNewCommandRegistry(USER& currentUser) {
             false
         },
         {
+            "strict",
+            "strict <status|on|off>",
+            "View or change strict audit mode",
+            {},
+            [&currentUser](const std::string& input) { handleStrictCommand(input, currentUser); },
+            "admin,debug",
+            false,
+            true
+        },
+        {
+            "export",
+            "export log <tlog-file>",
+            "Export an encrypted audit log to plaintext",
+            {},
+            [&currentUser](const std::string& input) { handleExportCommand(input, currentUser); },
+            "admin,debug",
+            false,
+            true
+        },
+        {
             "edit",
             "edit [filename]",
             "Open the text editor",

@@ -5,6 +5,7 @@
 #include <exception>
 #include <sstream>
 
+#include "audit_log.hpp"
 #include "color.hpp"
 
 namespace {
@@ -86,6 +87,7 @@ bool tryExecuteRegisteredCommand(
         }
 
         if (!hasCommandPermission(cmd.requiredUserType, currentUser.type)) {
+            tundraux::audit::logEvent("command", "denied " + inputCommand);
             colorcout("red", "Access Denied.\n");
         } else if (cmd.name == "help") {
             colorcout("cyan", "Available commands:\n");
@@ -109,6 +111,7 @@ bool tryExecuteRegisteredCommand(
             }
         } else {
             try {
+                tundraux::audit::logEvent("command", "execute " + inputCommand);
                 cmd.handler(input);
             } catch (const std::exception& ex) {
                 colorcout("red", "Command failed: " + std::string(ex.what()) + "\n");

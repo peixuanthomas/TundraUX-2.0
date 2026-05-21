@@ -13,6 +13,7 @@
 #include <sys/stat.h>
 
 #include "account_settings.hpp"
+#include "audit_log.hpp"
 #include "color.hpp"
 #include "editor.hpp"
 #include "manageusers.hpp"
@@ -70,6 +71,13 @@ bool hasUnsafePathPart(const fs::path& path) {
         }
     }
     return false;
+}
+
+std::string trimLeadingSpaces(std::string value) {
+    value.erase(value.begin(), std::find_if(value.begin(), value.end(), [](unsigned char ch) {
+        return !std::isspace(ch);
+    }));
+    return value;
 }
 }
 
@@ -235,5 +243,64 @@ void handleWhoamiCommand(const USER& currentUser) {
         colorcout("yellow", "No user is currently logged in.\n");
     } else {
         colorcout("white", "Current user: " + currentUser.name + " (" + currentUser.type + ")\n");
+    }
+}
+
+void handleStrictCommand(const std::string& input, USER& currentUser) {
+    std::istringstream iss(input);
+    std::string command;
+    std::string action;
+    std::string extra;
+    iss >> command >> action >> extra;
+
+    if (!extra.empty()) {
+        colorcout("yellow", "Usage: strict <status|on|off>\n");
+        return;
+    }
+
+    DataManager dataManager("user_data.dat");
+    if (action.empty() || action == "status") {
+        const bool strictModeEnabled = dataManager.GetStrictMode();
+        colorcout("white", "Strict mode: " + std::string(strictModeEnabled ? "on" : "off") + "\n");
+        tundraux::audit::logEvent("strict", "status " + std::string(strictModeEnabled ? "on" : "off"));
+        return;
+    }
+
+    if (action != "on" && action != "off") {
+        colorcout("yellow", "Usage: strict <status|on|off>\n");
+        return;
+    }
+
+    const bool enabled = action == "on";
+    if (!dataManager.SetStrictMode(enabled)) {
+        colorcout("red", "Failed to update strict mode.\n");
+        return;
+    }
+
+    tundraux::audit::refreshStrictMode();
+    tundraux::audit::setCurrentUser(currentUser);
+    tundraux::audit::logEvent("strict", enabled ? "enabled" : "disabled");
+    colorcout("green", enabled ? "Strict mode enabled.\n" : "Strict mode disabled.\n");
+}
+
+void handleExportCommand(const std::string& input, USER& currentUser) {
+    std::istringstream iss(input);
+    std::string command;
+    std::string subcommand;
+    iss >> command >> subcommand;
+    std::string path;
+    std::getline(iss, path);
+    path = trimLeadingSpaces(path);
+
+    if (subcommand != "log" || path.empty()) {
+        colorcout("yellow", "Usage: export log <tlog-file>\n");
+        return;
+    }
+
+    std::string message;
+    if (tundraux::audit::exportTlogToPlaintext(path, currentUser.name, currentUser.type, message)) {
+        colorcout("green", message + "\n");
+    } else {
+        colorcout("red", message + "\n");
     }
 }

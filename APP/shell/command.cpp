@@ -9,6 +9,9 @@
 #include <unordered_set>
 #include <vector>
 
+#include <TundraTUI/input.hpp>
+
+#include "audit_log.hpp"
 #include "color.hpp"
 #include "commandHandlers.hpp"
 #include "commandReg.hpp"
@@ -43,6 +46,8 @@ bool redrawsShellHeader(const std::string& input) {
 
 void task_main() {
     renderShellHeader();
+    tundraux::audit::initialize();
+    tundra_tui::setKeyAuditSink(tundraux::audit::logKeyPress);
 
     USER currentUser = {
         TUNDRAUX_DEFAULT_USER_TYPE,
@@ -51,6 +56,7 @@ void task_main() {
         "",
         0
     };
+    tundraux::audit::setCurrentUser(currentUser);
 
     std::vector<RegisteredCommand> registeredCommands = buildNewCommandRegistry(currentUser);
     std::vector<std::string> commandHistory;
@@ -59,6 +65,7 @@ void task_main() {
     bool shellHeaderWasJustRendered = true;
 
     while (true) {
+        tundraux::audit::setCurrentUser(currentUser);
         if (shellHeaderWasJustRendered) {
             shellHeaderWasJustRendered = false;
         } else {
@@ -79,6 +86,7 @@ void task_main() {
         if (input.empty()) {
             continue;
         }
+        tundraux::audit::logEvent("shell", "input " + input);
 
         if (commandHistory.empty() || commandHistory.back() != input) {
             if (static_cast<int>(commandHistory.size()) >= MAX_HISTORY) {
@@ -90,9 +98,11 @@ void task_main() {
 
         if (input.length() > 1 && input[0] == '/') {
             if (!canRunSystemCommand(currentUser)) {
+                tundraux::audit::logEvent("shell", "system denied");
                 colorcout("red", "Access Denied.\n");
                 continue;
             }
+            tundraux::audit::logEvent("shell", "system execute");
             std::string command = input.substr(1);
             colorcout("yellow", "=== Executing: " + command + " ===\n");
             int result = system(command.c_str());
