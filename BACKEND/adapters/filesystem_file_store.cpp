@@ -258,7 +258,12 @@ std::filesystem::path FilesystemFileStore::resolveManagedPath(const std::string&
 
     for (const auto& part : requested) {
         const auto component = part.string();
-        if (component == "." || component == ".." || component.find(':') != std::string::npos) {
+        if (component.empty() ||
+            component == "." ||
+            component == ".." ||
+            component.find(':') != std::string::npos ||
+            component.back() == '.' ||
+            component.back() == ' ') {
             throw invalidPath();
         }
     }
@@ -271,12 +276,20 @@ std::filesystem::path FilesystemFileStore::resolveManagedPath(const std::string&
 }
 
 void FilesystemFileStore::rejectProtectedPath(const std::filesystem::path& resolved) const {
-    const auto filename = lowerAscii(resolved.filename().string());
-    const auto extension = lowerAscii(resolved.extension().string());
-    if (filename == "user_data.dat" ||
-        extension == ".tux" ||
-        extension == ".tlog") {
-        throw permissionDenied();
+    std::error_code error;
+    const auto relative = std::filesystem::relative(resolved, root_, error);
+    if (error) {
+        throw storageError();
+    }
+
+    for (const auto& part : relative) {
+        const auto filename = lowerAscii(part.filename().string());
+        const auto extension = lowerAscii(part.extension().string());
+        if (filename == "user_data.dat" ||
+            extension == ".tux" ||
+            extension == ".tlog") {
+            throw permissionDenied();
+        }
     }
 }
 

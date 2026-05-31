@@ -9,7 +9,11 @@
 #include <functional>
 #include <fstream>
 #include <iostream>
+#include <stdexcept>
 #include <string>
+#include <system_error>
+#include <thread>
+#include <chrono>
 #include <utility>
 #include <vector>
 
@@ -69,11 +73,14 @@ public:
 class TempDirectory final {
 public:
     explicit TempDirectory(std::filesystem::path root) : root_(std::move(root)) {
+        verifyUnderTempRoot();
         std::filesystem::remove_all(root_);
     }
 
     ~TempDirectory() {
-        std::filesystem::remove_all(root_);
+        if (isUnderTempRoot()) {
+            std::filesystem::remove_all(root_);
+        }
     }
 
     const std::filesystem::path& path() const {
@@ -81,8 +88,35 @@ public:
     }
 
 private:
+    void verifyUnderTempRoot() const {
+        if (!isUnderTempRoot()) {
+            throw std::runtime_error("TempDirectory root is outside system temp directory.");
+        }
+    }
+
+    bool isUnderTempRoot() const {
+        std::error_code error;
+        const auto tempRoot = std::filesystem::temp_directory_path(error);
+        if (error) {
+            return false;
+        }
+        const auto relative = std::filesystem::relative(root_, tempRoot, error);
+        if (error || relative.empty() || relative.is_absolute()) {
+            return false;
+        }
+        const auto first = relative.begin();
+        return first != relative.end() && *first != std::filesystem::path("..");
+    }
+
     std::filesystem::path root_;
 };
+
+std::filesystem::path uniqueTempPath() {
+    const auto ticks = std::chrono::steady_clock::now().time_since_epoch().count();
+    const auto threadId = std::hash<std::thread::id>{}(std::this_thread::get_id());
+    return std::filesystem::temp_directory_path() /
+        ("tundraux_backend_file_store_tests_" + std::to_string(ticks) + "_" + std::to_string(threadId));
+}
 
 bool expect(bool condition, const std::string& message) {
     if (!condition) {
@@ -182,9 +216,7 @@ int main() {
     if (!expect(missing.error.code == ErrorCode::NotFound, "missing.txt error code mismatch")) return 1;
     if (!expect(missing.error.message == "File not found.", "missing.txt error message mismatch")) return 1;
 
-    const auto root = std::filesystem::temp_directory_path() /
-        std::filesystem::path("tundraux_backend_file_store_tests");
-    TempDirectory tempRoot(root);
+    TempDirectory tempRoot(uniqueTempPath());
     std::filesystem::create_directories(tempRoot.path() / "docs");
     std::filesystem::create_directories(tempRoot.path() / "Alpha");
     std::filesystem::create_directories(tempRoot.path() / "beta");
@@ -264,10 +296,9 @@ int main() {
         ErrorCode::StorageError,
         [&store]() { store.writeFile("oversize.txt", std::string(16u * 1024u * 1024u + 1u, 'x')); })) return 1;
 
-    if (!expectBackendExceptionOneOf(
-        "../user_data.dat should fail with InvalidPath or PermissionDenied",
+    if (!expectBackendException(
+        "../user_data.dat should fail with InvalidPath",
         ErrorCode::InvalidPath,
-        ErrorCode::PermissionDenied,
         [&store]() { (void)store.readFile("../user_data.dat"); })) return 1;
     if (!expectBackendException(
         "secret.TUX should fail with PermissionDenied",
@@ -290,19 +321,43 @@ int main() {
         ErrorCode::PermissionDenied,
         [&store]() { (void)store.readFile("USER_DATA.DAT"); })) return 1;
     std::filesystem::create_directories(tempRoot.path() / "protected.TLOG");
+    std::ofstream(tempRoot.path() / "protected.TLOG" / "note.txt") << "protected";
     if (!expectBackendException(
         "protected.TLOG listDirectory should fail with PermissionDenied",
         ErrorCode::PermissionDenied,
         [&store]() { (void)store.listDirectory("protected.TLOG"); })) return 1;
-    if (!expectBackendExceptionOneOf(
-        "user_data.dat:stream write should fail with InvalidPath or PermissionDenied",
-        ErrorCode::InvalidPath,
+    if (!expectBackendException(
+        "protected.TLOG/note.txt read should fail with PermissionDenied",
         ErrorCode::PermissionDenied,
+        [&store]() { (void)store.readFile("protected.TLOG/note.txt"); })) return 1;
+    if (!expectBackendException(
+        "protected.TLOG/new.txt write should fail with PermissionDenied",
+        ErrorCode::PermissionDenied,
+        [&store]() { store.writeFile("protected.TLOG/new.txt", "x"); })) return 1;
+    if (!expectBackendException(
+        "user_data.dat:stream write should fail with InvalidPath",
+        ErrorCode::InvalidPath,
         [&store]() { store.writeFile("user_data.dat:stream", "x"); })) return 1;
     if (!expectBackendException(
         "docs/new.txt:stream write should fail with InvalidPath",
         ErrorCode::InvalidPath,
         [&store]() { store.writeFile("docs/new.txt:stream", "x"); })) return 1;
+    if (!expectBackendException(
+        "user_data.dat. read should fail with InvalidPath",
+        ErrorCode::InvalidPath,
+        [&store]() { (void)store.readFile("user_data.dat."); })) return 1;
+    if (!expectBackendException(
+        "user_data.dat. write should fail with InvalidPath",
+        ErrorCode::InvalidPath,
+        [&store]() { store.writeFile("user_data.dat.", "x"); })) return 1;
+    if (!expectBackendException(
+        "audit.tlog. read should fail with InvalidPath",
+        ErrorCode::InvalidPath,
+        [&store]() { (void)store.readFile("audit.tlog."); })) return 1;
+    if (!expectBackendException(
+        "secret.tux trailing-space write should fail with InvalidPath",
+        ErrorCode::InvalidPath,
+        [&store]() { store.writeFile("secret.tux ", "x"); })) return 1;
 
     return 0;
 }
