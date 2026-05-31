@@ -3,7 +3,6 @@
 #include "backend_error.hpp"
 #include "user_store.hpp"
 
-#include <cstdint>
 #include <string>
 #include <unordered_map>
 #include <utility>
@@ -55,7 +54,6 @@ public:
 private:
     UserStore& users_;
     std::unordered_map<std::string, BackendUser> sessions_;
-    std::uint64_t nextSessionId_ = 1;
 
     std::string nextSessionId();
     static BackendUser guestUser();

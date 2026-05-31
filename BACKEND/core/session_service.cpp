@@ -1,10 +1,37 @@
 #include "session_service.hpp"
 
 #include <algorithm>
+#include <cstdint>
 #include <exception>
+#include <iomanip>
+#include <random>
+#include <sstream>
 #include <utility>
 
 namespace tundraux::backend {
+namespace {
+
+constexpr const char* kAuthenticationFailedMessage = "Authentication failed.";
+
+std::string randomSessionId() {
+    static thread_local std::mt19937_64 generator([] {
+        std::random_device device;
+        std::seed_seq seed{
+            device(), device(), device(), device(),
+            device(), device(), device(), device()
+        };
+        return std::mt19937_64(seed);
+    }());
+
+    std::uniform_int_distribution<std::uint64_t> distribution;
+    std::ostringstream out;
+    out << std::hex << std::setfill('0')
+        << std::setw(16) << distribution(generator)
+        << std::setw(16) << distribution(generator);
+    return out.str();
+}
+
+} // namespace
 
 SessionService::SessionService(UserStore& users) : users_(users) {}
 
@@ -13,7 +40,11 @@ BackendUser SessionService::guestUser() {
 }
 
 std::string SessionService::nextSessionId() {
-    return "session-" + std::to_string(nextSessionId_++);
+    std::string sessionId;
+    do {
+        sessionId = randomSessionId();
+    } while (sessions_.find(sessionId) != sessions_.end());
+    return sessionId;
 }
 
 SessionInfo SessionService::startGuestSession() {
@@ -43,7 +74,7 @@ ServiceResult<SessionInfo> SessionService::login(
         return user.name == username;
     });
     if (found == users.end()) {
-        return ServiceResult<SessionInfo>::failure(ErrorCode::AuthenticationFailed, "User not found.");
+        return ServiceResult<SessionInfo>::failure(ErrorCode::AuthenticationFailed, kAuthenticationFailedMessage);
     }
     if (found->failedCount > 7) {
         return ServiceResult<SessionInfo>::failure(ErrorCode::PermissionDenied, "User disabled due to too many failed attempts.");
@@ -58,7 +89,7 @@ ServiceResult<SessionInfo> SessionService::login(
         } catch (const std::exception&) {
             return ServiceResult<SessionInfo>::failure(ErrorCode::StorageError, "Unable to update user data.");
         }
-        return ServiceResult<SessionInfo>::failure(ErrorCode::AuthenticationFailed, "Incorrect password.");
+        return ServiceResult<SessionInfo>::failure(ErrorCode::AuthenticationFailed, kAuthenticationFailedMessage);
     }
 
     BackendUser updated = *found;

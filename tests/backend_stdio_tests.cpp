@@ -38,17 +38,31 @@ std::string quotePath(const std::filesystem::path& path) {
     return "\"" + path.string() + "\"";
 }
 
+std::string startGuestSession(tundraux::backend::JsonRpcDispatcher& dispatcher) {
+    const std::string response = dispatcher.handleLine(R"({"id":"1","method":"session.startGuestSession","params":{}})");
+    const auto parsed = tundraux::backend::parseJson(response);
+    if (!parsed.ok) {
+        return {};
+    }
+    return parsed.value.asObject().at("result").asObject().at("sessionId").asString();
+}
+
 bool responseHasStorageErrorWithNoStdoutLeak(const std::filesystem::path& path, const std::string& label) {
     tundraux::backend::DataManagerUserStore store(path.string());
     tundraux::backend::SessionService sessions(store);
     tundraux::backend::UserService users(store, sessions);
     tundraux::backend::JsonRpcDispatcher dispatcher(sessions, users);
-    dispatcher.handleLine(R"({"id":"1","method":"session.startGuestSession","params":{}})");
+    const std::string sessionId = startGuestSession(dispatcher);
+    if (sessionId.empty()) {
+        std::cerr << label << " could not start guest session\n";
+        return false;
+    }
 
     std::ostringstream capturedStdout;
     auto* previousStdout = std::cout.rdbuf(capturedStdout.rdbuf());
     const std::string response = dispatcher.handleLine(
-        R"({"id":"2","method":"session.login","params":{"sessionId":"session-1","username":"alice","password":"Secret1"}})"
+        R"({"id":"2","method":"session.login","params":{"sessionId":")" + sessionId +
+        R"(","username":"alice","password":"Secret1"}})"
     );
     std::cout.rdbuf(previousStdout);
 
@@ -93,6 +107,12 @@ bool runInvalidStorageInProcessTests() {
         return false;
     }
     std::filesystem::remove_all(directoryPath);
+
+    const auto missingPath = std::filesystem::temp_directory_path() / "tundraux_backend_stdio_missing_user_data.dat";
+    std::filesystem::remove(missingPath);
+    if (!responseHasStorageErrorWithNoStdoutLeak(missingPath, "missing user data")) {
+        return false;
+    }
 
     return true;
 }
@@ -158,7 +178,6 @@ bool runMalformedStorageProcessTest(const std::filesystem::path& backendExePath)
     {
         std::ofstream file(stdinPath, std::ios::binary | std::ios::trunc);
         file << R"({"id":"1","method":"session.startGuestSession","params":{}})" << "\n";
-        file << R"({"id":"2","method":"session.login","params":{"sessionId":"session-1","username":"alice","password":"Secret1"}})" << "\n";
     }
 
     const bool succeeded = runProcessCommand(
@@ -196,13 +215,13 @@ bool runMalformedStorageProcessTest(const std::filesystem::path& backendExePath)
         }
     }
 
-    if (jsonLineCount != 2) {
-        std::cerr << "malformed storage process stdout should contain two JSON lines: " << stdoutText << "\n";
+    if (jsonLineCount != 1) {
+        std::cerr << "malformed storage process stdout should contain one JSON line: " << stdoutText << "\n";
         return false;
     }
     if (stdoutText.find(R"("sessionId")") == std::string::npos ||
-        stdoutText.find(R"("code":"StorageError")") == std::string::npos) {
-        std::cerr << "malformed storage process stdout missing expected JSON responses: " << stdoutText << "\n";
+        stdoutText.find(R"("type":"guest")") == std::string::npos) {
+        std::cerr << "malformed storage process stdout missing guest response: " << stdoutText << "\n";
         return false;
     }
     if (stdoutText.find("Error:") != std::string::npos || stdoutText.find("\x1b[") != std::string::npos) {
@@ -257,7 +276,7 @@ bool runGuestSessionProcessTest(const std::filesystem::path& backendExePath) {
     const auto& result = object.at("result").asObject();
     const auto& user = result.at("user").asObject();
     if (object.at("id").asString() != "1" ||
-        result.at("sessionId").asString() != "session-1" ||
+        result.at("sessionId").asString().empty() ||
         user.at("type").asString() != "guest" ||
         !user.at("name").asString().empty()) {
         std::cerr << "guest session process stdout has wrong protocol fields: " << stdoutText << "\n";

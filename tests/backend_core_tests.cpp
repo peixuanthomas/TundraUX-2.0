@@ -55,13 +55,25 @@ int main() {
 
     const auto guest = sessions.startGuestSession();
     if (!expect(!guest.sessionId.empty(), "guest session id is empty")) return 1;
+    if (!expect(guest.sessionId != "session-1", "guest session id should not be predictable")) return 1;
+    if (!expect(guest.sessionId.size() >= 32, "guest session id should have high entropy shape")) return 1;
     if (!expect(guest.user.type == "guest", "guest type mismatch")) return 1;
     if (!expect(guest.user.name.empty(), "guest name should be empty")) return 1;
+
+    const auto secondGuest = sessions.startGuestSession();
+    if (!expect(secondGuest.sessionId != guest.sessionId, "guest session ids should be unique")) return 1;
+    if (!expect(secondGuest.sessionId != "session-2", "second guest session id should not be predictable")) return 1;
 
     const auto badLogin = sessions.login(guest.sessionId, "alice", "bad");
     if (!expect(!badLogin.ok, "bad login should fail")) return 1;
     if (!expect(badLogin.error.code == ErrorCode::AuthenticationFailed, "bad login error mismatch")) return 1;
+    if (!expect(badLogin.error.message == "Authentication failed.", "bad login message mismatch")) return 1;
     if (!expect(store.users[0].failedCount == 1, "failed login should increment count")) return 1;
+
+    const auto unknownLogin = sessions.login(guest.sessionId, "missing", "bad");
+    if (!expect(!unknownLogin.ok, "unknown login should fail")) return 1;
+    if (!expect(unknownLogin.error.code == badLogin.error.code, "unknown login code should match bad password")) return 1;
+    if (!expect(unknownLogin.error.message == badLogin.error.message, "unknown login message should match bad password")) return 1;
 
     const auto lockedLogin = sessions.login(guest.sessionId, "locked", "Secret3");
     if (!expect(!lockedLogin.ok, "locked login should fail")) return 1;

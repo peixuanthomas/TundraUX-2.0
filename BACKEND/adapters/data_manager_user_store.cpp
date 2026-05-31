@@ -80,7 +80,9 @@ DataManagerUserStore::DataManagerUserStore(std::string filename)
 
 std::vector<BackendUser> DataManagerUserStore::listUsers() const {
     const StorageState storage = classifyStorage(filename_);
-    if (storage == StorageState::Invalid || storage == StorageState::ExistingEmptyFile) {
+    if (storage == StorageState::Missing ||
+        storage == StorageState::Invalid ||
+        storage == StorageState::ExistingEmptyFile) {
         throw std::runtime_error("Unable to read user data.");
     }
 
@@ -98,7 +100,9 @@ std::vector<BackendUser> DataManagerUserStore::listUsers() const {
 
 bool DataManagerUserStore::updateUser(const std::string& name, const BackendUser& user) {
     const StorageState storage = classifyStorage(filename_);
-    if (storage == StorageState::Invalid || storage == StorageState::ExistingEmptyFile) {
+    if (storage == StorageState::Missing ||
+        storage == StorageState::Invalid ||
+        storage == StorageState::ExistingEmptyFile) {
         throw std::runtime_error("Unable to read user data.");
     }
 
