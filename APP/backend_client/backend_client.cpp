@@ -97,6 +97,7 @@ FrontendFileEntry parseFileEntry(const JsonValue& value) {
     if (sizeValue.type() != JsonValue::Type::Number ||
         !std::isfinite(sizeValue.asNumber()) ||
         sizeValue.asNumber() < 0.0 ||
+        std::floor(sizeValue.asNumber()) != sizeValue.asNumber() ||
         sizeValue.asNumber() > static_cast<double>(std::numeric_limits<unsigned long long>::max())) {
         throw std::logic_error("expected size number");
     }
@@ -122,13 +123,18 @@ JsonValue makeRequest(const std::string& id, const std::string& method, JsonValu
 }
 
 template <typename T, typename Parser>
-ClientResult<T> parseClientResponse(const std::string& response, Parser parser) {
+ClientResult<T> parseClientResponse(const std::string& response, const std::string& expectedId, Parser parser) {
     const auto parsed = tundraux::backend::parseJson(response);
     if (!parsed.ok || parsed.value.type() != JsonValue::Type::Object) {
         return errorResult<T>(invalidResponseCode, invalidResponseMessage);
     }
 
     const auto& object = parsed.value.asObject();
+    const auto* id = objectField(object, "id");
+    if (id == nullptr || id->type() != JsonValue::Type::String || id->asString() != expectedId) {
+        return errorResult<T>(invalidResponseCode, invalidResponseMessage);
+    }
+
     const auto* error = objectField(object, "error");
     if (error != nullptr) {
         if (error->type() != JsonValue::Type::Object) {
@@ -170,7 +176,7 @@ ClientResult<T> sendRequest(
     if (!transport.requestLine(requestLine, response)) {
         return errorResult<T>(transportErrorCode, transportErrorMessage);
     }
-    return parseClientResponse<T>(response, parser);
+    return parseClientResponse<T>(response, id, parser);
 }
 
 } // namespace

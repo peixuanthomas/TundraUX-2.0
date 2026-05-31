@@ -40,7 +40,7 @@ const tundraux::backend::JsonValue::Object* parseRequestObject(
         return nullptr;
     }
     const auto parsed = tundraux::backend::parseJson(transport.requests.back());
-    if (!expect(parsed.ok, label + " request should parse: " + transport.requests.back())) {
+    if (!expect(parsed.ok, label + " request should parse")) {
         return nullptr;
     }
     parsedValue = parsed.value;
@@ -57,6 +57,13 @@ bool expectRequestMethod(const FakeTransport& transport, const std::string& meth
         return false;
     }
     return expect(object->at("method").asString() == method, label + " method mismatch");
+}
+
+template <typename T>
+bool expectInvalidResponse(const tundraux::frontend::ClientResult<T>& result, const std::string& label) {
+    return expect(!result.ok, label + " should fail") &&
+        expect(result.errorCode == "InvalidResponse", label + " error code mismatch") &&
+        expect(result.message == "Invalid backend response.", label + " error message mismatch");
 }
 
 bool runStartGuestSessionTest() {
@@ -109,6 +116,46 @@ bool runWhoamiMalformedResponseTest() {
         expect(result.message == "Invalid backend response.", "whoami malformed error message mismatch");
 }
 
+bool runMissingResponseIdTest() {
+    FakeTransport transport;
+    transport.nextResponse = R"({"result":{"content":"hello"}})";
+    tundraux::frontend::BackendClient client(transport);
+
+    const auto result = client.readFile("session-1", "docs/note.txt");
+
+    return expectInvalidResponse(result, "missing response id");
+}
+
+bool runWrongTypeResponseIdTest() {
+    FakeTransport transport;
+    transport.nextResponse = R"({"id":1,"result":{"content":"hello"}})";
+    tundraux::frontend::BackendClient client(transport);
+
+    const auto result = client.readFile("session-1", "docs/note.txt");
+
+    return expectInvalidResponse(result, "wrong-type response id");
+}
+
+bool runMismatchedSuccessResponseIdTest() {
+    FakeTransport transport;
+    transport.nextResponse = R"({"id":"2","result":{"content":"hello"}})";
+    tundraux::frontend::BackendClient client(transport);
+
+    const auto result = client.readFile("session-1", "docs/note.txt");
+
+    return expectInvalidResponse(result, "mismatched success response id");
+}
+
+bool runMismatchedErrorResponseIdTest() {
+    FakeTransport transport;
+    transport.nextResponse = R"({"id":"2","error":{"code":"PermissionDenied","message":"No."}})";
+    tundraux::frontend::BackendClient client(transport);
+
+    const auto result = client.listUsers("session-1");
+
+    return expectInvalidResponse(result, "mismatched error response id");
+}
+
 bool runTransportFailureTest() {
     FakeTransport transport;
     transport.available = false;
@@ -156,6 +203,26 @@ bool runListDirectoryTest() {
         expect(result.value[0].size == 5ULL, "list directory entry size mismatch");
 }
 
+bool runListDirectoryFractionalSizeTest() {
+    FakeTransport transport;
+    transport.nextResponse = R"({"id":"1","result":{"entries":[{"name":"note.txt","path":"docs/note.txt","type":"file","size":5.9}]}})";
+    tundraux::frontend::BackendClient client(transport);
+
+    const auto result = client.listDirectory("session-1", "docs");
+
+    return expectInvalidResponse(result, "list directory fractional size");
+}
+
+bool runListDirectoryNegativeSizeTest() {
+    FakeTransport transport;
+    transport.nextResponse = R"({"id":"1","result":{"entries":[{"name":"note.txt","path":"docs/note.txt","type":"file","size":-1}]}})";
+    tundraux::frontend::BackendClient client(transport);
+
+    const auto result = client.listDirectory("session-1", "docs");
+
+    return expectInvalidResponse(result, "list directory negative size");
+}
+
 bool runLoginTest() {
     FakeTransport transport;
     transport.nextResponse = R"({"id":"1","result":{"sessionId":"session-1","user":{"name":"alice","type":"admin"}}})";
@@ -188,9 +255,15 @@ int main() {
     if (!runListUsersErrorTest()) return 1;
     if (!runReadFileSuccessTest()) return 1;
     if (!runWhoamiMalformedResponseTest()) return 1;
+    if (!runMissingResponseIdTest()) return 1;
+    if (!runWrongTypeResponseIdTest()) return 1;
+    if (!runMismatchedSuccessResponseIdTest()) return 1;
+    if (!runMismatchedErrorResponseIdTest()) return 1;
     if (!runTransportFailureTest()) return 1;
     if (!runWriteFileTest()) return 1;
     if (!runListDirectoryTest()) return 1;
+    if (!runListDirectoryFractionalSizeTest()) return 1;
+    if (!runListDirectoryNegativeSizeTest()) return 1;
     if (!runLoginTest()) return 1;
     if (!runLogoutTest()) return 1;
     return 0;
