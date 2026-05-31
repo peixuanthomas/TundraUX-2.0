@@ -7,7 +7,6 @@
 #include "crypto.hpp"
 
 #include <algorithm>
-#include <cstdlib>
 #include <chrono>
 #include <cstdint>
 #include <deque>
@@ -48,10 +47,6 @@ std::string readTextFile(const std::filesystem::path& path) {
     std::ostringstream contents;
     contents << file.rdbuf();
     return contents.str();
-}
-
-std::string quotePath(const std::filesystem::path& path) {
-    return "\"" + path.string() + "\"";
 }
 
 std::filesystem::path uniqueTempPath(const std::string& label) {
@@ -193,54 +188,6 @@ bool runInvalidStorageInProcessTests() {
     return true;
 }
 
-bool runProcessCommand(
-    const std::filesystem::path& backendExePath,
-    const std::string& arguments,
-    const std::filesystem::path& stdinPath,
-    const std::filesystem::path& stdoutPath,
-    const std::filesystem::path& stderrPath
-) {
-    std::string command = "\"" + quotePath(backendExePath) + " " + arguments;
-    if (!stdinPath.empty()) {
-        command += " < " + quotePath(stdinPath);
-    }
-    command += " > " + quotePath(stdoutPath) + " 2> " + quotePath(stderrPath);
-    command += "\"";
-    return std::system(command.c_str()) == 0;
-}
-
-bool runInvalidCliProcessTest(
-    const std::filesystem::path& backendExePath,
-    const std::string& arguments,
-    const std::string& label
-) {
-    const auto base = uniqueTempPath("process_" + label);
-    const auto stdoutPath = base.string() + ".stdout.txt";
-    const auto stderrPath = base.string() + ".stderr.txt";
-    ScopedPathCleanup cleanup({stdoutPath, stderrPath});
-    std::filesystem::remove(stdoutPath);
-    std::filesystem::remove(stderrPath);
-
-    const bool succeeded = runProcessCommand(backendExePath, arguments, {}, stdoutPath, stderrPath);
-    const std::string stdoutText = readTextFile(stdoutPath);
-    const std::string stderrText = readTextFile(stderrPath);
-    cleanup.cleanup();
-
-    if (succeeded) {
-        std::cerr << label << " should exit nonzero\n";
-        return false;
-    }
-    if (!stdoutText.empty()) {
-        std::cerr << label << " wrote stdout: " << stdoutText << "\n";
-        return false;
-    }
-    if (stderrText.find("Usage: tundraux_backend_stdio") == std::string::npos) {
-        std::cerr << label << " missing usage on stderr: " << stderrText << "\n";
-        return false;
-    }
-    return true;
-}
-
 struct InteractiveProcess {
     HANDLE process = INVALID_HANDLE_VALUE;
     HANDLE thread = INVALID_HANDLE_VALUE;
@@ -324,6 +271,169 @@ std::string quoteArg(const std::string& arg) {
     quoted.append(backslashCount * 2, '\\');
     quoted += "\"";
     return quoted;
+}
+
+struct ProcessCommandResult {
+    DWORD exitCode = 1;
+    bool timedOut = false;
+    std::string diagnostics;
+
+    bool succeeded() const {
+        return !timedOut && diagnostics.empty() && exitCode == 0;
+    }
+};
+
+ProcessCommandResult runProcessCommand(
+    const std::filesystem::path& backendExePath,
+    const std::vector<std::string>& arguments,
+    const std::filesystem::path& stdinPath,
+    const std::filesystem::path& stdoutPath,
+    const std::filesystem::path& stderrPath,
+    DWORD timeoutMs = 5000
+) {
+    ProcessCommandResult result;
+    SECURITY_ATTRIBUTES securityAttributes{};
+    securityAttributes.nLength = sizeof(securityAttributes);
+    securityAttributes.bInheritHandle = TRUE;
+
+    HANDLE stdinHandle = CreateFileA(
+        stdinPath.empty() ? "NUL" : stdinPath.string().c_str(),
+        GENERIC_READ,
+        FILE_SHARE_READ | FILE_SHARE_WRITE,
+        &securityAttributes,
+        OPEN_EXISTING,
+        FILE_ATTRIBUTE_NORMAL,
+        nullptr
+    );
+    if (stdinHandle == INVALID_HANDLE_VALUE) {
+        result.diagnostics = "CreateFileA(stdin) failed: " + windowsErrorMessage(GetLastError());
+        return result;
+    }
+
+    HANDLE stdoutHandle = CreateFileA(
+        stdoutPath.string().c_str(),
+        GENERIC_WRITE,
+        FILE_SHARE_READ,
+        &securityAttributes,
+        CREATE_ALWAYS,
+        FILE_ATTRIBUTE_NORMAL,
+        nullptr
+    );
+    if (stdoutHandle == INVALID_HANDLE_VALUE) {
+        result.diagnostics = "CreateFileA(stdout) failed: " + windowsErrorMessage(GetLastError());
+        closeHandle(stdinHandle);
+        return result;
+    }
+
+    HANDLE stderrHandle = CreateFileA(
+        stderrPath.string().c_str(),
+        GENERIC_WRITE,
+        FILE_SHARE_READ,
+        &securityAttributes,
+        CREATE_ALWAYS,
+        FILE_ATTRIBUTE_NORMAL,
+        nullptr
+    );
+    if (stderrHandle == INVALID_HANDLE_VALUE) {
+        result.diagnostics = "CreateFileA(stderr) failed: " + windowsErrorMessage(GetLastError());
+        closeHandle(stdinHandle);
+        closeHandle(stdoutHandle);
+        return result;
+    }
+
+    STARTUPINFOA startupInfo{};
+    startupInfo.cb = sizeof(startupInfo);
+    startupInfo.dwFlags = STARTF_USESTDHANDLES;
+    startupInfo.hStdInput = stdinHandle;
+    startupInfo.hStdOutput = stdoutHandle;
+    startupInfo.hStdError = stderrHandle;
+
+    PROCESS_INFORMATION processInfo{};
+    std::string commandLine = quoteArg(backendExePath.string());
+    for (const auto& arg : arguments) {
+        commandLine += " " + quoteArg(arg);
+    }
+    std::vector<char> mutableCommandLine(commandLine.begin(), commandLine.end());
+    mutableCommandLine.push_back('\0');
+
+    const BOOL created = CreateProcessA(
+        nullptr,
+        mutableCommandLine.data(),
+        nullptr,
+        nullptr,
+        TRUE,
+        CREATE_NO_WINDOW,
+        nullptr,
+        nullptr,
+        &startupInfo,
+        &processInfo
+    );
+    const DWORD createProcessError = GetLastError();
+
+    closeHandle(stdinHandle);
+    closeHandle(stdoutHandle);
+    closeHandle(stderrHandle);
+
+    if (!created) {
+        result.diagnostics = "CreateProcessA failed: " + windowsErrorMessage(createProcessError);
+        return result;
+    }
+
+    const DWORD waitResult = WaitForSingleObject(processInfo.hProcess, timeoutMs);
+    if (waitResult == WAIT_TIMEOUT) {
+        result.timedOut = true;
+        result.diagnostics = "timed out waiting " + std::to_string(timeoutMs) + " ms for process exit";
+        if (!TerminateProcess(processInfo.hProcess, 1)) {
+            result.diagnostics += "; TerminateProcess failed: " + windowsErrorMessage(GetLastError());
+        }
+        WaitForSingleObject(processInfo.hProcess, 1000);
+    } else if (waitResult == WAIT_FAILED) {
+        result.diagnostics = "WaitForSingleObject(process) failed: " + windowsErrorMessage(GetLastError());
+    } else if (!GetExitCodeProcess(processInfo.hProcess, &result.exitCode)) {
+        result.diagnostics = "GetExitCodeProcess failed: " + windowsErrorMessage(GetLastError());
+    }
+
+    closeHandle(processInfo.hThread);
+    closeHandle(processInfo.hProcess);
+    return result;
+}
+
+bool runInvalidCliProcessTest(
+    const std::filesystem::path& backendExePath,
+    const std::vector<std::string>& arguments,
+    const std::string& label
+) {
+    const auto base = uniqueTempPath("process_" + label);
+    const auto stdoutPath = base.string() + ".stdout.txt";
+    const auto stderrPath = base.string() + ".stderr.txt";
+    ScopedPathCleanup cleanup({stdoutPath, stderrPath});
+    std::filesystem::remove(stdoutPath);
+    std::filesystem::remove(stderrPath);
+
+    const ProcessCommandResult process = runProcessCommand(backendExePath, arguments, {}, stdoutPath, stderrPath);
+    const std::string stdoutText = readTextFile(stdoutPath);
+    const std::string stderrText = readTextFile(stderrPath);
+    cleanup.cleanup();
+
+    if (process.timedOut || !process.diagnostics.empty()) {
+        std::cerr << label << " process runner failed: " << process.diagnostics
+                  << "\nstdout:\n" << stdoutText
+                  << "\nstderr:\n" << stderrText << "\n";
+        return false;
+    }
+    if (process.succeeded()) {
+        std::cerr << label << " should exit nonzero\n";
+        return false;
+    }
+    if (!stdoutText.empty()) {
+        std::cerr << label << " wrote stdout: " << stdoutText << "\n";
+        return false;
+    }
+    if (stderrText.find("Usage: tundraux_backend_stdio") == std::string::npos) {
+        std::cerr << label << " missing usage on stderr: " << stderrText << "\n";
+        return false;
+    }
+    return true;
 }
 
 bool setStartupError(InteractiveProcess& child, const std::string& context, DWORD error = GetLastError()) {
@@ -909,12 +1019,14 @@ bool runMissingFilesRootProcessTest(const std::filesystem::path& backendExePath)
     }
     const auto initialList = tundraux::backend::parseJson(response);
     const auto& initialListObject = initialList.value.asObject();
-    if (initialListObject.find("error") != initialListObject.end()) {
-        const auto& error = initialListObject.at("error").asObject();
-        if (error.at("code").asString() != "NotFound") {
-            std::cerr << "missing files root initial list returned wrong error: " << response << "\n";
-            return fail();
-        }
+    if (initialListObject.find("error") == initialListObject.end()) {
+        std::cerr << "missing files root initial list should return NotFound error: " << response << "\n";
+        return fail();
+    }
+    const auto& error = initialListObject.at("error").asObject();
+    if (error.at("code").asString() != "NotFound") {
+        std::cerr << "missing files root initial list returned wrong error: " << response << "\n";
+        return fail();
     }
 
     if (!sendRequestAndReadResponse(
@@ -1013,9 +1125,9 @@ bool runMalformedStorageProcessTest(const std::filesystem::path& backendExePath)
         file << R"({"id":"1","method":"session.startGuestSession","params":{}})" << "\n";
     }
 
-    const bool succeeded = runProcessCommand(
+    const ProcessCommandResult process = runProcessCommand(
         backendExePath,
-        "--user-data " + quotePath(userDataPath),
+        {"--user-data", userDataPath},
         stdinPath,
         stdoutPath,
         stderrPath
@@ -1024,8 +1136,12 @@ bool runMalformedStorageProcessTest(const std::filesystem::path& backendExePath)
     const std::string stderrText = readTextFile(stderrPath);
     cleanup.cleanup();
 
-    if (!succeeded) {
-        std::cerr << "malformed storage process should exit zero\n";
+    if (!process.succeeded()) {
+        std::cerr << "malformed storage process should exit zero"
+                  << "; exit code: " << process.exitCode
+                  << (process.diagnostics.empty() ? "" : ("; " + process.diagnostics))
+                  << "\nstdout:\n" << stdoutText
+                  << "\nstderr:\n" << stderrText << "\n";
         return false;
     }
     std::istringstream stdoutLines(stdoutText);
@@ -1076,13 +1192,17 @@ bool runGuestSessionProcessTest(const std::filesystem::path& backendExePath) {
         file << R"({"id":"1","method":"session.startGuestSession","params":{}})" << "\n";
     }
 
-    const bool succeeded = runProcessCommand(backendExePath, "", stdinPath, stdoutPath, stderrPath);
+    const ProcessCommandResult process = runProcessCommand(backendExePath, {}, stdinPath, stdoutPath, stderrPath);
     std::string stdoutText = readTextFile(stdoutPath);
     const std::string stderrText = readTextFile(stderrPath);
     cleanup.cleanup();
 
-    if (!succeeded) {
-        std::cerr << "guest session process should exit zero\n";
+    if (!process.succeeded()) {
+        std::cerr << "guest session process should exit zero"
+                  << "; exit code: " << process.exitCode
+                  << (process.diagnostics.empty() ? "" : ("; " + process.diagnostics))
+                  << "\nstdout:\n" << stdoutText
+                  << "\nstderr:\n" << stderrText << "\n";
         return false;
     }
     if (!stderrText.empty()) {
@@ -1122,9 +1242,9 @@ bool runProcessTests(const std::filesystem::path& backendExePath) {
     }
 
     return runGuestSessionProcessTest(backendExePath) &&
-        runInvalidCliProcessTest(backendExePath, "--bad", "unknown_arg") &&
-        runInvalidCliProcessTest(backendExePath, "--user-data", "missing_user_data_value") &&
-        runInvalidCliProcessTest(backendExePath, "--files-root", "missing_files_root_value") &&
+        runInvalidCliProcessTest(backendExePath, {"--bad"}, "unknown_arg") &&
+        runInvalidCliProcessTest(backendExePath, {"--user-data"}, "missing_user_data_value") &&
+        runInvalidCliProcessTest(backendExePath, {"--files-root"}, "missing_files_root_value") &&
         runFileApiProcessTest(backendExePath) &&
         runMissingFilesRootProcessTest(backendExePath) &&
         runMalformedStorageProcessTest(backendExePath);
