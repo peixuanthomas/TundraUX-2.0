@@ -313,7 +313,9 @@ target_compile_features(backend_stdio_tests
         cxx_std_17
 )
 
-add_test(NAME backend_stdio_tests COMMAND backend_stdio_tests)
+add_dependencies(backend_stdio_tests tundraux_backend_stdio)
+
+add_test(NAME backend_stdio_tests COMMAND backend_stdio_tests $<TARGET_FILE:tundraux_backend_stdio>)
 
 if(TUNDRAUX_DEBUG_STARTUP)
     target_compile_definitions(${PROJECT_NAME}

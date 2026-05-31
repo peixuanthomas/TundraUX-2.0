@@ -98,27 +98,33 @@ bool runInvalidStorageInProcessTests() {
 }
 
 bool runProcessCommand(
+    const std::filesystem::path& backendExePath,
     const std::string& arguments,
     const std::filesystem::path& stdinPath,
     const std::filesystem::path& stdoutPath,
     const std::filesystem::path& stderrPath
 ) {
-    std::string command = ".\\tundraux_backend_stdio.exe " + arguments;
+    std::string command = "\"" + quotePath(backendExePath) + " " + arguments;
     if (!stdinPath.empty()) {
         command += " < " + quotePath(stdinPath);
     }
     command += " > " + quotePath(stdoutPath) + " 2> " + quotePath(stderrPath);
+    command += "\"";
     return std::system(command.c_str()) == 0;
 }
 
-bool runInvalidCliProcessTest(const std::string& arguments, const std::string& label) {
+bool runInvalidCliProcessTest(
+    const std::filesystem::path& backendExePath,
+    const std::string& arguments,
+    const std::string& label
+) {
     const auto base = std::filesystem::temp_directory_path() / ("tundraux_backend_stdio_" + label);
     const auto stdoutPath = base.string() + ".stdout.txt";
     const auto stderrPath = base.string() + ".stderr.txt";
     std::filesystem::remove(stdoutPath);
     std::filesystem::remove(stderrPath);
 
-    const bool succeeded = runProcessCommand(arguments, {}, stdoutPath, stderrPath);
+    const bool succeeded = runProcessCommand(backendExePath, arguments, {}, stdoutPath, stderrPath);
     const std::string stdoutText = readTextFile(stdoutPath);
     const std::string stderrText = readTextFile(stderrPath);
     std::filesystem::remove(stdoutPath);
@@ -139,7 +145,7 @@ bool runInvalidCliProcessTest(const std::string& arguments, const std::string& l
     return true;
 }
 
-bool runMalformedStorageProcessTest() {
+bool runMalformedStorageProcessTest(const std::filesystem::path& backendExePath) {
     const auto base = std::filesystem::temp_directory_path() / "tundraux_backend_stdio_process_malformed";
     const auto userDataPath = base.string() + ".dat";
     const auto stdinPath = base.string() + ".stdin.txt";
@@ -156,6 +162,7 @@ bool runMalformedStorageProcessTest() {
     }
 
     const bool succeeded = runProcessCommand(
+        backendExePath,
         "--user-data " + quotePath(userDataPath),
         stdinPath,
         stdoutPath,
@@ -209,22 +216,33 @@ bool runMalformedStorageProcessTest() {
     return true;
 }
 
-bool runProcessTests() {
-    return runInvalidCliProcessTest("--bad", "unknown_arg") &&
-        runInvalidCliProcessTest("--user-data", "missing_user_data_value") &&
-        runMalformedStorageProcessTest();
+bool runProcessTests(const std::filesystem::path& backendExePath) {
+    if (backendExePath.empty() || !std::filesystem::exists(backendExePath)) {
+        std::cerr << "backend stdio executable path is missing or does not exist: "
+                  << backendExePath.string() << "\n";
+        return false;
+    }
+
+    return runInvalidCliProcessTest(backendExePath, "--bad", "unknown_arg") &&
+        runInvalidCliProcessTest(backendExePath, "--user-data", "missing_user_data_value") &&
+        runMalformedStorageProcessTest(backendExePath);
 }
 
 } // namespace
 
-int main() {
+int main(int argc, char* argv[]) {
+    if (argc != 2) {
+        std::cerr << "Usage: backend_stdio_tests <tundraux_backend_stdio_exe>\n";
+        return 1;
+    }
+
     if (!runGuestSessionSmokeTest()) {
         return 1;
     }
     if (!runInvalidStorageInProcessTests()) {
         return 1;
     }
-    if (!runProcessTests()) {
+    if (!runProcessTests(argv[1])) {
         return 1;
     }
 
