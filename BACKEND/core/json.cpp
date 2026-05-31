@@ -3,6 +3,7 @@
 #include <cctype>
 #include <cmath>
 #include <iomanip>
+#include <locale>
 #include <sstream>
 #include <stdexcept>
 #include <utility>
@@ -116,7 +117,11 @@ private:
             std::string key = parseString();
             skipWhitespace();
             expect(':', "Expected ':' after object key.");
-            object.emplace(std::move(key), parseValue());
+            JsonValue value = parseValue();
+            const auto inserted = object.emplace(std::move(key), std::move(value));
+            if (!inserted.second) {
+                throw std::runtime_error("Duplicate object key.");
+            }
             skipWhitespace();
             if (match('}')) {
                 break;
@@ -172,6 +177,9 @@ private:
         switch (escaped) {
         case '"': return "\"";
         case '\\': return "\\";
+        case '/': return "/";
+        case 'b': return "\b";
+        case 'f': return "\f";
         case 'n': return "\n";
         case 'r': return "\r";
         case 't': return "\t";
@@ -229,7 +237,15 @@ private:
         }
 
         try {
-            return JsonValue::number(std::stod(input_.substr(start, position_ - start)));
+            const std::string token = input_.substr(start, position_ - start);
+            std::istringstream in(token);
+            in.imbue(std::locale::classic());
+            double value = 0.0;
+            char extra = '\0';
+            if (!(in >> value) || (in >> extra)) {
+                throw std::runtime_error("Invalid number.");
+            }
+            return JsonValue::number(value);
         } catch (const std::exception&) {
             throw std::runtime_error("Invalid number.");
         }
@@ -267,6 +283,7 @@ std::string stringifyNumber(double value) {
     }
 
     std::ostringstream out;
+    out.imbue(std::locale::classic());
     out << std::fixed << std::setprecision(15) << value;
     std::string text = out.str();
     const auto decimal = text.find('.');
