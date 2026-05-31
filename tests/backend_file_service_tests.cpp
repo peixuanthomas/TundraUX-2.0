@@ -188,6 +188,26 @@ bool hasEntryNamed(const std::vector<tundraux::backend::FileEntry>& entries, con
     return false;
 }
 
+bool createdSymlink(const std::filesystem::path& target, const std::filesystem::path& link) {
+    std::error_code error;
+    std::filesystem::create_symlink(target, link, error);
+    if (error) {
+        std::cerr << "Skipping file symlink assertions: " << error.message() << "\n";
+        return false;
+    }
+    return true;
+}
+
+bool createdDirectorySymlink(const std::filesystem::path& target, const std::filesystem::path& link) {
+    std::error_code error;
+    std::filesystem::create_directory_symlink(target, link, error);
+    if (error) {
+        std::cerr << "Skipping directory symlink assertions: " << error.message() << "\n";
+        return false;
+    }
+    return true;
+}
+
 } // namespace
 
 int main() {
@@ -387,6 +407,57 @@ int main() {
         "secret.tux trailing-space write should fail with InvalidPath",
         ErrorCode::InvalidPath,
         [&store]() { store.writeFile("secret.tux ", "x"); })) return 1;
+    if (!expectBackendException(
+        "CON should fail with InvalidPath",
+        ErrorCode::InvalidPath,
+        [&store]() { (void)store.readFile("CON"); })) return 1;
+    if (!expectBackendException(
+        "NUL.txt should fail with InvalidPath",
+        ErrorCode::InvalidPath,
+        [&store]() { store.writeFile("NUL.txt", "x"); })) return 1;
+    if (!expectBackendException(
+        "COM1.log should fail with InvalidPath",
+        ErrorCode::InvalidPath,
+        [&store]() { (void)store.readFile("COM1.log"); })) return 1;
+
+    const auto outside = tempRoot.path().parent_path() / (tempRoot.path().filename().string() + "_outside.txt");
+    const auto outsideDir = tempRoot.path().parent_path() / (tempRoot.path().filename().string() + "_outside_dir");
+    {
+        std::ofstream(outside) << "outside";
+    }
+    std::filesystem::create_directories(outsideDir);
+
+    if (createdSymlink(outside, tempRoot.path() / "link-to-outside.txt")) {
+        if (!expectBackendExceptionOneOf(
+            "file symlink read should fail with PermissionDenied or InvalidPath",
+            ErrorCode::PermissionDenied,
+            ErrorCode::InvalidPath,
+            [&store]() { (void)store.readFile("link-to-outside.txt"); })) return 1;
+        if (!expectBackendExceptionOneOf(
+            "file symlink write should fail with PermissionDenied or InvalidPath",
+            ErrorCode::PermissionDenied,
+            ErrorCode::InvalidPath,
+            [&store]() { store.writeFile("link-to-outside.txt", "x"); })) return 1;
+    }
+
+    if (createdDirectorySymlink(outsideDir, tempRoot.path() / "link-dir")) {
+        if (!expectBackendExceptionOneOf(
+            "directory symlink listDirectory should fail with PermissionDenied or InvalidPath",
+            ErrorCode::PermissionDenied,
+            ErrorCode::InvalidPath,
+            [&store]() { (void)store.listDirectory("link-dir"); })) return 1;
+    }
+
+    if (createdSymlink(tempRoot.path() / "missing-symlink-target.txt", tempRoot.path() / "dangling-link.txt")) {
+        if (!expectBackendExceptionOneOf(
+            "dangling symlink write should fail with PermissionDenied or InvalidPath",
+            ErrorCode::PermissionDenied,
+            ErrorCode::InvalidPath,
+            [&store]() { store.writeFile("dangling-link.txt", "x"); })) return 1;
+    }
+
+    std::filesystem::remove_all(outsideDir);
+    std::filesystem::remove(outside);
 
     return 0;
 }

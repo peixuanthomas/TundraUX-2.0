@@ -20,6 +20,7 @@ private:
     std::filesystem::path root_;
 
     std::filesystem::path resolveManagedPath(const std::string& path, bool allowRoot) const;
+    void rejectUnsafeExistingPathComponents(const std::filesystem::path& resolved) const;
     void rejectProtectedPath(const std::filesystem::path& resolved) const;
 };
 

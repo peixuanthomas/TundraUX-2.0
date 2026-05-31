@@ -7,6 +7,13 @@
 #include <system_error>
 #include <utility>
 
+#ifdef _WIN32
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#include <windows.h>
+#endif
+
 namespace tundraux::backend {
 
 namespace {
@@ -38,6 +45,38 @@ std::string lowerAscii(std::string value) {
         return static_cast<char>(std::tolower(ch));
     });
     return value;
+}
+
+bool isReservedDosDeviceName(const std::string& component) {
+    const auto lower = lowerAscii(component);
+    const auto base = lower.substr(0, lower.find('.'));
+    if (base == "con" || base == "prn" || base == "aux" || base == "nul") {
+        return true;
+    }
+    if (base.size() == 4 &&
+        (base.rfind("com", 0) == 0 || base.rfind("lpt", 0) == 0) &&
+        base[3] >= '1' && base[3] <= '9') {
+        return true;
+    }
+    return false;
+}
+
+bool isReparseOrSymlink(const std::filesystem::path& path) {
+    std::error_code error;
+    const auto status = std::filesystem::symlink_status(path, error);
+    if (!error && std::filesystem::is_symlink(status)) {
+        return true;
+    }
+
+#ifdef _WIN32
+    const auto attributes = GetFileAttributesW(path.wstring().c_str());
+    if (attributes != INVALID_FILE_ATTRIBUTES &&
+        (attributes & FILE_ATTRIBUTE_REPARSE_POINT) != 0) {
+        return true;
+    }
+#endif
+
+    return false;
 }
 
 bool isPathInside(const std::filesystem::path& root, const std::filesystem::path& path) {
@@ -76,7 +115,9 @@ FilesystemFileStore::FilesystemFileStore(std::string root)
 
 std::vector<FileEntry> FilesystemFileStore::listDirectory(const std::string& path) const {
     try {
-        const auto resolved = canonicalExistingPath(resolveManagedPath(path, true));
+        const auto requested = resolveManagedPath(path, true);
+        rejectUnsafeExistingPathComponents(requested);
+        const auto resolved = canonicalExistingPath(requested);
         if (!isPathInside(root_, resolved)) {
             throw invalidPath();
         }
@@ -147,7 +188,9 @@ std::vector<FileEntry> FilesystemFileStore::listDirectory(const std::string& pat
 
 FileContent FilesystemFileStore::readFile(const std::string& path) const {
     try {
-        const auto resolved = canonicalExistingPath(resolveManagedPath(path, false));
+        const auto requested = resolveManagedPath(path, false);
+        rejectUnsafeExistingPathComponents(requested);
+        const auto resolved = canonicalExistingPath(requested);
         if (!isPathInside(root_, resolved)) {
             throw invalidPath();
         }
@@ -205,6 +248,14 @@ void FilesystemFileStore::writeFile(const std::string& path, const std::string& 
         }
 
         const auto resolved = resolveManagedPath(path, false);
+        rejectUnsafeExistingPathComponents(resolved);
+        std::error_code error;
+        std::filesystem::create_directories(resolved.parent_path(), error);
+        if (error) {
+            throw storageError();
+        }
+        rejectUnsafeExistingPathComponents(resolved);
+
         const auto parent = canonicalExistingPath(resolved.parent_path());
         const auto finalPath = (parent / resolved.filename()).lexically_normal();
         if (!isPathInside(root_, parent) || !isPathInside(root_, finalPath)) {
@@ -212,7 +263,6 @@ void FilesystemFileStore::writeFile(const std::string& path, const std::string& 
         }
         rejectProtectedPath(finalPath);
 
-        std::error_code error;
         if (std::filesystem::exists(finalPath, error)) {
             const auto existingTarget = canonicalExistingPath(finalPath);
             if (!isPathInside(root_, existingTarget)) {
@@ -220,11 +270,6 @@ void FilesystemFileStore::writeFile(const std::string& path, const std::string& 
             }
             rejectProtectedPath(existingTarget);
         } else if (error) {
-            throw storageError();
-        }
-
-        std::filesystem::create_directories(parent, error);
-        if (error) {
             throw storageError();
         }
 
@@ -263,7 +308,8 @@ std::filesystem::path FilesystemFileStore::resolveManagedPath(const std::string&
             component == ".." ||
             component.find(':') != std::string::npos ||
             component.back() == '.' ||
-            component.back() == ' ') {
+            component.back() == ' ' ||
+            isReservedDosDeviceName(component)) {
             throw invalidPath();
         }
     }
@@ -273,6 +319,21 @@ std::filesystem::path FilesystemFileStore::resolveManagedPath(const std::string&
         throw invalidPath();
     }
     return resolved;
+}
+
+void FilesystemFileStore::rejectUnsafeExistingPathComponents(const std::filesystem::path& resolved) const {
+    const auto relative = resolved.lexically_relative(root_);
+    if (relative.empty()) {
+        return;
+    }
+
+    auto current = root_;
+    for (const auto& part : relative) {
+        current /= part;
+        if (isReparseOrSymlink(current)) {
+            throw permissionDenied();
+        }
+    }
 }
 
 void FilesystemFileStore::rejectProtectedPath(const std::filesystem::path& resolved) const {
