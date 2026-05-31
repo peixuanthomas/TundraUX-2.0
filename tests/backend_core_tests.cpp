@@ -2,13 +2,14 @@
 #include "user_store.hpp"
 
 #include <iostream>
+#include <string_view>
 
 int main() {
     const tundraux::backend::BackendError error{
         tundraux::backend::ErrorCode::PermissionDenied,
         "Access Denied."
     };
-    if (tundraux::backend::toString(error.code) != "PermissionDenied") {
+    if (std::string_view{tundraux::backend::toString(error.code)} != "PermissionDenied") {
         std::cerr << "unexpected error code string\n";
         return 1;
     }
