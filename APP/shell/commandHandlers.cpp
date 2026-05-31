@@ -22,6 +22,14 @@
 #include "TUXfile.hpp"
 #include "explorer.hpp"
 
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#include <windows.h>
+
 namespace {
 namespace fs = std::filesystem;
 
@@ -98,6 +106,51 @@ bool writeWholeFile(const fs::path& path, const std::string& content) {
     return static_cast<bool>(stream);
 }
 
+bool writeNewFileAtomically(const fs::path& path, const std::string& content, DWORD& errorCode) {
+    errorCode = ERROR_SUCCESS;
+    HANDLE handle = CreateFileW(
+        path.wstring().c_str(),
+        GENERIC_WRITE,
+        0,
+        nullptr,
+        CREATE_NEW,
+        FILE_ATTRIBUTE_TEMPORARY,
+        nullptr
+    );
+    if (handle == INVALID_HANDLE_VALUE) {
+        errorCode = GetLastError();
+        return false;
+    }
+
+    bool ok = true;
+    const char* cursor = content.data();
+    std::size_t remaining = content.size();
+    while (remaining > 0) {
+        const DWORD chunk = remaining > static_cast<std::size_t>(MAXDWORD)
+            ? MAXDWORD
+            : static_cast<DWORD>(remaining);
+        DWORD written = 0;
+        if (!WriteFile(handle, cursor, chunk, &written, nullptr) || written == 0) {
+            errorCode = GetLastError();
+            ok = false;
+            break;
+        }
+        cursor += written;
+        remaining -= written;
+    }
+
+    if (!CloseHandle(handle)) {
+        errorCode = GetLastError();
+        ok = false;
+    }
+
+    if (!ok) {
+        std::error_code error;
+        fs::remove(path, error);
+    }
+    return ok;
+}
+
 class TemporaryEditorFile {
 public:
     TemporaryEditorFile() = default;
@@ -126,11 +179,11 @@ public:
         for (int attempt = 0; attempt < 100; ++attempt) {
             const fs::path candidate =
                 tempRoot / ("plain-edit-" + std::to_string(seed) + "-" + std::to_string(attempt) + ".tmp");
-            if (fs::exists(candidate, error) || error) {
-                error.clear();
-                continue;
-            }
-            if (!writeWholeFile(candidate, content)) {
+            DWORD createError = ERROR_SUCCESS;
+            if (!writeNewFileAtomically(candidate, content, createError)) {
+                if (createError == ERROR_FILE_EXISTS || createError == ERROR_ALREADY_EXISTS) {
+                    continue;
+                }
                 return false;
             }
             path_ = candidate;
