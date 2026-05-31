@@ -16,6 +16,7 @@ add_subdirectory(TundraTUI)
 
 add_library(tundraux_backend_core
     BACKEND/core/json.cpp
+    BACKEND/core/json_rpc.cpp
     BACKEND/core/session_service.cpp
     BACKEND/core/user_service.cpp
 )

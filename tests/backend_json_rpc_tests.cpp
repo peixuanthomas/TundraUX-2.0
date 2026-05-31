@@ -1,4 +1,8 @@
 #include "json.hpp"
+#include "json_rpc.hpp"
+#include "session_service.hpp"
+#include "user_service.hpp"
+#include "user_store.hpp"
 
 #include <cmath>
 #include <iostream>
@@ -7,6 +11,32 @@
 #include <stdexcept>
 #include <string>
 #include <vector>
+
+namespace {
+
+class InMemoryUserStore final : public tundraux::backend::UserStore {
+public:
+    std::vector<tundraux::backend::BackendUser> users{
+        {"admin", "alice", "Secret1", "hint", 0},
+        {"user", "bob", "Secret2", "hint", 0}
+    };
+
+    std::vector<tundraux::backend::BackendUser> listUsers() const override {
+        return users;
+    }
+
+    bool updateUser(const std::string& name, const tundraux::backend::BackendUser& user) override {
+        for (auto& existing : users) {
+            if (existing.name == name) {
+                existing = user;
+                return true;
+            }
+        }
+        return false;
+    }
+};
+
+} // namespace
 
 bool expect(bool condition, const std::string& message) {
     if (!condition) {
@@ -62,6 +92,58 @@ bool runCommaLocaleNumberTest() {
     return expect(json == "1.5", "number stringify should use dot decimal under comma locale: " + json)
         && expect(parsed.ok, "number parse should accept dot decimal under comma locale")
         && expect(std::fabs(parsed.value.asNumber() - 1.5) < 0.000000000001, "comma locale parsed number mismatch");
+}
+
+bool runDispatcherTest() {
+    using tundraux::backend::JsonRpcDispatcher;
+    using tundraux::backend::JsonValue;
+    using tundraux::backend::parseJson;
+    using tundraux::backend::SessionService;
+    using tundraux::backend::UserService;
+
+    InMemoryUserStore store;
+    SessionService sessions(store);
+    UserService users(store, sessions);
+    JsonRpcDispatcher dispatcher(sessions, users);
+
+    const std::string guestResponse = dispatcher.handleLine(R"({"id":"1","method":"session.startGuestSession","params":{}})");
+    const auto guest = parseJson(guestResponse);
+    if (!expect(guest.ok, "guest response should parse: " + guestResponse)) return false;
+    const auto& guestObject = guest.value.asObject();
+    const auto& guestResult = guestObject.at("result").asObject();
+    if (!expect(guestObject.at("id").asString() == "1", "guest response id mismatch")) return false;
+    if (!expect(guestResult.at("sessionId").asString() == "session-1", "guest session id mismatch")) return false;
+    if (!expect(guestResult.at("user").asObject().at("type").asString() == "guest", "guest user type mismatch")) return false;
+    if (!expect(guestResult.at("user").asObject().at("name").asString().empty(), "guest user name should be empty")) return false;
+
+    const std::string loginResponse = dispatcher.handleLine(R"({"id":"2","method":"session.login","params":{"sessionId":"session-1","username":"alice","password":"Secret1"}})");
+    const auto login = parseJson(loginResponse);
+    if (!expect(login.ok, "login response should parse: " + loginResponse)) return false;
+    const auto& loginResult = login.value.asObject().at("result").asObject();
+    if (!expect(loginResult.at("user").asObject().at("type").asString() == "admin", "login user type mismatch")) return false;
+
+    const std::string listResponse = dispatcher.handleLine(R"({"id":"3","method":"user.listUsers","params":{"sessionId":"session-1"}})");
+    const auto list = parseJson(listResponse);
+    if (!expect(list.ok, "list response should parse: " + listResponse)) return false;
+    const auto& listUsers = list.value.asObject().at("result").asObject().at("users").asArray();
+    if (!expect(listUsers.size() == 2, "list users count mismatch")) return false;
+    for (const auto& user : listUsers) {
+        if (!expect(user.asObject().find("password") == user.asObject().end(), "list users should not expose password field")) return false;
+    }
+
+    const std::string unknownResponse = dispatcher.handleLine(R"({"id":"4","method":"missing.method","params":{}})");
+    const auto unknown = parseJson(unknownResponse);
+    if (!expect(unknown.ok, "unknown response should parse: " + unknownResponse)) return false;
+    if (!expect(unknown.value.asObject().at("error").asObject().at("code").asString() == "UnknownMethod", "unknown method code mismatch")) return false;
+
+    const std::string invalidResponse = dispatcher.handleLine("{");
+    const auto invalid = parseJson(invalidResponse);
+    if (!expect(invalid.ok, "invalid response should parse: " + invalidResponse)) return false;
+    const auto& invalidObject = invalid.value.asObject();
+    if (!expect(invalidObject.at("id").type() == JsonValue::Type::Null, "invalid request id should be null")) return false;
+    if (!expect(invalidObject.at("error").asObject().at("code").asString() == "InvalidRequest", "invalid request code mismatch")) return false;
+
+    return true;
 }
 
 int main() {
@@ -127,6 +209,8 @@ int main() {
         wrongTypeThrew = true;
     }
     if (!expect(wrongTypeThrew, "wrong-type accessor should throw")) return 1;
+
+    if (!expect(runDispatcherTest(), "json rpc dispatcher behavior failed")) return 1;
 
     return 0;
 }
