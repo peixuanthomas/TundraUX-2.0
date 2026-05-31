@@ -10,6 +10,7 @@ namespace {
 
 class InMemoryUserStore final : public tundraux::backend::UserStore {
 public:
+    bool failUpdates = false;
     std::vector<tundraux::backend::BackendUser> users{
         {"admin", "alice", "Secret1", "hint", 0},
         {"user", "bob", "Secret2", "hint", 0},
@@ -21,6 +22,9 @@ public:
     }
 
     bool updateUser(const std::string& name, const tundraux::backend::BackendUser& user) override {
+        if (failUpdates) {
+            return false;
+        }
         for (auto& existing : users) {
             if (existing.name == name) {
                 existing = user;
@@ -80,6 +84,27 @@ int main() {
     const auto missingSession = sessions.whoami("missing");
     if (!expect(!missingSession.ok, "missing session should fail")) return 1;
     if (!expect(missingSession.error.code == ErrorCode::SessionExpired, "missing session error mismatch")) return 1;
+
+    InMemoryUserStore failedCountStore;
+    failedCountStore.failUpdates = true;
+    SessionService failedCountSessions(failedCountStore);
+    const auto failedCountGuest = failedCountSessions.startGuestSession();
+    const auto failedCountLogin = failedCountSessions.login(failedCountGuest.sessionId, "alice", "bad");
+    if (!expect(!failedCountLogin.ok, "failed-count persistence failure should fail login")) return 1;
+    if (!expect(failedCountLogin.error.code == ErrorCode::StorageError, "failed-count persistence error mismatch")) return 1;
+    if (!expect(failedCountStore.users[0].failedCount == 0, "failed-count persistence failure should not mutate store")) return 1;
+
+    InMemoryUserStore resetStore;
+    resetStore.failUpdates = true;
+    SessionService resetSessions(resetStore);
+    const auto resetGuest = resetSessions.startGuestSession();
+    const auto resetLogin = resetSessions.login(resetGuest.sessionId, "alice", "Secret1");
+    if (!expect(!resetLogin.ok, "reset persistence failure should fail login")) return 1;
+    if (!expect(resetLogin.error.code == ErrorCode::StorageError, "reset persistence error mismatch")) return 1;
+    const auto resetWhoami = resetSessions.whoami(resetGuest.sessionId);
+    if (!expect(resetWhoami.ok, "whoami after reset persistence failure should pass")) return 1;
+    if (!expect(resetWhoami.value.type == "guest", "reset persistence failure should leave session as guest")) return 1;
+    if (!expect(resetWhoami.value.name.empty(), "reset persistence failure should not set session name")) return 1;
 
     return 0;
 }

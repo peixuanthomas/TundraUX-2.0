@@ -44,13 +44,17 @@ ServiceResult<SessionInfo> SessionService::login(
     if (found->password != password) {
         BackendUser updated = *found;
         updated.failedCount += 1;
-        users_.updateUser(found->name, updated);
+        if (!users_.updateUser(found->name, updated)) {
+            return ServiceResult<SessionInfo>::failure(ErrorCode::StorageError, "Unable to update user data.");
+        }
         return ServiceResult<SessionInfo>::failure(ErrorCode::AuthenticationFailed, "Incorrect password.");
     }
 
     BackendUser updated = *found;
     updated.failedCount = 0;
-    users_.updateUser(found->name, updated);
+    if (!users_.updateUser(found->name, updated)) {
+        return ServiceResult<SessionInfo>::failure(ErrorCode::StorageError, "Unable to update user data.");
+    }
     session->second = updated;
     return ServiceResult<SessionInfo>::success(SessionInfo{sessionId, updated});
 }
