@@ -3,4 +3,8 @@
 #include <string>
 #include <vector>
 
-void task_main();
+namespace tundraux::frontend {
+class BackendRuntime;
+}
+
+void task_main(tundraux::frontend::BackendRuntime* backendRuntime = nullptr);

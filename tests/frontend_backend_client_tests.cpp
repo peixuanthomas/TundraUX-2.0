@@ -1,4 +1,5 @@
 #include "backend_client.hpp"
+#include "backend_runtime.hpp"
 #include "json.hpp"
 
 #include <iostream>
@@ -270,6 +271,36 @@ bool runLogoutTest() {
         expectRequestMethod(transport, "session.logout", "logout");
 }
 
+bool runRuntimeLegacyDirectTest() {
+    tundraux::frontend::BackendRuntime runtime;
+    tundraux::frontend::BackendRuntimeOptions options;
+    options.legacyDirect = true;
+    std::string error;
+
+    const bool initialized = runtime.initialize(options, error);
+
+    return expect(initialized, "legacy-direct runtime should initialize") &&
+        expect(error.empty(), "legacy-direct runtime should not set error") &&
+        expect(runtime.legacyDirect(), "legacy-direct runtime flag mismatch") &&
+        expect(runtime.client() == nullptr, "legacy-direct runtime should not create client") &&
+        expect(runtime.sessionId().empty(), "legacy-direct runtime should not set session id");
+}
+
+bool runRuntimeMissingBackendPathTest() {
+    tundraux::frontend::BackendRuntime runtime;
+    tundraux::frontend::BackendRuntimeOptions options;
+    options.backendStdioPath = "Z:\\definitely\\missing\\tundraux_backend_stdio.exe";
+    std::string error;
+
+    const bool initialized = runtime.initialize(options, error);
+
+    return expect(!initialized, "missing backend runtime should fail") &&
+        expect(!error.empty(), "missing backend runtime should set error") &&
+        expect(!runtime.legacyDirect(), "missing backend runtime should not be legacy-direct") &&
+        expect(runtime.client() == nullptr, "missing backend runtime should not create client") &&
+        expect(runtime.sessionId().empty(), "missing backend runtime should not set session id");
+}
+
 } // namespace
 
 int main() {
@@ -290,5 +321,7 @@ int main() {
     if (!runListDirectoryNegativeSizeTest()) return 1;
     if (!runLoginTest()) return 1;
     if (!runLogoutTest()) return 1;
+    if (!runRuntimeLegacyDirectTest()) return 1;
+    if (!runRuntimeMissingBackendPathTest()) return 1;
     return 0;
 }

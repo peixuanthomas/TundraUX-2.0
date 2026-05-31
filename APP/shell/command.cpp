@@ -12,6 +12,7 @@
 #include <TundraTUI/input.hpp>
 
 #include "audit_log.hpp"
+#include "backend_runtime.hpp"
 #include "color.hpp"
 #include "commandHandlers.hpp"
 #include "commandReg.hpp"
@@ -44,7 +45,8 @@ bool redrawsShellHeader(const std::string& input) {
     return (command == "cls" || command == "clear") && !(iss >> extra);
 }
 
-void task_main() {
+void task_main(tundraux::frontend::BackendRuntime* backendRuntime) {
+    (void)backendRuntime;
     renderShellHeader();
     tundraux::audit::initialize();
     tundra_tui::setKeyAuditSink(tundraux::audit::logKeyPress);

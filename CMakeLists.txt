@@ -88,6 +88,9 @@ set(TUNDRAUX_CORE_SOURCES
 
 set(TUNDRAUX_APP_SOURCES
     APP/account_settings/account_settings.cpp
+    APP/backend_client/backend_client.cpp
+    APP/backend_client/backend_process.cpp
+    APP/backend_client/backend_runtime.cpp
     APP/editor/editor.cpp
     APP/editor/editor_portable.cpp
     APP/editor/editor_win.cpp
@@ -135,6 +138,7 @@ target_include_directories(${PROJECT_NAME}
     PRIVATE
         ${PROJECT_SOURCE_DIR}/CORE/startup
         ${PROJECT_SOURCE_DIR}/APP/account_settings
+        ${PROJECT_SOURCE_DIR}/APP/backend_client
         ${PROJECT_SOURCE_DIR}/APP/editor
         ${PROJECT_SOURCE_DIR}/APP/explorer
         ${PROJECT_SOURCE_DIR}/APP/file_manager
@@ -145,11 +149,13 @@ target_include_directories(${PROJECT_NAME}
         ${PROJECT_SOURCE_DIR}/SYSTEM/console
         ${PROJECT_SOURCE_DIR}/SYSTEM/crypto
         ${PROJECT_SOURCE_DIR}/SYSTEM/debug
+        ${PROJECT_SOURCE_DIR}/BACKEND/core
 )
 
 target_link_libraries(${PROJECT_NAME}
     PRIVATE
         TundraTUI::TundraTUI
+        tundraux_backend_core
 )
 
 target_compile_features(${PROJECT_NAME}
@@ -343,6 +349,8 @@ add_test(NAME backend_stdio_tests COMMAND backend_stdio_tests $<TARGET_FILE:tund
 add_executable(frontend_backend_client_tests
     tests/frontend_backend_client_tests.cpp
     APP/backend_client/backend_client.cpp
+    APP/backend_client/backend_process.cpp
+    APP/backend_client/backend_runtime.cpp
 )
 
 target_include_directories(frontend_backend_client_tests
