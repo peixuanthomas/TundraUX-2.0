@@ -387,6 +387,16 @@ int main() {
         "protected.TLOG/new.txt write should fail with PermissionDenied",
         ErrorCode::PermissionDenied,
         [&store]() { store.writeFile("protected.TLOG/new.txt", "x"); })) return 1;
+    if (!expect(
+        !std::filesystem::exists(tempRoot.path() / "missingProtected.TLOG"),
+        "missingProtected.TLOG should not exist before denied write")) return 1;
+    if (!expectBackendException(
+        "missingProtected.TLOG/new.txt write should fail with PermissionDenied",
+        ErrorCode::PermissionDenied,
+        [&store]() { store.writeFile("missingProtected.TLOG/new.txt", "x"); })) return 1;
+    if (!expect(
+        !std::filesystem::exists(tempRoot.path() / "missingProtected.TLOG"),
+        "missingProtected.TLOG should not be created by denied write")) return 1;
     if (!expectBackendException(
         "user_data.dat:stream write should fail with InvalidPath",
         ErrorCode::InvalidPath,

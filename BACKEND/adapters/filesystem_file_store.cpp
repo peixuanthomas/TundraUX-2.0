@@ -256,6 +256,7 @@ void FilesystemFileStore::writeFile(const std::string& path, const std::string& 
 
         const auto resolved = resolveManagedPath(path, false);
         rejectUnsafeExistingPathComponents(resolved);
+        rejectProtectedPath(resolved);
         std::error_code error;
         std::filesystem::create_directories(resolved.parent_path(), error);
         if (error) {
@@ -268,7 +269,6 @@ void FilesystemFileStore::writeFile(const std::string& path, const std::string& 
         if (!isPathInside(root_, parent) || !isPathInside(root_, finalPath)) {
             throw invalidPath();
         }
-        rejectProtectedPath(finalPath);
 
         if (std::filesystem::exists(finalPath, error)) {
             const auto existingTarget = canonicalExistingPath(finalPath);
