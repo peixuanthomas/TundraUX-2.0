@@ -320,6 +320,11 @@ add_executable(backend_stdio_tests
     tests/backend_stdio_tests.cpp
 )
 
+target_include_directories(backend_stdio_tests
+    PRIVATE
+        ${PROJECT_SOURCE_DIR}/SYSTEM/crypto
+)
+
 target_link_libraries(backend_stdio_tests
     PRIVATE
         tundraux_backend_core

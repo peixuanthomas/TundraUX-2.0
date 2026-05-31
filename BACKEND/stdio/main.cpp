@@ -1,35 +1,40 @@
 #include "data_manager_user_store.hpp"
+#include "file_service.hpp"
+#include "filesystem_file_store.hpp"
 #include "json_rpc.hpp"
 #include "session_service.hpp"
 #include "user_service.hpp"
 
 #include <iostream>
 #include <string>
+#include <utility>
 
 namespace {
 
 void printUsage() {
-    std::cerr << "Usage: tundraux_backend_stdio [--user-data PATH]\n";
+    std::cerr << "Usage: tundraux_backend_stdio [--user-data PATH] [--files-root PATH]\n";
 }
 
-bool parseArgs(int argc, char* argv[], std::string& userDataPath) {
+bool parseArgs(int argc, char* argv[], std::string& userDataPath, std::string& filesRoot) {
     for (int i = 1; i < argc; ++i) {
         const std::string arg = argv[i];
-        if (arg != "--user-data") {
-            std::cerr << "Unknown argument: " << arg << "\n";
+        if (arg != "--user-data" && arg != "--files-root") {
             printUsage();
             return false;
         }
         if (i + 1 >= argc) {
-            std::cerr << "--user-data requires a path.\n";
             printUsage();
             return false;
         }
-        userDataPath = argv[++i];
-        if (userDataPath.empty()) {
-            std::cerr << "--user-data path must not be empty.\n";
+        std::string value = argv[++i];
+        if (value.empty()) {
             printUsage();
             return false;
+        }
+        if (arg == "--user-data") {
+            userDataPath = std::move(value);
+        } else {
+            filesRoot = std::move(value);
         }
     }
     return true;
@@ -39,14 +44,17 @@ bool parseArgs(int argc, char* argv[], std::string& userDataPath) {
 
 int main(int argc, char* argv[]) {
     std::string userDataPath = "user_data.dat";
-    if (!parseArgs(argc, argv, userDataPath)) {
+    std::string filesRoot = "Files";
+    if (!parseArgs(argc, argv, userDataPath, filesRoot)) {
         return 1;
     }
 
-    tundraux::backend::DataManagerUserStore store(userDataPath);
-    tundraux::backend::SessionService sessions(store);
-    tundraux::backend::UserService users(store, sessions);
-    tundraux::backend::JsonRpcDispatcher dispatcher(sessions, users);
+    tundraux::backend::DataManagerUserStore usersStore(userDataPath);
+    tundraux::backend::FilesystemFileStore filesStore(filesRoot);
+    tundraux::backend::SessionService sessions(usersStore);
+    tundraux::backend::UserService users(usersStore, sessions);
+    tundraux::backend::FileService files(filesStore, sessions);
+    tundraux::backend::JsonRpcDispatcher dispatcher(sessions, users, files);
 
     std::string line;
     while (std::getline(std::cin, line)) {
