@@ -198,6 +198,22 @@ target_compile_features(tundratui_footer_hint_tests
 
 add_test(NAME tundratui_footer_hint_tests COMMAND tundratui_footer_hint_tests)
 
+add_executable(backend_core_tests
+    tests/backend_core_tests.cpp
+)
+
+target_include_directories(backend_core_tests
+    PRIVATE
+        ${PROJECT_SOURCE_DIR}/BACKEND/core
+)
+
+target_compile_features(backend_core_tests
+    PRIVATE
+        cxx_std_17
+)
+
+add_test(NAME backend_core_tests COMMAND backend_core_tests)
+
 if(TUNDRAUX_DEBUG_STARTUP)
     target_compile_definitions(${PROJECT_NAME}
         PRIVATE
