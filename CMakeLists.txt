@@ -31,6 +31,37 @@ target_compile_features(tundraux_backend_core
         cxx_std_17
 )
 
+add_library(tundraux_backend_adapters
+    BACKEND/adapters/data_manager_user_store.cpp
+)
+
+target_include_directories(tundraux_backend_adapters
+    PUBLIC
+        ${PROJECT_SOURCE_DIR}/BACKEND/adapters
+    PRIVATE
+        ${PROJECT_SOURCE_DIR}/USER/udata
+        ${PROJECT_SOURCE_DIR}/SYSTEM/console
+        ${PROJECT_SOURCE_DIR}/SYSTEM/crypto
+)
+
+target_link_libraries(tundraux_backend_adapters
+    PUBLIC
+        tundraux_backend_core
+    PRIVATE
+        TundraTUI::TundraTUI
+)
+
+target_sources(tundraux_backend_adapters
+    PRIVATE
+        USER/udata/udata.cpp
+        SYSTEM/crypto/crypto.cpp
+)
+
+target_compile_features(tundraux_backend_adapters
+    PUBLIC
+        cxx_std_17
+)
+
 add_executable(${PROJECT_NAME})
 
 set(TUNDRAUX_CORE_SOURCES
