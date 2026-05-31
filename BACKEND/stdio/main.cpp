@@ -6,13 +6,41 @@
 #include <iostream>
 #include <string>
 
+namespace {
+
+void printUsage() {
+    std::cerr << "Usage: tundraux_backend_stdio [--user-data PATH]\n";
+}
+
+bool parseArgs(int argc, char* argv[], std::string& userDataPath) {
+    for (int i = 1; i < argc; ++i) {
+        const std::string arg = argv[i];
+        if (arg != "--user-data") {
+            std::cerr << "Unknown argument: " << arg << "\n";
+            printUsage();
+            return false;
+        }
+        if (i + 1 >= argc) {
+            std::cerr << "--user-data requires a path.\n";
+            printUsage();
+            return false;
+        }
+        userDataPath = argv[++i];
+        if (userDataPath.empty()) {
+            std::cerr << "--user-data path must not be empty.\n";
+            printUsage();
+            return false;
+        }
+    }
+    return true;
+}
+
+} // namespace
+
 int main(int argc, char* argv[]) {
     std::string userDataPath = "user_data.dat";
-    for (int i = 1; i + 1 < argc; ++i) {
-        if (std::string(argv[i]) == "--user-data") {
-            userDataPath = argv[i + 1];
-            ++i;
-        }
+    if (!parseArgs(argc, argv, userDataPath)) {
+        return 1;
     }
 
     tundraux::backend::DataManagerUserStore store(userDataPath);

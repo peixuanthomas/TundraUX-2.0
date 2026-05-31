@@ -1,6 +1,7 @@
 #include "session_service.hpp"
 
 #include <algorithm>
+#include <exception>
 #include <utility>
 
 namespace tundraux::backend {
@@ -31,7 +32,13 @@ ServiceResult<SessionInfo> SessionService::login(
         return ServiceResult<SessionInfo>::failure(ErrorCode::SessionExpired, "Session expired.");
     }
 
-    auto users = users_.listUsers();
+    std::vector<BackendUser> users;
+    try {
+        users = users_.listUsers();
+    } catch (const std::exception&) {
+        return ServiceResult<SessionInfo>::failure(ErrorCode::StorageError, "Unable to read user data.");
+    }
+
     auto found = std::find_if(users.begin(), users.end(), [&](const BackendUser& user) {
         return user.name == username;
     });
@@ -44,7 +51,11 @@ ServiceResult<SessionInfo> SessionService::login(
     if (found->password != password) {
         BackendUser updated = *found;
         updated.failedCount += 1;
-        if (!users_.updateUser(found->name, updated)) {
+        try {
+            if (!users_.updateUser(found->name, updated)) {
+                return ServiceResult<SessionInfo>::failure(ErrorCode::StorageError, "Unable to update user data.");
+            }
+        } catch (const std::exception&) {
             return ServiceResult<SessionInfo>::failure(ErrorCode::StorageError, "Unable to update user data.");
         }
         return ServiceResult<SessionInfo>::failure(ErrorCode::AuthenticationFailed, "Incorrect password.");
@@ -52,7 +63,11 @@ ServiceResult<SessionInfo> SessionService::login(
 
     BackendUser updated = *found;
     updated.failedCount = 0;
-    if (!users_.updateUser(found->name, updated)) {
+    try {
+        if (!users_.updateUser(found->name, updated)) {
+            return ServiceResult<SessionInfo>::failure(ErrorCode::StorageError, "Unable to update user data.");
+        }
+    } catch (const std::exception&) {
         return ServiceResult<SessionInfo>::failure(ErrorCode::StorageError, "Unable to update user data.");
     }
     session->second = updated;

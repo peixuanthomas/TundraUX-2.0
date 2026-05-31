@@ -1,5 +1,7 @@
 #include "user_service.hpp"
 
+#include <exception>
+
 namespace tundraux::backend {
 
 UserService::UserService(UserStore& users, const SessionService& sessions)
@@ -18,7 +20,13 @@ ServiceResult<std::vector<BackendUser>> UserService::listUsers(const std::string
         return ServiceResult<std::vector<BackendUser>>::failure(ErrorCode::PermissionDenied, "Access Denied.");
     }
 
-    auto users = users_.listUsers();
+    std::vector<BackendUser> users;
+    try {
+        users = users_.listUsers();
+    } catch (const std::exception&) {
+        return ServiceResult<std::vector<BackendUser>>::failure(ErrorCode::StorageError, "Unable to read user data.");
+    }
+
     for (auto& user : users) {
         user.password.clear();
     }
