@@ -17,8 +17,10 @@ public:
     void writeFile(const std::string& path, const std::string& content) override;
 
 private:
+    std::filesystem::path configuredRoot_;
     std::filesystem::path root_;
 
+    void ensureTrustedRoot() const;
     std::filesystem::path resolveManagedPath(const std::string& path, bool allowRoot) const;
     void rejectUnsafeExistingPathComponents(const std::filesystem::path& resolved) const;
     void rejectProtectedPath(const std::filesystem::path& resolved) const;

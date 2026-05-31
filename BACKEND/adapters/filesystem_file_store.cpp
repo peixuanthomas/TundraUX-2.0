@@ -99,6 +99,10 @@ std::filesystem::path stableAbsolutePath(const std::filesystem::path& path) {
     return std::filesystem::absolute(path).lexically_normal();
 }
 
+std::filesystem::path lexicalAbsolutePath(const std::filesystem::path& path) {
+    return std::filesystem::absolute(path).lexically_normal();
+}
+
 std::filesystem::path canonicalExistingPath(const std::filesystem::path& path) {
     std::error_code error;
     const auto canonical = std::filesystem::weakly_canonical(path, error);
@@ -118,10 +122,14 @@ std::string lexicalEntryPath(const std::string& directory, const std::string& na
 } // namespace
 
 FilesystemFileStore::FilesystemFileStore(std::string root)
-    : root_(stableAbsolutePath(std::filesystem::path(std::move(root)))) {}
+    : configuredRoot_(lexicalAbsolutePath(std::filesystem::path(std::move(root)))),
+      root_(stableAbsolutePath(configuredRoot_)) {
+    ensureTrustedRoot();
+}
 
 std::vector<FileEntry> FilesystemFileStore::listDirectory(const std::string& path) const {
     try {
+        ensureTrustedRoot();
         const auto requested = resolveManagedPath(path, true);
         rejectUnsafeExistingPathComponents(requested);
         const auto resolved = canonicalExistingPath(requested);
@@ -195,6 +203,7 @@ std::vector<FileEntry> FilesystemFileStore::listDirectory(const std::string& pat
 
 FileContent FilesystemFileStore::readFile(const std::string& path) const {
     try {
+        ensureTrustedRoot();
         const auto requested = resolveManagedPath(path, false);
         rejectUnsafeExistingPathComponents(requested);
         const auto resolved = canonicalExistingPath(requested);
@@ -250,6 +259,7 @@ FileContent FilesystemFileStore::readFile(const std::string& path) const {
 
 void FilesystemFileStore::writeFile(const std::string& path, const std::string& content) {
     try {
+        ensureTrustedRoot();
         if (content.size() > kMaxFileContentSize) {
             throw storageError();
         }
@@ -262,6 +272,7 @@ void FilesystemFileStore::writeFile(const std::string& path, const std::string& 
         if (error) {
             throw storageError();
         }
+        ensureTrustedRoot();
         rejectUnsafeExistingPathComponents(resolved);
 
         const auto parent = canonicalExistingPath(resolved.parent_path());
@@ -292,6 +303,24 @@ void FilesystemFileStore::writeFile(const std::string& path, const std::string& 
         throw;
     } catch (const std::exception&) {
         throw storageError();
+    }
+}
+
+void FilesystemFileStore::ensureTrustedRoot() const {
+    std::error_code error;
+    const bool exists = std::filesystem::exists(configuredRoot_, error);
+    if (error) {
+        throw storageError();
+    }
+    if (!exists) {
+        return;
+    }
+    if (isReparseOrSymlink(configuredRoot_)) {
+        throw permissionDenied();
+    }
+    const auto resolvedRoot = canonicalExistingPath(configuredRoot_);
+    if (resolvedRoot != root_) {
+        throw permissionDenied();
     }
 }
 

@@ -444,10 +444,14 @@ int main() {
 
     const auto outside = tempRoot.path().parent_path() / (tempRoot.path().filename().string() + "_outside.txt");
     const auto outsideDir = tempRoot.path().parent_path() / (tempRoot.path().filename().string() + "_outside_dir");
+    const auto rootLink = tempRoot.path().parent_path() / (tempRoot.path().filename().string() + "_root_link");
+    const auto replaceRoot = tempRoot.path().parent_path() / (tempRoot.path().filename().string() + "_replace_root");
     {
         std::ofstream(outside) << "outside";
     }
     std::filesystem::create_directories(outsideDir);
+    std::filesystem::remove_all(rootLink);
+    std::filesystem::remove_all(replaceRoot);
 
     if (createdSymlink(outside, tempRoot.path() / "link-to-outside.txt")) {
         if (!expectBackendExceptionOneOf(
@@ -486,7 +490,33 @@ int main() {
             [&store]() { store.writeFile("dangling-link.txt", "x"); })) return 1;
     }
 
+    if (createdDirectorySymlink(outsideDir, rootLink)) {
+        if (!expectBackendExceptionOneOf(
+            "root directory symlink should fail with PermissionDenied or StorageError",
+            ErrorCode::PermissionDenied,
+            ErrorCode::StorageError,
+            [&rootLink]() {
+                FilesystemFileStore unsafeStore(rootLink.string());
+                (void)unsafeStore.listDirectory("");
+            })) return 1;
+        std::filesystem::remove(rootLink);
+    }
+
+    std::filesystem::create_directories(replaceRoot);
+    FilesystemFileStore replaceStore(replaceRoot.string());
+    std::filesystem::remove_all(replaceRoot);
+    if (createdDirectorySymlink(outsideDir, replaceRoot)) {
+        if (!expectBackendExceptionOneOf(
+            "replaced root directory symlink should fail with PermissionDenied or StorageError",
+            ErrorCode::PermissionDenied,
+            ErrorCode::StorageError,
+            [&replaceStore]() { (void)replaceStore.listDirectory(""); })) return 1;
+        std::filesystem::remove(replaceRoot);
+    }
+
     std::filesystem::remove_all(outsideDir);
+    std::filesystem::remove_all(rootLink);
+    std::filesystem::remove_all(replaceRoot);
     std::filesystem::remove(outside);
 
     return 0;
