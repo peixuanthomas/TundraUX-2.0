@@ -1,9 +1,13 @@
 #include "backend_error.hpp"
+#include "filesystem_file_store.hpp"
 #include "file_service.hpp"
 #include "file_store.hpp"
 #include "session_service.hpp"
 #include "user_store.hpp"
 
+#include <filesystem>
+#include <functional>
+#include <fstream>
 #include <iostream>
 #include <string>
 #include <utility>
@@ -62,12 +66,57 @@ public:
     }
 };
 
+class TempDirectory final {
+public:
+    explicit TempDirectory(std::filesystem::path root) : root_(std::move(root)) {
+        std::filesystem::remove_all(root_);
+    }
+
+    ~TempDirectory() {
+        std::filesystem::remove_all(root_);
+    }
+
+    const std::filesystem::path& path() const {
+        return root_;
+    }
+
+private:
+    std::filesystem::path root_;
+};
+
 bool expect(bool condition, const std::string& message) {
     if (!condition) {
         std::cerr << message << "\n";
         return false;
     }
     return true;
+}
+
+bool expectBackendException(
+    const std::string& message,
+    tundraux::backend::ErrorCode expected,
+    const std::function<void()>& action
+) {
+    try {
+        action();
+    } catch (const tundraux::backend::BackendException& error) {
+        return expect(error.code() == expected, message);
+    }
+    return expect(false, message);
+}
+
+bool expectBackendExceptionOneOf(
+    const std::string& message,
+    tundraux::backend::ErrorCode first,
+    tundraux::backend::ErrorCode second,
+    const std::function<void()>& action
+) {
+    try {
+        action();
+    } catch (const tundraux::backend::BackendException& error) {
+        return expect(error.code() == first || error.code() == second, message);
+    }
+    return expect(false, message);
 }
 
 } // namespace
@@ -112,6 +161,40 @@ int main() {
     if (!expect(!missing.ok, "missing.txt readFile should fail")) return 1;
     if (!expect(missing.error.code == ErrorCode::NotFound, "missing.txt error code mismatch")) return 1;
     if (!expect(missing.error.message == "File not found.", "missing.txt error message mismatch")) return 1;
+
+    const auto root = std::filesystem::temp_directory_path() /
+        std::filesystem::path("tundraux_backend_file_store_tests");
+    TempDirectory tempRoot(root);
+    std::filesystem::create_directories(tempRoot.path() / "docs");
+    std::ofstream(tempRoot.path() / "docs" / "note.txt") << "hello";
+    std::ofstream(tempRoot.path() / "secret.TUX") << "protected";
+    std::ofstream(tempRoot.path() / "audit.tlog") << "protected";
+
+    FilesystemFileStore store(tempRoot.path().string());
+
+    const auto entries = store.listDirectory("");
+    if (!expect(!entries.empty(), "filesystem listDirectory root should return entries")) return 1;
+
+    const auto note = store.readFile("docs/note.txt");
+    if (!expect(note.content == "hello", "filesystem readFile content mismatch")) return 1;
+
+    store.writeFile("docs/new.txt", "created");
+    const auto created = store.readFile("docs/new.txt");
+    if (!expect(created.content == "created", "filesystem writeFile content mismatch")) return 1;
+
+    if (!expectBackendExceptionOneOf(
+        "../user_data.dat should fail with InvalidPath or PermissionDenied",
+        ErrorCode::InvalidPath,
+        ErrorCode::PermissionDenied,
+        [&store]() { (void)store.readFile("../user_data.dat"); })) return 1;
+    if (!expectBackendException(
+        "secret.TUX should fail with PermissionDenied",
+        ErrorCode::PermissionDenied,
+        [&store]() { (void)store.readFile("secret.TUX"); })) return 1;
+    if (!expectBackendException(
+        "audit.tlog should fail with PermissionDenied",
+        ErrorCode::PermissionDenied,
+        [&store]() { (void)store.readFile("audit.tlog"); })) return 1;
 
     return 0;
 }

@@ -34,6 +34,7 @@ target_compile_features(tundraux_backend_core
 
 add_library(tundraux_backend_adapters
     BACKEND/adapters/data_manager_user_store.cpp
+    BACKEND/adapters/filesystem_file_store.cpp
 )
 
 target_include_directories(tundraux_backend_adapters
@@ -289,7 +290,7 @@ add_executable(backend_file_service_tests
 
 target_link_libraries(backend_file_service_tests
     PRIVATE
-        tundraux_backend_core
+        tundraux_backend_adapters
 )
 
 target_compile_features(backend_file_service_tests
