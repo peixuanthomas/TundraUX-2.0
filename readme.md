@@ -31,7 +31,7 @@ cmake -B build
 cmake --build build
 ```
 
-The generated executable is named `TundraUX2`.
+The main frontend executable is named `TundraUX2`.
 
 ### Backend Phase 1
 
@@ -44,7 +44,7 @@ cmake --build build
 ctest --test-dir build --output-on-failure
 ```
 
-The project currently does not register automated tests, so `ctest` reports that no tests were found.
+`ctest --test-dir build --output-on-failure` runs the registered project tests, including backend Phase 1 tests.
 
 ### Startup Mode
 

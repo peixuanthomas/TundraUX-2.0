@@ -31,7 +31,7 @@ cmake -B build
 cmake --build build
 ```
 
-生成的可执行文件名为 `TundraUX2`。
+主前端可执行文件名为 `TundraUX2`。
 
 ### 后端第一阶段
 
@@ -44,7 +44,7 @@ cmake --build build
 ctest --test-dir build --output-on-failure
 ```
 
-项目当前没有注册自动化测试，因此 `ctest` 会报告未找到测试。
+`ctest --test-dir build --output-on-failure` 会运行项目已注册的测试，包括后端第一阶段测试。
 
 ### 启动模式
 
