@@ -7,6 +7,7 @@
 #include <cwctype>
 #include <ctime>
 #include <filesystem>
+#include <fstream>
 #include <iomanip>
 #include <iostream>
 #include <sstream>
@@ -73,6 +74,87 @@ bool hasUnsafePathPart(const fs::path& path) {
     }
     return false;
 }
+
+std::string readWholeFile(const fs::path& path, bool& ok) {
+    std::ifstream stream(path, std::ios::binary);
+    if (!stream) {
+        ok = false;
+        return {};
+    }
+
+    std::ostringstream buffer;
+    buffer << stream.rdbuf();
+    ok = !stream.bad();
+    return buffer.str();
+}
+
+bool writeWholeFile(const fs::path& path, const std::string& content) {
+    std::ofstream stream(path, std::ios::binary | std::ios::trunc);
+    if (!stream) {
+        return false;
+    }
+
+    stream.write(content.data(), static_cast<std::streamsize>(content.size()));
+    return static_cast<bool>(stream);
+}
+
+class TemporaryEditorFile {
+public:
+    TemporaryEditorFile() = default;
+
+    ~TemporaryEditorFile() {
+        cleanup();
+    }
+
+    TemporaryEditorFile(const TemporaryEditorFile&) = delete;
+    TemporaryEditorFile& operator=(const TemporaryEditorFile&) = delete;
+
+    bool create(const std::string& content) {
+        std::error_code error;
+        fs::path tempRoot = fs::temp_directory_path(error);
+        if (error) {
+            return false;
+        }
+
+        tempRoot /= "TundraUX";
+        fs::create_directories(tempRoot, error);
+        if (error) {
+            return false;
+        }
+
+        const auto seed = std::chrono::steady_clock::now().time_since_epoch().count();
+        for (int attempt = 0; attempt < 100; ++attempt) {
+            const fs::path candidate =
+                tempRoot / ("plain-edit-" + std::to_string(seed) + "-" + std::to_string(attempt) + ".tmp");
+            if (fs::exists(candidate, error) || error) {
+                error.clear();
+                continue;
+            }
+            if (!writeWholeFile(candidate, content)) {
+                return false;
+            }
+            path_ = candidate;
+            return true;
+        }
+
+        return false;
+    }
+
+    const fs::path& path() const {
+        return path_;
+    }
+
+private:
+    void cleanup() {
+        if (!path_.empty()) {
+            std::error_code error;
+            fs::remove(path_, error);
+            path_.clear();
+        }
+    }
+
+    fs::path path_;
+};
 
 std::string trimLeadingSpaces(std::string value) {
     value.erase(value.begin(), std::find_if(value.begin(), value.end(), [](unsigned char ch) {
@@ -386,7 +468,11 @@ void handleManageUsersCommand(const std::string&, USER& currentUser) {
     manage_users(currentUser);
 }
 
-void handleEditCommand(const std::string& input, USER& currentUser) {
+void handleEditCommand(
+    const std::string& input,
+    USER& currentUser,
+    tundraux::frontend::BackendRuntime* backendRuntime
+) {
     tundraux::audit::setCurrentUser(currentUser);
     std::istringstream iss(input);
     std::string cmd, filename;
@@ -413,6 +499,49 @@ void handleEditCommand(const std::string& input, USER& currentUser) {
     fs::path requestedPath(filename);
     if (requestedPath.is_absolute() || hasUnsafePathPart(requestedPath)) {
         colorcout("red", "Access Denied.\n");
+        return;
+    }
+
+    if (usesBackend(backendRuntime)) {
+        auto* client = backendRuntime->client();
+        if (client == nullptr) {
+            colorcout("red", "Backend unavailable.\n");
+            return;
+        }
+        if (backendRuntime->sessionId().empty()) {
+            colorcout("yellow", "No backend session is active.\n");
+            return;
+        }
+
+        auto readResult = client->readFile(backendRuntime->sessionId(), filename);
+        if (!readResult.ok && readResult.errorCode != "NotFound") {
+            colorcout("red", backendFailureMessage("Unable to open file.", readResult.errorCode) + "\n");
+            return;
+        }
+
+        TemporaryEditorFile tempFile;
+        if (!tempFile.create(readResult.ok ? readResult.value : std::string{})) {
+            colorcout("red", "Unable to prepare editor file.\n");
+            return;
+        }
+
+        tundraux::audit::logEvent("editor", "backend open " + filename);
+        const int editorResult = run_editor(tempFile.path().string(), filename);
+        if (editorResult != 0) {
+            return;
+        }
+
+        bool readTempOk = false;
+        const std::string editedContent = readWholeFile(tempFile.path(), readTempOk);
+        if (!readTempOk) {
+            colorcout("red", "Unable to read editor output.\n");
+            return;
+        }
+
+        auto writeResult = client->writeFile(backendRuntime->sessionId(), filename, editedContent);
+        if (!writeResult.ok || !writeResult.value) {
+            colorcout("red", backendFailureMessage("Unable to save file.", writeResult.errorCode) + "\n");
+        }
         return;
     }
 
