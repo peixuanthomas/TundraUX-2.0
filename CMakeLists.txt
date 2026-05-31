@@ -14,6 +14,20 @@ option(TUNDRAUX_DEBUG_STARTUP "Start TundraUX2 in debug mode without logging in.
 set(TUNDRATUI_BUILD_EXAMPLES ON CACHE BOOL "Build TundraTUI example programs.")
 add_subdirectory(TundraTUI)
 
+add_library(tundraux_backend_core
+    BACKEND/core/session_service.cpp
+)
+
+target_include_directories(tundraux_backend_core
+    PUBLIC
+        ${PROJECT_SOURCE_DIR}/BACKEND/core
+)
+
+target_compile_features(tundraux_backend_core
+    PUBLIC
+        cxx_std_17
+)
+
 add_executable(${PROJECT_NAME})
 
 set(TUNDRAUX_CORE_SOURCES
@@ -205,6 +219,11 @@ add_executable(backend_core_tests
 target_include_directories(backend_core_tests
     PRIVATE
         ${PROJECT_SOURCE_DIR}/BACKEND/core
+)
+
+target_link_libraries(backend_core_tests
+    PRIVATE
+        tundraux_backend_core
 )
 
 target_compile_features(backend_core_tests
