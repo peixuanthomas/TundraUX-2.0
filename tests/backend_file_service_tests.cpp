@@ -130,6 +130,15 @@ bool expectEntry(
         expect(entry.type == type, "filesystem listDirectory type mismatch");
 }
 
+bool hasEntryNamed(const std::vector<tundraux::backend::FileEntry>& entries, const std::string& name) {
+    for (const auto& entry : entries) {
+        if (entry.name == name) {
+            return true;
+        }
+    }
+    return false;
+}
+
 } // namespace
 
 int main() {
@@ -179,6 +188,7 @@ int main() {
     std::filesystem::create_directories(tempRoot.path() / "docs");
     std::filesystem::create_directories(tempRoot.path() / "Alpha");
     std::filesystem::create_directories(tempRoot.path() / "beta");
+    std::filesystem::create_directories(tempRoot.path() / "temp");
     std::ofstream(tempRoot.path() / "Zoo.txt") << "zoo";
     std::ofstream(tempRoot.path() / "apple.txt") << "apple";
     std::ofstream(tempRoot.path() / "docs" / "note.txt") << "hello";
@@ -194,6 +204,7 @@ int main() {
     if (!expectEntry(entries[1], "beta", "beta", FileEntryType::Directory)) return 1;
     if (!expectEntry(entries[2], "docs", "docs", FileEntryType::Directory)) return 1;
     if (!expectEntry(entries[3], "apple.txt", "apple.txt", FileEntryType::File)) return 1;
+    if (!expect(!hasEntryNamed(entries, "temp"), "filesystem listDirectory should skip temp entry")) return 1;
 
     const auto note = store.readFile("docs/note.txt");
     if (!expect(note.content == "hello", "filesystem readFile content mismatch")) return 1;
@@ -201,6 +212,57 @@ int main() {
     store.writeFile("docs/new.txt", "created");
     const auto created = store.readFile("docs/new.txt");
     if (!expect(created.content == "created", "filesystem writeFile content mismatch")) return 1;
+
+    store.writeFile("nested/child/new.txt", "nested");
+    const auto nested = store.readFile("nested/child/new.txt");
+    if (!expect(nested.content == "nested", "filesystem writeFile should create parent directories")) return 1;
+
+    store.writeFile("docs/note.txt", "longer content");
+    store.writeFile("docs/note.txt", "short");
+    const auto truncated = store.readFile("docs/note.txt");
+    if (!expect(truncated.content == "short", "filesystem writeFile should truncate existing content")) return 1;
+
+    if (!expectBackendExceptionOneOf(
+        "absolute root path should fail with InvalidPath or PermissionDenied",
+        ErrorCode::InvalidPath,
+        ErrorCode::PermissionDenied,
+        [&store, &tempRoot]() { (void)store.readFile(tempRoot.path().string()); })) return 1;
+    if (!expectBackendException(
+        "docs/./note.txt should fail with InvalidPath",
+        ErrorCode::InvalidPath,
+        [&store]() { (void)store.readFile("docs/./note.txt"); })) return 1;
+    if (!expectBackendException(
+        "docs/../note.txt should fail with InvalidPath",
+        ErrorCode::InvalidPath,
+        [&store]() { (void)store.readFile("docs/../note.txt"); })) return 1;
+    if (!expectBackendException(
+        "empty readFile path should fail with InvalidPath",
+        ErrorCode::InvalidPath,
+        [&store]() { (void)store.readFile(""); })) return 1;
+    if (!expectBackendException(
+        "empty writeFile path should fail with InvalidPath",
+        ErrorCode::InvalidPath,
+        [&store]() { store.writeFile("", "x"); })) return 1;
+    if (!expectBackendException(
+        "listDirectory missing path should fail with NotFound",
+        ErrorCode::NotFound,
+        [&store]() { (void)store.listDirectory("missing"); })) return 1;
+    if (!expectBackendException(
+        "listDirectory file path should fail with InvalidPath",
+        ErrorCode::InvalidPath,
+        [&store]() { (void)store.listDirectory("docs/note.txt"); })) return 1;
+    if (!expectBackendException(
+        "missing readFile path should fail with NotFound",
+        ErrorCode::NotFound,
+        [&store]() { (void)store.readFile("missing.txt"); })) return 1;
+    if (!expectBackendException(
+        "directory readFile path should fail with InvalidPath",
+        ErrorCode::InvalidPath,
+        [&store]() { (void)store.readFile("docs"); })) return 1;
+    if (!expectBackendException(
+        "oversize writeFile content should fail with StorageError",
+        ErrorCode::StorageError,
+        [&store]() { store.writeFile("oversize.txt", std::string(16u * 1024u * 1024u + 1u, 'x')); })) return 1;
 
     if (!expectBackendExceptionOneOf(
         "../user_data.dat should fail with InvalidPath or PermissionDenied",
