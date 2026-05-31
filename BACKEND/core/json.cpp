@@ -1,6 +1,7 @@
 #include "json.hpp"
 
 #include <cctype>
+#include <cmath>
 #include <iomanip>
 #include <sstream>
 #include <stdexcept>
@@ -154,6 +155,9 @@ private:
             if (ch == '"') {
                 return out;
             }
+            if (static_cast<unsigned char>(ch) < 0x20) {
+                throw std::runtime_error("Unescaped control character in string.");
+            }
             if (ch == '\\') {
                 out += parseEscape();
                 continue;
@@ -163,16 +167,41 @@ private:
         throw std::runtime_error("Unterminated string.");
     }
 
-    char parseEscape() {
+    std::string parseEscape() {
         const char escaped = advance();
         switch (escaped) {
-        case '"': return '"';
-        case '\\': return '\\';
-        case 'n': return '\n';
-        case 'r': return '\r';
-        case 't': return '\t';
+        case '"': return "\"";
+        case '\\': return "\\";
+        case 'n': return "\n";
+        case 'r': return "\r";
+        case 't': return "\t";
+        case 'u': return parseUnicodeEscape();
         default: throw std::runtime_error("Invalid string escape.");
         }
+    }
+
+    std::string parseUnicodeEscape() {
+        int value = 0;
+        for (int i = 0; i < 4; ++i) {
+            value = (value << 4) + parseHexDigit(advance());
+        }
+        if (value > 0x7f) {
+            throw std::runtime_error("Unsupported unicode escape.");
+        }
+        return std::string(1, static_cast<char>(value));
+    }
+
+    int parseHexDigit(char ch) {
+        if (ch >= '0' && ch <= '9') {
+            return ch - '0';
+        }
+        if (ch >= 'a' && ch <= 'f') {
+            return ch - 'a' + 10;
+        }
+        if (ch >= 'A' && ch <= 'F') {
+            return ch - 'A' + 10;
+        }
+        throw std::runtime_error("Invalid unicode escape.");
     }
 
     JsonValue parseNumber() {
@@ -181,8 +210,14 @@ private:
         if (std::isdigit(static_cast<unsigned char>(peek())) == 0) {
             throw std::runtime_error("Expected digit in number.");
         }
-        while (std::isdigit(static_cast<unsigned char>(peek())) != 0) {
-            advance();
+        if (match('0')) {
+            if (std::isdigit(static_cast<unsigned char>(peek())) != 0) {
+                throw std::runtime_error("Leading zero in number.");
+            }
+        } else {
+            while (std::isdigit(static_cast<unsigned char>(peek())) != 0) {
+                advance();
+            }
         }
         if (match('.')) {
             if (std::isdigit(static_cast<unsigned char>(peek())) == 0) {
@@ -210,16 +245,43 @@ static std::string escapeString(const std::string& input) {
         case '\n': out += "\\n"; break;
         case '\r': out += "\\r"; break;
         case '\t': out += "\\t"; break;
-        default: out += ch; break;
+        default:
+            if (static_cast<unsigned char>(ch) < 0x20) {
+                static const char* hex = "0123456789ABCDEF";
+                const auto value = static_cast<unsigned char>(ch);
+                out += "\\u00";
+                out += hex[(value >> 4) & 0x0f];
+                out += hex[value & 0x0f];
+            } else {
+                out += ch;
+            }
+            break;
         }
     }
     return out;
 }
 
 std::string stringifyNumber(double value) {
+    if (!std::isfinite(value)) {
+        return "null";
+    }
+
     std::ostringstream out;
-    out << std::setprecision(15) << value;
-    return out.str();
+    out << std::fixed << std::setprecision(15) << value;
+    std::string text = out.str();
+    const auto decimal = text.find('.');
+    if (decimal != std::string::npos) {
+        while (!text.empty() && text.back() == '0') {
+            text.pop_back();
+        }
+        if (!text.empty() && text.back() == '.') {
+            text.pop_back();
+        }
+    }
+    if (text == "-0") {
+        return "0";
+    }
+    return text;
 }
 
 } // namespace
@@ -270,22 +332,37 @@ JsonValue::Type JsonValue::type() const {
 }
 
 bool JsonValue::asBoolean() const {
+    if (type_ != Type::Boolean) {
+        throw std::logic_error("JsonValue is not a boolean.");
+    }
     return boolean_;
 }
 
 double JsonValue::asNumber() const {
+    if (type_ != Type::Number) {
+        throw std::logic_error("JsonValue is not a number.");
+    }
     return number_;
 }
 
 const std::string& JsonValue::asString() const {
+    if (type_ != Type::String) {
+        throw std::logic_error("JsonValue is not a string.");
+    }
     return string_;
 }
 
 const JsonValue::Array& JsonValue::asArray() const {
+    if (type_ != Type::Array) {
+        throw std::logic_error("JsonValue is not an array.");
+    }
     return array_;
 }
 
 const JsonValue::Object& JsonValue::asObject() const {
+    if (type_ != Type::Object) {
+        throw std::logic_error("JsonValue is not an object.");
+    }
     return object_;
 }
 
