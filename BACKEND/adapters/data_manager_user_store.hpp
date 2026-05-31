@@ -1,7 +1,6 @@
 #pragma once
 
 #include "user_store.hpp"
-#include "udata.hpp"
 
 #include <string>
 #include <vector>
@@ -18,8 +17,5 @@ public:
 private:
     std::string filename_;
 };
-
-BackendUser toBackendUser(const USER& user);
-USER toLegacyUser(const BackendUser& user);
 
 } // namespace tundraux::backend

@@ -1,31 +1,37 @@
 #include "data_manager_user_store.hpp"
 
+#include "udata.hpp"
+
 #include <utility>
 
 namespace tundraux::backend {
 
-DataManagerUserStore::DataManagerUserStore(std::string filename)
-    : filename_(std::move(filename)) {}
+namespace {
 
 BackendUser toBackendUser(const USER& user) {
-    return BackendUser{
-        user.type,
-        user.name,
-        user.password,
-        user.password_hint,
-        user.count
-    };
+    BackendUser backendUser;
+    backendUser.type = user.type;
+    backendUser.name = user.name;
+    backendUser.password = user.password;
+    backendUser.passwordHint = user.password_hint;
+    backendUser.failedCount = user.count;
+    return backendUser;
 }
 
 USER toLegacyUser(const BackendUser& user) {
-    return USER{
-        user.type,
-        user.name,
-        user.password,
-        user.passwordHint,
-        user.failedCount
-    };
+    USER legacyUser;
+    legacyUser.type = user.type;
+    legacyUser.name = user.name;
+    legacyUser.password = user.password;
+    legacyUser.password_hint = user.passwordHint;
+    legacyUser.count = user.failedCount;
+    return legacyUser;
 }
+
+} // namespace
+
+DataManagerUserStore::DataManagerUserStore(std::string filename)
+    : filename_(std::move(filename)) {}
 
 std::vector<BackendUser> DataManagerUserStore::listUsers() const {
     DataManager dataManager(filename_);
