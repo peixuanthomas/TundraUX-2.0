@@ -33,9 +33,13 @@ cmake --build build
 
 主前端可执行文件名为 `TundraUX2`。
 
-### 后端第一阶段
+### 后端第二阶段
 
-项目也会构建 `tundraux_backend_stdio`，这是前后端进程拆分的第一条后端边界。它通过 stdin/stdout 提供按行传输的 JSON-RPC，目前支持创建会话、登录、登出、查询当前用户和列出用户。现有 `TundraUX2` 前端在本阶段尚未迁移到该后端。
+项目也会构建 `tundraux_backend_stdio`，这是前后端进程拆分的本地后端进程边界。它通过 stdin/stdout 提供按行传输的 JSON-RPC，目前支持创建会话、登录、登出、查询当前用户、列出用户，以及普通文件操作（`file.listDirectory`、`file.readFile`、`file.writeFile`）。
+
+`TundraUX2` 现在默认启动本地 stdio 后端。主 Shell 的账号命令（`login`、`logout`、`whoami`、`listuser`）和普通文本编辑器路径（`edit <filename>`）在默认模式下会通过后端执行。调试时可使用 `--legacy-direct` 运行旧的前端直连逻辑。
+
+TUX File Manager、Explorer、账号管理 UI、strict/audit 控制、TUX 导入/导出/元数据流程，以及远程/HTTP 适配器，在本阶段仍是 legacy-direct 或尚未实现为后端 API。
 
 ## 验证
 
@@ -44,7 +48,7 @@ cmake --build build
 ctest --test-dir build --output-on-failure
 ```
 
-`ctest --test-dir build --output-on-failure` 会运行项目已注册的测试，包括后端第一阶段测试。
+`ctest --test-dir build --output-on-failure` 会运行项目已注册的测试，包括后端 core、JSON-RPC、stdio 进程、文件系统存储，以及前端 backend-client 测试。
 
 ### 启动模式
 
@@ -95,6 +99,8 @@ cmake --build build
 | `/<cmd>` | 执行 Windows CMD 命令，仅 admin/debug 可用 |
 
 调试命令不会出现在普通帮助中，包括编辑器后端检查、强制登录、显示颜色测试和诊断工具等。
+
+默认后端模式下，`login`、`logout`、`whoami`、`listuser` 和 `edit <filename>` 会通过 `tundraux_backend_stdio` 执行。`listuser` 在后端模式下仅 admin/debug 可用。可使用 `--legacy-direct` 切换回旧的前端直连模式。
 
 ## 用户角色
 
@@ -239,6 +245,10 @@ edit docs/notes
 | `APP/explorer/` | Explorer 应用 |
 | `APP/file_manager/` | TUX File Manager 和 `.TUX` 文件读写 |
 | `APP/editor/` | 编辑器前端和后端选择 |
+| `APP/backend_client/` | 前端 JSON-RPC 客户端和本地 stdio 后端进程运行时 |
+| `BACKEND/core/` | 后端服务接口、JSON-RPC 分发器、session/user/file 服务 |
+| `BACKEND/adapters/` | legacy 用户数据和文件系统存储的后端适配器 |
+| `BACKEND/stdio/` | stdio JSON-RPC 后端可执行程序 |
 | `USER/account/` | 用户管理界面 |
 | `USER/udata/` | 用户数据持久化 |
 | `SYSTEM/console/` | 彩色控制台输出和控制台屏幕保护工具 |

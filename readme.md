@@ -33,9 +33,13 @@ cmake --build build
 
 The main frontend executable is named `TundraUX2`.
 
-### Backend Phase 1
+### Backend Phase 2
 
-The project also builds `tundraux_backend_stdio`, the first backend process boundary for the frontend/backend split. It exposes line-delimited JSON-RPC over stdin/stdout and currently supports session startup, login/logout/whoami, and user listing. The existing `TundraUX2` frontend is not migrated to this backend yet.
+The project also builds `tundraux_backend_stdio`, the local backend process boundary for the frontend/backend split. It exposes line-delimited JSON-RPC over stdin/stdout and supports session startup, login/logout/whoami, user listing, and plain file operations (`file.listDirectory`, `file.readFile`, `file.writeFile`).
+
+`TundraUX2` now starts the local stdio backend by default. The main shell account commands (`login`, `logout`, `whoami`, `listuser`) and the plain text editor path (`edit <filename>`) use the backend in default mode. Use `--legacy-direct` to run the previous direct frontend logic for debugging.
+
+The TUX File Manager, Explorer, account management UI, strict/audit controls, TUX import/export/metadata flows, and remote/HTTP adapters are still legacy-direct or not implemented as backend APIs in this phase.
 
 ## Validation
 
@@ -44,7 +48,7 @@ cmake --build build
 ctest --test-dir build --output-on-failure
 ```
 
-`ctest --test-dir build --output-on-failure` runs the registered project tests, including backend Phase 1 tests.
+`ctest --test-dir build --output-on-failure` runs the registered project tests, including backend core, JSON-RPC, stdio process, filesystem store, and frontend backend-client tests.
 
 ### Startup Mode
 
@@ -95,6 +99,8 @@ The main shell prompt changes according to the current session:
 | `/<cmd>` | Run a Windows CMD command; admin/debug only |
 
 Debug-only commands are hidden from normal help output and include editor backend inspection, forced login, display color testing, and diagnostic utilities.
+
+In the default backend mode, `login`, `logout`, `whoami`, `listuser`, and `edit <filename>` are served through `tundraux_backend_stdio`. `listuser` is available only to admin/debug users in backend mode. Legacy direct mode is available with `--legacy-direct`.
 
 ## User Roles
 
@@ -239,6 +245,10 @@ Changing the encryption implementation will likely break compatibility with exis
 | `APP/explorer/` | Explorer app |
 | `APP/file_manager/` | TUX File Manager and `.TUX` I/O |
 | `APP/editor/` | Editor frontend and backend selection |
+| `APP/backend_client/` | Frontend JSON-RPC client and local stdio backend process runtime |
+| `BACKEND/core/` | Backend service interfaces, JSON-RPC dispatcher, session/user/file services |
+| `BACKEND/adapters/` | Backend adapters for legacy user data and filesystem storage |
+| `BACKEND/stdio/` | Stdio JSON-RPC backend executable |
 | `USER/account/` | User management interface |
 | `USER/udata/` | User data persistence |
 | `SYSTEM/console/` | Colored output and console screen guard utilities |
