@@ -423,10 +423,6 @@ bool sendRequestAndReadResponse(
     return expectJsonOnlyLine(response, label);
 }
 
-bool stderrHasLegacyColorOutput(const std::string& text) {
-    return text.find("Error:") != std::string::npos || text.find("\x1b[") != std::string::npos;
-}
-
 bool runFileApiProcessTest(const std::filesystem::path& backendExePath) {
     const auto base = uniqueTempPath("process_file_api");
     const std::filesystem::path userDataPath = base.string() + "_user_data.dat";
@@ -560,8 +556,8 @@ bool runFileApiProcessTest(const std::filesystem::path& backendExePath) {
         std::cerr << "file api process wrote unexpected trailing stdout: " << remainingStdout << "\n";
         return false;
     }
-    if (stderrHasLegacyColorOutput(stderrText)) {
-        std::cerr << "file api process stderr contains legacy diagnostics: " << stderrText << "\n";
+    if (!stderrText.empty()) {
+        std::cerr << "file api process wrote stderr: " << stderrText << "\n";
         return false;
     }
     return true;
