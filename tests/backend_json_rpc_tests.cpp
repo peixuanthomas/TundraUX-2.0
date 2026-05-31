@@ -1,5 +1,7 @@
 #include "json.hpp"
 #include "json_rpc.hpp"
+#include "file_service.hpp"
+#include "file_store.hpp"
 #include "session_service.hpp"
 #include "user_service.hpp"
 #include "user_store.hpp"
@@ -33,6 +35,36 @@ public:
             }
         }
         return false;
+    }
+};
+
+class InMemoryFileStore final : public tundraux::backend::FileStore {
+public:
+    std::string writtenPath;
+    std::string writtenContent;
+
+    std::vector<tundraux::backend::FileEntry> listDirectory(const std::string& path) const override {
+        if (path == "docs") {
+            return {
+                {"note.txt", "docs/note.txt", tundraux::backend::FileEntryType::File, 5}
+            };
+        }
+        if (path == "missing") {
+            throw tundraux::backend::BackendException(tundraux::backend::ErrorCode::NotFound, "File not found.");
+        }
+        return {};
+    }
+
+    tundraux::backend::FileContent readFile(const std::string& path) const override {
+        if (path == "missing.txt") {
+            throw tundraux::backend::BackendException(tundraux::backend::ErrorCode::NotFound, "File not found.");
+        }
+        return {"hello"};
+    }
+
+    void writeFile(const std::string& path, const std::string& content) override {
+        writtenPath = path;
+        writtenContent = content;
     }
 };
 
@@ -98,13 +130,16 @@ bool runDispatcherTest() {
     using tundraux::backend::JsonRpcDispatcher;
     using tundraux::backend::JsonValue;
     using tundraux::backend::parseJson;
+    using tundraux::backend::FileService;
     using tundraux::backend::SessionService;
     using tundraux::backend::UserService;
 
     InMemoryUserStore store;
     SessionService sessions(store);
     UserService users(store, sessions);
-    JsonRpcDispatcher dispatcher(sessions, users);
+    InMemoryFileStore fileStore;
+    FileService files(fileStore, sessions);
+    JsonRpcDispatcher dispatcher(sessions, users, files);
 
     const std::string guestResponse = dispatcher.handleLine(R"({"id":"1","method":"session.startGuestSession","params":{}})");
     const auto guest = parseJson(guestResponse);
@@ -137,6 +172,49 @@ bool runDispatcherTest() {
         if (!expect(user.asObject().find("password") == user.asObject().end(), "list users should not expose password field")) return false;
     }
 
+    const std::string listDirectoryResponse = dispatcher.handleLine(
+        R"({"id":"5","method":"file.listDirectory","params":{"sessionId":")" + sessionId + R"(","path":"docs"}})"
+    );
+    const auto listDirectory = parseJson(listDirectoryResponse);
+    if (!expect(listDirectory.ok, "list directory response should parse: " + listDirectoryResponse)) return false;
+    const auto& entries = listDirectory.value.asObject().at("result").asObject().at("entries").asArray();
+    if (!expect(entries.size() == 1, "list directory entry count mismatch")) return false;
+    const auto& entry = entries[0].asObject();
+    if (!expect(entry.at("name").asString() == "note.txt", "list directory entry name mismatch")) return false;
+    if (!expect(entry.at("path").asString() == "docs/note.txt", "list directory entry path mismatch")) return false;
+    if (!expect(entry.at("type").asString() == "file", "list directory entry type mismatch")) return false;
+    if (!expect(entry.at("size").asNumber() == 5.0, "list directory entry size mismatch")) return false;
+
+    const std::string readFileResponse = dispatcher.handleLine(
+        R"({"id":"6","method":"file.readFile","params":{"sessionId":")" + sessionId + R"(","path":"docs/note.txt"}})"
+    );
+    const auto readFile = parseJson(readFileResponse);
+    if (!expect(readFile.ok, "read file response should parse: " + readFileResponse)) return false;
+    if (!expect(readFile.value.asObject().at("result").asObject().at("content").asString() == "hello", "read file content mismatch")) return false;
+
+    const std::string writeFileResponse = dispatcher.handleLine(
+        R"({"id":"7","method":"file.writeFile","params":{"sessionId":")" + sessionId + R"(","path":"docs/note.txt","content":"updated"}})"
+    );
+    const auto writeFile = parseJson(writeFileResponse);
+    if (!expect(writeFile.ok, "write file response should parse: " + writeFileResponse)) return false;
+    if (!expect(writeFile.value.asObject().at("result").asObject().at("ok").asBoolean(), "write file ok mismatch")) return false;
+    if (!expect(fileStore.writtenPath == "docs/note.txt", "write file path mismatch")) return false;
+    if (!expect(fileStore.writtenContent == "updated", "write file content mismatch")) return false;
+
+    const std::string missingFileResponse = dispatcher.handleLine(
+        R"({"id":"8","method":"file.readFile","params":{"sessionId":")" + sessionId + R"(","path":"missing.txt"}})"
+    );
+    const auto missingFile = parseJson(missingFileResponse);
+    if (!expect(missingFile.ok, "missing file response should parse: " + missingFileResponse)) return false;
+    if (!expect(missingFile.value.asObject().at("error").asObject().at("code").asString() == "NotFound", "missing file code mismatch")) return false;
+
+    const std::string invalidFileParamsResponse = dispatcher.handleLine(
+        R"({"id":"9","method":"file.writeFile","params":{"sessionId":")" + sessionId + R"(","path":"docs/note.txt"}})"
+    );
+    const auto invalidFileParams = parseJson(invalidFileParamsResponse);
+    if (!expect(invalidFileParams.ok, "invalid file params response should parse: " + invalidFileParamsResponse)) return false;
+    if (!expect(invalidFileParams.value.asObject().at("error").asObject().at("code").asString() == "InvalidParams", "invalid file params code mismatch")) return false;
+
     const std::string logoutResponse = dispatcher.handleLine(
         R"({"id":"10","method":"session.logout","params":{"sessionId":")" + sessionId + R"("}})"
     );
@@ -164,6 +242,13 @@ bool runDispatcherTest() {
     if (!expect(guestList.ok, "guest list response should parse: " + guestListResponse)) return false;
     if (!expect(guestList.value.asObject().at("id").asString() == "12", "guest list response id mismatch")) return false;
     if (!expect(guestList.value.asObject().at("error").asObject().at("code").asString() == "PermissionDenied", "guest list users code mismatch")) return false;
+
+    const std::string guestFileListResponse = dispatcher.handleLine(
+        R"({"id":"14","method":"file.listDirectory","params":{"sessionId":")" + sessionId + R"(","path":"docs"}})"
+    );
+    const auto guestFileList = parseJson(guestFileListResponse);
+    if (!expect(guestFileList.ok, "guest file list response should parse: " + guestFileListResponse)) return false;
+    if (!expect(guestFileList.value.asObject().at("error").asObject().at("code").asString() == "PermissionDenied", "guest file list code mismatch")) return false;
 
     const std::string invalidLoginParamsResponse = dispatcher.handleLine(
         R"({"id":"13","method":"session.login","params":{"sessionId":")" + sessionId +

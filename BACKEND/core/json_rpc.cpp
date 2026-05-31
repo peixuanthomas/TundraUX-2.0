@@ -1,8 +1,10 @@
 #include "json_rpc.hpp"
 
 #include <exception>
+#include <memory>
 #include <string>
 #include <utility>
+#include <vector>
 
 namespace tundraux::backend {
 namespace {
@@ -29,6 +31,21 @@ private:
     std::string message_;
 };
 
+class UnavailableFileStore final : public FileStore {
+public:
+    std::vector<FileEntry> listDirectory(const std::string&) const override {
+        throw BackendException(ErrorCode::StorageError, "File storage error.");
+    }
+
+    FileContent readFile(const std::string&) const override {
+        throw BackendException(ErrorCode::StorageError, "File storage error.");
+    }
+
+    void writeFile(const std::string&, const std::string&) override {
+        throw BackendException(ErrorCode::StorageError, "File storage error.");
+    }
+};
+
 JsonValue userToJson(const BackendUser& user) {
     return JsonValue::object({
         {"name", JsonValue::string(user.name)},
@@ -40,6 +57,15 @@ JsonValue sessionToJson(const SessionInfo& session) {
     return JsonValue::object({
         {"sessionId", JsonValue::string(session.sessionId)},
         {"user", userToJson(session.user)}
+    });
+}
+
+JsonValue fileEntryToJson(const FileEntry& entry) {
+    return JsonValue::object({
+        {"name", JsonValue::string(entry.name)},
+        {"path", JsonValue::string(entry.path)},
+        {"type", JsonValue::string(entry.type == FileEntryType::Directory ? "directory" : "file")},
+        {"size", JsonValue::number(static_cast<double>(entry.size))}
     });
 }
 
@@ -57,8 +83,15 @@ void throwIfFailed(const BackendError& error) {
 
 } // namespace
 
+JsonRpcDispatcher::JsonRpcDispatcher(SessionService& sessions, UserService& users, FileService& files)
+    : sessions_(sessions), users_(users), files_(files) {}
+
 JsonRpcDispatcher::JsonRpcDispatcher(SessionService& sessions, UserService& users)
-    : sessions_(sessions), users_(users) {}
+    : sessions_(sessions),
+      users_(users),
+      fallbackFileStore_(std::make_unique<UnavailableFileStore>()),
+      fallbackFiles_(std::make_unique<FileService>(*fallbackFileStore_, sessions_)),
+      files_(*fallbackFiles_) {}
 
 std::string JsonRpcDispatcher::handleLine(const std::string& line) {
     JsonValue id = JsonValue::null();
@@ -147,6 +180,42 @@ JsonValue JsonRpcDispatcher::dispatch(const std::string& method, const JsonValue
             jsonUsers.push_back(userToJson(user));
         }
         return JsonValue::object({{"users", JsonValue::array(std::move(jsonUsers))}});
+    }
+
+    if (method == "file.listDirectory") {
+        const std::string sessionId = requiredStringParam(params, "sessionId");
+        const std::string path = requiredStringParam(params, "path");
+        const auto result = files_.listDirectory(sessionId, path);
+        if (!result.ok) {
+            throwIfFailed(result.error);
+        }
+
+        JsonValue::Array entries;
+        for (const auto& entry : result.value) {
+            entries.push_back(fileEntryToJson(entry));
+        }
+        return JsonValue::object({{"entries", JsonValue::array(std::move(entries))}});
+    }
+
+    if (method == "file.readFile") {
+        const std::string sessionId = requiredStringParam(params, "sessionId");
+        const std::string path = requiredStringParam(params, "path");
+        const auto result = files_.readFile(sessionId, path);
+        if (!result.ok) {
+            throwIfFailed(result.error);
+        }
+        return JsonValue::object({{"content", JsonValue::string(result.value.content)}});
+    }
+
+    if (method == "file.writeFile") {
+        const std::string sessionId = requiredStringParam(params, "sessionId");
+        const std::string path = requiredStringParam(params, "path");
+        const std::string content = requiredStringParam(params, "content");
+        const auto result = files_.writeFile(sessionId, path, content);
+        if (!result.ok) {
+            throwIfFailed(result.error);
+        }
+        return JsonValue::object({{"ok", JsonValue::boolean(true)}});
     }
 
     throw RpcError(ErrorCode::UnknownMethod, "Unknown method.");
