@@ -15,6 +15,7 @@ public:
     std::vector<tundraux::backend::BackendUser> users{
         {"admin", "alice", "Secret1", "hint", 0},
         {"user", "bob", "Secret2", "hint", 0},
+        {"debug", "debug", "Debug1", "hint", 0},
         {"user", "locked", "Secret3", "hint", 8}
     };
 
@@ -108,16 +109,41 @@ int main() {
     if (!expect(resetWhoami.value.name.empty(), "reset persistence failure should not set session name")) return 1;
 
     UserService userService(store, sessions);
+    const auto missingUsers = userService.listUsers("missing");
+    if (!expect(!missingUsers.ok, "missing session listUsers should fail")) return 1;
+    if (!expect(missingUsers.error.code == ErrorCode::SessionExpired, "missing session listUsers error mismatch")) return 1;
+
     const auto guestUsers = userService.listUsers(guest.sessionId);
     if (!expect(!guestUsers.ok, "guest listUsers should fail")) return 1;
     if (!expect(guestUsers.error.code == ErrorCode::PermissionDenied, "guest listUsers error mismatch")) return 1;
+
+    const auto userLogin = sessions.login(guest.sessionId, "bob", "Secret2");
+    if (!expect(userLogin.ok, "user login should pass")) return 1;
+    const auto normalUsers = userService.listUsers(guest.sessionId);
+    if (!expect(!normalUsers.ok, "user listUsers should fail")) return 1;
+    if (!expect(normalUsers.error.code == ErrorCode::PermissionDenied, "user listUsers error mismatch")) return 1;
 
     const auto adminLogin = sessions.login(guest.sessionId, "alice", "Secret1");
     if (!expect(adminLogin.ok, "admin relogin should pass")) return 1;
     const auto adminUsers = userService.listUsers(guest.sessionId);
     if (!expect(adminUsers.ok, "admin listUsers should pass")) return 1;
-    if (!expect(adminUsers.value.size() == 3, "admin listUsers count mismatch")) return 1;
-    if (!expect(adminUsers.value[0].password.empty(), "listUsers should not expose passwords")) return 1;
+    if (!expect(adminUsers.value.size() == 4, "admin listUsers count mismatch")) return 1;
+    for (const auto& user : adminUsers.value) {
+        if (!expect(user.password.empty(), "admin listUsers should not expose passwords")) return 1;
+    }
+
+    const auto debugLogin = sessions.login(guest.sessionId, "debug", "Debug1");
+    if (!expect(debugLogin.ok, "debug login should pass")) return 1;
+    const auto debugUsers = userService.listUsers(guest.sessionId);
+    if (!expect(debugUsers.ok, "debug listUsers should pass")) return 1;
+    if (!expect(debugUsers.value.size() == 4, "debug listUsers count mismatch")) return 1;
+    for (const auto& user : debugUsers.value) {
+        if (!expect(user.password.empty(), "debug listUsers should not expose passwords")) return 1;
+    }
+
+    if (!expect(store.users[0].password == "Secret1", "alice password should remain in store")) return 1;
+    if (!expect(store.users[1].password == "Secret2", "bob password should remain in store")) return 1;
+    if (!expect(store.users[2].password == "Debug1", "debug password should remain in store")) return 1;
 
     return 0;
 }
