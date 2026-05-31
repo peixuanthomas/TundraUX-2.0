@@ -109,6 +109,9 @@ std::string backendFailureMessage(
     const std::string& fallback,
     const std::string& errorCode
 ) {
+    if (errorCode == "AuthenticationFailed") {
+        return "Login failed.";
+    }
     if (errorCode == "TransportError") {
         return "Backend unavailable.";
     }
@@ -138,6 +141,23 @@ bool ensureBackendSession(tundraux::frontend::BackendRuntime& backendRuntime) {
     const auto guestSession = client->startGuestSession();
     if (!guestSession.ok) {
         colorcout("red", backendFailureMessage("Unable to start backend session.", guestSession.errorCode) + "\n");
+        return false;
+    }
+
+    backendRuntime.setSessionId(guestSession.value.sessionId);
+    return true;
+}
+
+bool refreshBackendGuestSession(tundraux::frontend::BackendRuntime& backendRuntime) {
+    auto* client = backendRuntime.client();
+    if (client == nullptr) {
+        colorcout("red", "Backend unavailable.\n");
+        return false;
+    }
+
+    const auto guestSession = client->startGuestSession();
+    if (!guestSession.ok) {
+        colorcout("red", backendFailureMessage("Unable to start backend guest session.", guestSession.errorCode) + "\n");
         return false;
     }
 
@@ -179,7 +199,7 @@ void handleLoginCommand(
         const auto result = backendRuntime->client()->login(backendRuntime->sessionId(), username, password);
         if (!result.ok) {
             tundraux::audit::logEvent("login", "backend failure " + result.errorCode);
-            colorcout("red", "Login failed.\n");
+            colorcout("red", backendFailureMessage("Unable to complete backend login.", result.errorCode) + "\n");
             return;
         }
 
@@ -284,16 +304,22 @@ void handleLogoutCommand(
         tundraux::audit::logEvent("logout", "backend");
         auto* client = backendRuntime->client();
         if (client == nullptr) {
-            colorcout("yellow", "Backend unavailable.\n");
-        } else if (!backendRuntime->sessionId().empty()) {
-            const auto result = client->logout(backendRuntime->sessionId());
-            if (!result.ok) {
-                colorcout("yellow", backendFailureMessage("Logout request failed.", result.errorCode) + "\n");
-            }
-        } else {
-            colorcout("yellow", "Backend session already cleared.\n");
+            colorcout("red", "Backend unavailable.\n");
+            return;
         }
-        backendRuntime->setSessionId("");
+        if (backendRuntime->sessionId().empty()) {
+            colorcout("yellow", "No backend session is active.\n");
+            return;
+        }
+
+        const auto result = client->logout(backendRuntime->sessionId());
+        if (!result.ok) {
+            colorcout("yellow", backendFailureMessage("Logout request failed.", result.errorCode) + "\n");
+            return;
+        }
+        if (!refreshBackendGuestSession(*backendRuntime)) {
+            return;
+        }
         currentUser = guestUser();
         tundraux::audit::setCurrentUser(currentUser);
         colorcout("green", "Logged out successfully.\n");

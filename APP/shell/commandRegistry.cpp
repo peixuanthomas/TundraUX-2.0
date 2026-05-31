@@ -1,5 +1,6 @@
 #include "commandReg.hpp"
 
+#include "backend_runtime.hpp"
 #include "commandHandlers.hpp"
 #include "debug.hpp"
 
@@ -66,7 +67,7 @@ std::vector<RegisteredCommand> buildNewCommandRegistry(
             [backendRuntime](const std::string& input) {
                 handleListUserCommand(input, backendRuntime);
             },
-            "",
+            backendRuntime != nullptr && !backendRuntime->legacyDirect() ? "admin,debug" : "",
             false
         },
         {
