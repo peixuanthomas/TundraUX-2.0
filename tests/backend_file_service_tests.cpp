@@ -139,6 +139,21 @@ bool expectBackendException(
     return expect(false, message);
 }
 
+bool expectBackendException(
+    const std::string& message,
+    tundraux::backend::ErrorCode expectedCode,
+    const std::string& expectedMessage,
+    const std::function<void()>& action
+) {
+    try {
+        action();
+    } catch (const tundraux::backend::BackendException& error) {
+        return expect(error.code() == expectedCode, message + " code mismatch") &&
+            expect(error.what() == expectedMessage, message + " message mismatch");
+    }
+    return expect(false, message);
+}
+
 bool expectBackendExceptionOneOf(
     const std::string& message,
     tundraux::backend::ErrorCode first,
@@ -291,6 +306,20 @@ int main() {
         "directory readFile path should fail with InvalidPath",
         ErrorCode::InvalidPath,
         [&store]() { (void)store.readFile("docs"); })) return 1;
+    const std::string limitContent(16u * 1024u * 1024u, 'a');
+    store.writeFile("limit-ok.txt", limitContent);
+    if (!expect(
+        std::filesystem::file_size(tempRoot.path() / "limit-ok.txt") == limitContent.size(),
+        "exact 16 MiB writeFile should create full-size file")) return 1;
+    {
+        std::ofstream tooLarge(tempRoot.path() / "too-large.txt", std::ios::binary | std::ios::trunc);
+        tooLarge << std::string(16u * 1024u * 1024u + 1u, 'b');
+    }
+    if (!expectBackendException(
+        "oversize readFile content should fail with StorageError",
+        ErrorCode::StorageError,
+        "File storage error.",
+        [&store]() { (void)store.readFile("too-large.txt"); })) return 1;
     if (!expectBackendException(
         "oversize writeFile content should fail with StorageError",
         ErrorCode::StorageError,
