@@ -76,4 +76,8 @@ ServiceResult<BackendUser> SessionService::whoami(const std::string& sessionId) 
     return ServiceResult<BackendUser>::success(session->second);
 }
 
+ServiceResult<BackendUser> SessionService::requireSession(const std::string& sessionId) const {
+    return whoami(sessionId);
+}
+
 } // namespace tundraux::backend

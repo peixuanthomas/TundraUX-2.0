@@ -50,6 +50,7 @@ public:
     );
     ServiceResult<EmptyResult> logout(const std::string& sessionId);
     ServiceResult<BackendUser> whoami(const std::string& sessionId) const;
+    ServiceResult<BackendUser> requireSession(const std::string& sessionId) const;
 
 private:
     UserStore& users_;

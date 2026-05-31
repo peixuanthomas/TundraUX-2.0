@@ -1,5 +1,6 @@
 #include "backend_error.hpp"
 #include "session_service.hpp"
+#include "user_service.hpp"
 #include "user_store.hpp"
 
 #include <iostream>
@@ -105,6 +106,18 @@ int main() {
     if (!expect(resetWhoami.ok, "whoami after reset persistence failure should pass")) return 1;
     if (!expect(resetWhoami.value.type == "guest", "reset persistence failure should leave session as guest")) return 1;
     if (!expect(resetWhoami.value.name.empty(), "reset persistence failure should not set session name")) return 1;
+
+    UserService userService(store, sessions);
+    const auto guestUsers = userService.listUsers(guest.sessionId);
+    if (!expect(!guestUsers.ok, "guest listUsers should fail")) return 1;
+    if (!expect(guestUsers.error.code == ErrorCode::PermissionDenied, "guest listUsers error mismatch")) return 1;
+
+    const auto adminLogin = sessions.login(guest.sessionId, "alice", "Secret1");
+    if (!expect(adminLogin.ok, "admin relogin should pass")) return 1;
+    const auto adminUsers = userService.listUsers(guest.sessionId);
+    if (!expect(adminUsers.ok, "admin listUsers should pass")) return 1;
+    if (!expect(adminUsers.value.size() == 3, "admin listUsers count mismatch")) return 1;
+    if (!expect(adminUsers.value[0].password.empty(), "listUsers should not expose passwords")) return 1;
 
     return 0;
 }
