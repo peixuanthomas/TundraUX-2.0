@@ -62,6 +62,21 @@ target_compile_features(tundraux_backend_adapters
         cxx_std_17
 )
 
+add_executable(tundraux_backend_stdio
+    BACKEND/stdio/main.cpp
+)
+
+target_link_libraries(tundraux_backend_stdio
+    PRIVATE
+        tundraux_backend_core
+        tundraux_backend_adapters
+)
+
+target_compile_features(tundraux_backend_stdio
+    PRIVATE
+        cxx_std_17
+)
+
 add_executable(${PROJECT_NAME})
 
 set(TUNDRAUX_CORE_SOURCES
@@ -282,6 +297,23 @@ target_compile_features(backend_json_rpc_tests
 )
 
 add_test(NAME backend_json_rpc_tests COMMAND backend_json_rpc_tests)
+
+add_executable(backend_stdio_tests
+    tests/backend_stdio_tests.cpp
+)
+
+target_link_libraries(backend_stdio_tests
+    PRIVATE
+        tundraux_backend_core
+        tundraux_backend_adapters
+)
+
+target_compile_features(backend_stdio_tests
+    PRIVATE
+        cxx_std_17
+)
+
+add_test(NAME backend_stdio_tests COMMAND backend_stdio_tests)
 
 if(TUNDRAUX_DEBUG_STARTUP)
     target_compile_definitions(${PROJECT_NAME}
