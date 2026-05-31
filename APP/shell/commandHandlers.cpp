@@ -317,11 +317,13 @@ void handleLogoutCommand(
             colorcout("yellow", backendFailureMessage("Logout request failed.", result.errorCode) + "\n");
             return;
         }
-        if (!refreshBackendGuestSession(*backendRuntime)) {
-            return;
-        }
+        backendRuntime->setSessionId("");
         currentUser = guestUser();
         tundraux::audit::setCurrentUser(currentUser);
+        if (!refreshBackendGuestSession(*backendRuntime)) {
+            colorcout("yellow", "Logged out, but backend guest session recovery failed.\n");
+            return;
+        }
         colorcout("green", "Logged out successfully.\n");
         return;
     }
