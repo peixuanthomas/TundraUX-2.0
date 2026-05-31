@@ -163,6 +163,14 @@ target_compile_features(${PROJECT_NAME}
         cxx_std_17
 )
 
+add_dependencies(${PROJECT_NAME} tundraux_backend_stdio)
+
+add_custom_command(TARGET ${PROJECT_NAME} POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+        $<TARGET_FILE:tundraux_backend_stdio>
+        $<TARGET_FILE_DIR:${PROJECT_NAME}>
+)
+
 enable_testing()
 
 add_executable(audit_log_tests

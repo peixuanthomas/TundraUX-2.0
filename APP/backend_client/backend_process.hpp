@@ -2,6 +2,7 @@
 
 #include "backend_client.hpp"
 
+#include <mutex>
 #include <string>
 
 #ifndef WIN32_LEAN_AND_MEAN
@@ -31,9 +32,13 @@ public:
     void stop();
 
 private:
+    void stopLocked();
+
     PROCESS_INFORMATION processInfo_{};
     HANDLE childStdinWrite_ = nullptr;
     HANDLE childStdoutRead_ = nullptr;
+    std::string pendingStdout_;
+    std::mutex mutex_;
 };
 
 } // namespace tundraux::frontend

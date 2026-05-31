@@ -3,7 +3,9 @@
 #include "backend_process.hpp"
 
 #include <filesystem>
+#include <string>
 #include <utility>
+#include <vector>
 
 #ifndef WIN32_LEAN_AND_MEAN
 #define WIN32_LEAN_AND_MEAN
@@ -16,30 +18,44 @@
 namespace tundraux::frontend {
 namespace {
 
-std::string currentExecutableDirectoryBackendPath() {
-    char buffer[MAX_PATH];
-    const DWORD length = GetModuleFileNameA(nullptr, buffer, MAX_PATH);
-    if (length == 0 || length == MAX_PATH) {
-        return "";
-    }
-
-    std::filesystem::path executablePath(buffer);
-    return (executablePath.parent_path() / "tundraux_backend_stdio.exe").string();
+std::string pathToString(const std::filesystem::path& path) {
+    return path.u8string();
 }
 
-std::string resolveBackendStdioPath(const std::string& configuredPath) {
+std::filesystem::path currentExecutableDirectoryBackendPath() {
+    std::vector<wchar_t> buffer(MAX_PATH);
+    while (true) {
+        const DWORD length = GetModuleFileNameW(nullptr, buffer.data(), static_cast<DWORD>(buffer.size()));
+        if (length == 0) {
+            return {};
+        }
+        if (length < buffer.size()) {
+            return std::filesystem::path(std::wstring(buffer.data(), length)).parent_path() /
+                "tundraux_backend_stdio.exe";
+        }
+        buffer.resize(buffer.size() * 2);
+    }
+}
+
+std::string resolveBackendStdioPath(const std::string& configuredPath, std::string& error) {
     if (!configuredPath.empty()) {
         return configuredPath;
     }
 
-    const std::string executableDirectoryPath = currentExecutableDirectoryBackendPath();
-    if (!executableDirectoryPath.empty() && std::filesystem::exists(executableDirectoryPath)) {
-        return executableDirectoryPath;
+    const std::filesystem::path executableDirectoryPath = currentExecutableDirectoryBackendPath();
+    if (executableDirectoryPath.empty()) {
+        error = "Failed to resolve frontend executable path for backend stdio process.";
+        return "";
     }
 
-    const std::filesystem::path currentDirectoryPath =
-        std::filesystem::current_path() / "tundraux_backend_stdio.exe";
-    return currentDirectoryPath.string();
+    std::error_code existsError;
+    if (std::filesystem::exists(executableDirectoryPath, existsError)) {
+        return pathToString(executableDirectoryPath);
+    }
+
+    error = "Backend stdio executable not found next to frontend executable: " +
+        pathToString(executableDirectoryPath);
+    return "";
 }
 
 } // namespace
@@ -59,7 +75,12 @@ bool BackendRuntime::initialize(const BackendRuntimeOptions& options, std::strin
         return true;
     }
 
-    const std::string backendPath = resolveBackendStdioPath(options.backendStdioPath);
+    const std::string backendPath = resolveBackendStdioPath(options.backendStdioPath, error);
+    if (backendPath.empty()) {
+        legacyDirect_ = false;
+        return false;
+    }
+
     auto transport = std::make_unique<BackendProcessTransport>();
     if (!transport->start(backendPath, options.userDataPath, options.filesRoot)) {
         error = "Failed to start backend stdio process: " + backendPath;

@@ -1,7 +1,11 @@
 #include "backend_client.hpp"
+#include "backend_process.hpp"
 #include "backend_runtime.hpp"
 #include "json.hpp"
 
+#include <algorithm>
+#include <cstdint>
+#include <filesystem>
 #include <iostream>
 #include <string>
 #include <vector>
@@ -289,7 +293,10 @@ bool runRuntimeLegacyDirectTest() {
 bool runRuntimeMissingBackendPathTest() {
     tundraux::frontend::BackendRuntime runtime;
     tundraux::frontend::BackendRuntimeOptions options;
-    options.backendStdioPath = "Z:\\definitely\\missing\\tundraux_backend_stdio.exe";
+    const auto missingPath = std::filesystem::temp_directory_path() /
+        ("tundraux_missing_backend_stdio_" + std::to_string(reinterpret_cast<std::uintptr_t>(&runtime))) /
+        "tundraux_backend_stdio.exe";
+    options.backendStdioPath = missingPath.string();
     std::string error;
 
     const bool initialized = runtime.initialize(options, error);
@@ -301,9 +308,55 @@ bool runRuntimeMissingBackendPathTest() {
         expect(runtime.sessionId().empty(), "missing backend runtime should not set session id");
 }
 
+bool runProcessResponseLineTooLongTest(const std::string& selfPath) {
+    tundraux::frontend::BackendProcessTransport transport;
+    if (!transport.start(selfPath, "too-long-response", "unused")) {
+        return expect(false, "too-long process transport should start fake backend");
+    }
+
+    std::string response;
+    const bool ok = transport.requestLine(R"({"id":"1","method":"test","params":{}})", response);
+    transport.stop();
+
+    constexpr std::size_t maxExpectedResponseBytes = 20ULL * 1024ULL * 1024ULL;
+    return expect(!ok, "too-long process response should fail transport") &&
+        expect(response.size() <= maxExpectedResponseBytes, "too-long process response should stay bounded");
+}
+
+int runFakeBackendMode(const std::string& mode) {
+    std::string request;
+    if (!std::getline(std::cin, request)) {
+        return 1;
+    }
+
+    if (mode == "too-long-response") {
+        constexpr std::size_t totalBytes = 20ULL * 1024ULL * 1024ULL + 1ULL;
+        const std::string chunk(64 * 1024, 'x');
+        std::size_t remaining = totalBytes;
+        while (remaining > 0) {
+            const std::size_t toWrite = std::min(remaining, chunk.size());
+            std::cout.write(chunk.data(), static_cast<std::streamsize>(toWrite));
+            if (!std::cout) {
+                return 1;
+            }
+            remaining -= toWrite;
+        }
+        std::cout.flush();
+        return 0;
+    }
+
+    return 1;
+}
+
 } // namespace
 
-int main() {
+int main(int argc, char* argv[]) {
+    for (int i = 1; i + 1 < argc; ++i) {
+        if (std::string(argv[i]) == "--user-data") {
+            return runFakeBackendMode(argv[i + 1]);
+        }
+    }
+
     if (!runStartGuestSessionTest()) return 1;
     if (!runListUsersErrorTest()) return 1;
     if (!runReadFileSuccessTest()) return 1;
@@ -323,5 +376,6 @@ int main() {
     if (!runLogoutTest()) return 1;
     if (!runRuntimeLegacyDirectTest()) return 1;
     if (!runRuntimeMissingBackendPathTest()) return 1;
+    if (!runProcessResponseLineTooLongTest(argv[0])) return 1;
     return 0;
 }
