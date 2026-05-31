@@ -176,22 +176,7 @@ HANDLE createChildStderrHandle() {
     childSecurity.nLength = sizeof(childSecurity);
     childSecurity.bInheritHandle = TRUE;
 
-    const HANDLE stderrHandle = GetStdHandle(STD_ERROR_HANDLE);
-    HANDLE childStderr = nullptr;
-    if (validHandle(stderrHandle) &&
-        DuplicateHandle(
-            GetCurrentProcess(),
-            stderrHandle,
-            GetCurrentProcess(),
-            &childStderr,
-            0,
-            TRUE,
-            DUPLICATE_SAME_ACCESS
-        )) {
-        return childStderr;
-    }
-
-    childStderr = CreateFileW(
+    const HANDLE childStderr = CreateFileW(
         L"NUL",
         GENERIC_WRITE,
         FILE_SHARE_READ | FILE_SHARE_WRITE,
@@ -203,21 +188,30 @@ HANDLE createChildStderrHandle() {
     return validHandle(childStderr) ? childStderr : nullptr;
 }
 
+void cancelOverlappedAndDrain(HANDLE handle, OVERLAPPED& overlapped) {
+    CancelIoEx(handle, &overlapped);
+
+    const DWORD waitResult = WaitForSingleObject(overlapped.hEvent, INFINITE);
+    if (waitResult == WAIT_OBJECT_0) {
+        DWORD ignored = 0;
+        GetOverlappedResult(handle, &overlapped, &ignored, FALSE);
+    }
+}
+
 bool waitForOverlapped(HANDLE handle, OVERLAPPED& overlapped, DWORD& transferred, ULONGLONG deadline) {
     const DWORD waitMs = remainingMillis(deadline);
     if (waitMs == 0) {
-        CancelIoEx(handle, &overlapped);
+        cancelOverlappedAndDrain(handle, overlapped);
         return false;
     }
 
     const DWORD waitResult = WaitForSingleObject(overlapped.hEvent, waitMs);
     if (waitResult == WAIT_TIMEOUT) {
-        CancelIoEx(handle, &overlapped);
-        WaitForSingleObject(overlapped.hEvent, kPostTerminateWaitMs);
+        cancelOverlappedAndDrain(handle, overlapped);
         return false;
     }
     if (waitResult != WAIT_OBJECT_0) {
-        CancelIoEx(handle, &overlapped);
+        cancelOverlappedAndDrain(handle, overlapped);
         return false;
     }
 
