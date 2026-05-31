@@ -433,6 +433,14 @@ int main() {
         "COM1.log should fail with InvalidPath",
         ErrorCode::InvalidPath,
         [&store]() { (void)store.readFile("COM1.log"); })) return 1;
+    if (!expectBackendException(
+        "USER_D~1.DAT should fail with InvalidPath",
+        ErrorCode::InvalidPath,
+        [&store]() { (void)store.readFile("USER_D~1.DAT"); })) return 1;
+    if (!expectBackendException(
+        "AUDIT~1.TLO should fail with InvalidPath",
+        ErrorCode::InvalidPath,
+        [&store]() { store.writeFile("AUDIT~1.TLO", "x"); })) return 1;
 
     const auto outside = tempRoot.path().parent_path() / (tempRoot.path().filename().string() + "_outside.txt");
     const auto outsideDir = tempRoot.path().parent_path() / (tempRoot.path().filename().string() + "_outside_dir");

@@ -310,10 +310,12 @@ std::filesystem::path FilesystemFileStore::resolveManagedPath(const std::string&
 
     for (const auto& part : requested) {
         const auto component = part.string();
+        // Windows 8.3 short-name aliases can bypass protected filename checks.
         if (component.empty() ||
             component == "." ||
             component == ".." ||
             component.find(':') != std::string::npos ||
+            component.find('~') != std::string::npos ||
             component.back() == '.' ||
             component.back() == ' ' ||
             isReservedDosDeviceName(component)) {
