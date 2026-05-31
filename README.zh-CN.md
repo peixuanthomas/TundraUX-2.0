@@ -33,6 +33,10 @@ cmake --build build
 
 生成的可执行文件名为 `TundraUX2`。
 
+### 后端第一阶段
+
+项目也会构建 `tundraux_backend_stdio`，这是前后端进程拆分的第一条后端边界。它通过 stdin/stdout 提供按行传输的 JSON-RPC，目前支持创建会话、登录、登出、查询当前用户和列出用户。现有 `TundraUX2` 前端在本阶段尚未迁移到该后端。
+
 ## 验证
 
 ```powershell

@@ -33,6 +33,10 @@ cmake --build build
 
 The generated executable is named `TundraUX2`.
 
+### Backend Phase 1
+
+The project also builds `tundraux_backend_stdio`, the first backend process boundary for the frontend/backend split. It exposes line-delimited JSON-RPC over stdin/stdout and currently supports session startup, login/logout/whoami, and user listing. The existing `TundraUX2` frontend is not migrated to this backend yet.
+
 ## Validation
 
 ```powershell
