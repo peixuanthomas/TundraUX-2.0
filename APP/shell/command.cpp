@@ -46,7 +46,6 @@ bool redrawsShellHeader(const std::string& input) {
 }
 
 void task_main(tundraux::frontend::BackendRuntime* backendRuntime) {
-    (void)backendRuntime;
     renderShellHeader();
     tundraux::audit::initialize();
     tundra_tui::setKeyAuditSink(tundraux::audit::logKeyPress);
@@ -60,7 +59,7 @@ void task_main(tundraux::frontend::BackendRuntime* backendRuntime) {
     };
     tundraux::audit::setCurrentUser(currentUser);
 
-    std::vector<RegisteredCommand> registeredCommands = buildNewCommandRegistry(currentUser);
+    std::vector<RegisteredCommand> registeredCommands = buildNewCommandRegistry(currentUser, backendRuntime);
     std::vector<std::string> commandHistory;
     int historyIndex = -1;
     const int MAX_HISTORY = 100;

@@ -3,7 +3,10 @@
 #include "commandHandlers.hpp"
 #include "debug.hpp"
 
-std::vector<RegisteredCommand> buildNewCommandRegistry(USER& currentUser) {
+std::vector<RegisteredCommand> buildNewCommandRegistry(
+    USER& currentUser,
+    tundraux::frontend::BackendRuntime* backendRuntime
+) {
     return {
         {
             "help",
@@ -37,7 +40,9 @@ std::vector<RegisteredCommand> buildNewCommandRegistry(USER& currentUser) {
             "login <username>",
             "Log in as specified user",
             {},
-            [&currentUser](const std::string& input) { handleLoginCommand(input, currentUser); },
+            [&currentUser, backendRuntime](const std::string& input) {
+                handleLoginCommand(input, currentUser, backendRuntime);
+            },
             "guest,debug",
             false,
             true
@@ -47,7 +52,9 @@ std::vector<RegisteredCommand> buildNewCommandRegistry(USER& currentUser) {
             "logout",
             "Log out current user",
             {},
-            [&currentUser](const std::string& input) { handleLogoutCommand(input, currentUser); },
+            [&currentUser, backendRuntime](const std::string& input) {
+                handleLogoutCommand(input, currentUser, backendRuntime);
+            },
             "",
             false
         },
@@ -56,7 +63,9 @@ std::vector<RegisteredCommand> buildNewCommandRegistry(USER& currentUser) {
             "listuser",
             "List all users",
             {},
-            handleListUserCommand,
+            [backendRuntime](const std::string& input) {
+                handleListUserCommand(input, backendRuntime);
+            },
             "",
             false
         },
@@ -251,7 +260,9 @@ std::vector<RegisteredCommand> buildNewCommandRegistry(USER& currentUser) {
             "whoami",
             "Display the current logged in user",
             {},
-            [&currentUser](const std::string&) {handleWhoamiCommand(currentUser); },
+            [&currentUser, backendRuntime](const std::string&) {
+                handleWhoamiCommand(currentUser, backendRuntime);
+            },
             "",
             false
         }

@@ -14,6 +14,7 @@
 
 #include "account_settings.hpp"
 #include "audit_log.hpp"
+#include "backend_runtime.hpp"
 #include "color.hpp"
 #include "editor.hpp"
 #include "manageusers.hpp"
@@ -79,17 +80,117 @@ std::string trimLeadingSpaces(std::string value) {
     }));
     return value;
 }
+
+bool usesBackend(tundraux::frontend::BackendRuntime* backendRuntime) {
+    return backendRuntime != nullptr && !backendRuntime->legacyDirect();
 }
 
-void handleLoginCommand(const std::string& input, USER& currentUser) {
+USER guestUser() {
+    return {
+        "guest",
+        "",
+        "",
+        "",
+        0
+    };
+}
+
+USER shellUserFromBackend(const tundraux::frontend::FrontendUser& user) {
+    return {
+        user.type,
+        user.name,
+        "",
+        "",
+        0
+    };
+}
+
+std::string backendFailureMessage(
+    const std::string& fallback,
+    const std::string& errorCode
+) {
+    if (errorCode == "TransportError") {
+        return "Backend unavailable.";
+    }
+    if (errorCode == "InvalidResponse") {
+        return "Invalid backend response.";
+    }
+    if (errorCode == "SessionExpired") {
+        return "Backend session expired.";
+    }
+    if (errorCode == "PermissionDenied") {
+        return "Access Denied.";
+    }
+    return fallback;
+}
+
+bool ensureBackendSession(tundraux::frontend::BackendRuntime& backendRuntime) {
+    if (!backendRuntime.sessionId().empty()) {
+        return true;
+    }
+
+    auto* client = backendRuntime.client();
+    if (client == nullptr) {
+        colorcout("red", "Backend unavailable.\n");
+        return false;
+    }
+
+    const auto guestSession = client->startGuestSession();
+    if (!guestSession.ok) {
+        colorcout("red", backendFailureMessage("Unable to start backend session.", guestSession.errorCode) + "\n");
+        return false;
+    }
+
+    backendRuntime.setSessionId(guestSession.value.sessionId);
+    return true;
+}
+
+void displayLocalWhoami(const USER& currentUser) {
+    if (currentUser.name.empty()) {
+        colorcout("yellow", "No user is currently logged in.\n");
+    } else {
+        colorcout("white", "Current user: " + currentUser.name + " (" + currentUser.type + ")\n");
+    }
+}
+}
+
+void handleLoginCommand(
+    const std::string& input,
+    USER& currentUser,
+    tundraux::frontend::BackendRuntime* backendRuntime
+) {
     std::istringstream iss(input);
-    std::string cmd, username;
-    iss >> cmd >> username;
-    if (username.empty())
-    {
+    std::string cmd;
+    std::string username;
+    std::string extra;
+    iss >> cmd >> username >> extra;
+    if (username.empty() || !extra.empty()) {
         colorcout("yellow", "Usage: login <username>\n");
         return;
     }
+
+    if (usesBackend(backendRuntime)) {
+        tundraux::audit::logEvent("login", "backend attempt");
+        if (!ensureBackendSession(*backendRuntime)) {
+            return;
+        }
+
+        const std::string password = getHiddenInput("Please enter password: ", '*');
+        const auto result = backendRuntime->client()->login(backendRuntime->sessionId(), username, password);
+        if (!result.ok) {
+            tundraux::audit::logEvent("login", "backend failure " + result.errorCode);
+            colorcout("red", "Login failed.\n");
+            return;
+        }
+
+        backendRuntime->setSessionId(result.value.sessionId);
+        currentUser = shellUserFromBackend(result.value.user);
+        tundraux::audit::setCurrentUser(currentUser);
+        tundraux::audit::logEvent("login", "backend success");
+        rollcout("green", "Welcome, " + currentUser.name + "!");
+        return;
+    }
+
     tundraux::audit::logEvent("login", "attempt " + username);
     DataManager dataManager("user_data.dat");
     const auto &users = dataManager.GetAllUsers();
@@ -168,25 +269,79 @@ void handleClearScreenCommand(const std::string&) {
     renderShellHeader();
 }
 
-void handleLogoutCommand(const std::string&, USER& currentUser) {
+void handleLogoutCommand(
+    const std::string&,
+    USER& currentUser,
+    tundraux::frontend::BackendRuntime* backendRuntime
+) {
     if (currentUser.name.empty())
     {
         colorcout("yellow", "No user is currently logged in.\n");
         return;
     }
+
+    if (usesBackend(backendRuntime)) {
+        tundraux::audit::logEvent("logout", "backend");
+        auto* client = backendRuntime->client();
+        if (client == nullptr) {
+            colorcout("yellow", "Backend unavailable.\n");
+        } else if (!backendRuntime->sessionId().empty()) {
+            const auto result = client->logout(backendRuntime->sessionId());
+            if (!result.ok) {
+                colorcout("yellow", backendFailureMessage("Logout request failed.", result.errorCode) + "\n");
+            }
+        } else {
+            colorcout("yellow", "Backend session already cleared.\n");
+        }
+        backendRuntime->setSessionId("");
+        currentUser = guestUser();
+        tundraux::audit::setCurrentUser(currentUser);
+        colorcout("green", "Logged out successfully.\n");
+        return;
+    }
+
     tundraux::audit::logEvent("logout", currentUser.name);
     colorcout("green", "User " + currentUser.name + " logged out successfully.\n");
-    currentUser = {
-        "guest",
-        "",
-        "",
-        "",
-        0
-    };
+    currentUser = guestUser();
     tundraux::audit::setCurrentUser(currentUser);
 }
 
-void handleListUserCommand(const std::string&) {
+void handleListUserCommand(
+    const std::string&,
+    tundraux::frontend::BackendRuntime* backendRuntime
+) {
+    if (usesBackend(backendRuntime)) {
+        auto* client = backendRuntime->client();
+        if (client == nullptr) {
+            colorcout("red", "Backend unavailable.\n");
+            return;
+        }
+        if (backendRuntime->sessionId().empty()) {
+            colorcout("yellow", "No backend session is active.\n");
+            return;
+        }
+
+        const auto result = client->listUsers(backendRuntime->sessionId());
+        if (!result.ok) {
+            colorcout(
+                result.errorCode == "PermissionDenied" ? "red" : "yellow",
+                backendFailureMessage("Unable to list users.", result.errorCode) + "\n"
+            );
+            return;
+        }
+
+        if (result.value.empty()) {
+            colorcout("yellow", "No users found.\n");
+            return;
+        }
+
+        colorcout("cyan", "Current Users:\n");
+        for (const auto& user : result.value) {
+            colorcout("white", "Username: " + user.name + " (" + user.type + ")\n");
+        }
+        return;
+    }
+
     listUser();
 }
 
@@ -256,12 +411,30 @@ void handleExplorerCommand(const std::string&, USER& currentUser) {
     open_explorer(currentUser.name, currentUser.type);
 }
 
-void handleWhoamiCommand(const USER& currentUser) {
-    if(currentUser.name.empty()) {
-        colorcout("yellow", "No user is currently logged in.\n");
-    } else {
-        colorcout("white", "Current user: " + currentUser.name + " (" + currentUser.type + ")\n");
+void handleWhoamiCommand(
+    USER& currentUser,
+    tundraux::frontend::BackendRuntime* backendRuntime
+) {
+    if (!usesBackend(backendRuntime) || backendRuntime->sessionId().empty()) {
+        displayLocalWhoami(currentUser);
+        return;
     }
+
+    auto* client = backendRuntime->client();
+    if (client == nullptr) {
+        colorcout("yellow", "Backend unavailable.\n");
+        return;
+    }
+
+    const auto result = client->whoami(backendRuntime->sessionId());
+    if (!result.ok) {
+        colorcout("yellow", backendFailureMessage("Unable to query backend session.", result.errorCode) + "\n");
+        return;
+    }
+
+    currentUser = shellUserFromBackend(result.value);
+    tundraux::audit::setCurrentUser(currentUser);
+    displayLocalWhoami(currentUser);
 }
 
 void handleStrictCommand(const std::string& input, USER& currentUser) {
