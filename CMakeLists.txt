@@ -340,6 +340,29 @@ add_dependencies(backend_stdio_tests tundraux_backend_stdio)
 
 add_test(NAME backend_stdio_tests COMMAND backend_stdio_tests $<TARGET_FILE:tundraux_backend_stdio>)
 
+add_executable(frontend_backend_client_tests
+    tests/frontend_backend_client_tests.cpp
+    APP/backend_client/backend_client.cpp
+)
+
+target_include_directories(frontend_backend_client_tests
+    PRIVATE
+        ${PROJECT_SOURCE_DIR}/APP/backend_client
+        ${PROJECT_SOURCE_DIR}/BACKEND/core
+)
+
+target_link_libraries(frontend_backend_client_tests
+    PRIVATE
+        tundraux_backend_core
+)
+
+target_compile_features(frontend_backend_client_tests
+    PRIVATE
+        cxx_std_17
+)
+
+add_test(NAME frontend_backend_client_tests COMMAND frontend_backend_client_tests)
+
 if(TUNDRAUX_DEBUG_STARTUP)
     target_compile_definitions(${PROJECT_NAME}
         PRIVATE
