@@ -273,6 +273,10 @@ int main() {
     if (!expectEntry(entries[3], "apple.txt", "apple.txt", FileEntryType::File)) return 1;
     if (!expect(!hasEntryNamed(entries, "temp"), "filesystem listDirectory should skip temp entry")) return 1;
 
+    const auto docsEntries = store.listDirectory("docs");
+    if (!expect(docsEntries.size() == 1, "filesystem listDirectory docs count mismatch")) return 1;
+    if (!expectEntry(docsEntries[0], "note.txt", "docs/note.txt", FileEntryType::File)) return 1;
+
     const auto note = store.readFile("docs/note.txt");
     if (!expect(note.content == "hello", "filesystem readFile content mismatch")) return 1;
 
@@ -438,6 +442,10 @@ int main() {
             ErrorCode::PermissionDenied,
             ErrorCode::InvalidPath,
             [&store]() { store.writeFile("link-to-outside.txt", "x"); })) return 1;
+        const auto symlinkFilteredEntries = store.listDirectory("");
+        if (!expect(
+            !hasEntryNamed(symlinkFilteredEntries, "link-to-outside.txt"),
+            "filesystem listDirectory should skip file symlink entries")) return 1;
     }
 
     if (createdDirectorySymlink(outsideDir, tempRoot.path() / "link-dir")) {
@@ -446,6 +454,10 @@ int main() {
             ErrorCode::PermissionDenied,
             ErrorCode::InvalidPath,
             [&store]() { (void)store.listDirectory("link-dir"); })) return 1;
+        const auto symlinkFilteredEntries = store.listDirectory("");
+        if (!expect(
+            !hasEntryNamed(symlinkFilteredEntries, "link-dir"),
+            "filesystem listDirectory should skip directory symlink entries")) return 1;
     }
 
     if (createdSymlink(tempRoot.path() / "missing-symlink-target.txt", tempRoot.path() / "dangling-link.txt")) {

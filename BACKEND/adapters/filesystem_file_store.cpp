@@ -108,6 +108,13 @@ std::filesystem::path canonicalExistingPath(const std::filesystem::path& path) {
     return canonical;
 }
 
+std::string lexicalEntryPath(const std::string& directory, const std::string& name) {
+    if (directory.empty()) {
+        return std::filesystem::path(name).generic_string();
+    }
+    return (std::filesystem::path(directory) / name).generic_string();
+}
+
 } // namespace
 
 FilesystemFileStore::FilesystemFileStore(std::string root)
@@ -150,13 +157,13 @@ std::vector<FileEntry> FilesystemFileStore::listDirectory(const std::string& pat
             if (error) {
                 throw storageError();
             }
+            if (isReparseOrSymlink(entry.path())) {
+                continue;
+            }
 
             FileEntry out;
             out.name = name;
-            out.path = std::filesystem::relative(entry.path(), root_, error).generic_string();
-            if (error) {
-                throw storageError();
-            }
+            out.path = lexicalEntryPath(path, name);
             out.type = std::filesystem::is_directory(status) ? FileEntryType::Directory : FileEntryType::File;
             if (std::filesystem::is_regular_file(status)) {
                 out.size = entry.file_size(error);
