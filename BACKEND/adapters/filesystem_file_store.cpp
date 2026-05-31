@@ -80,6 +80,9 @@ std::vector<FileEntry> FilesystemFileStore::listDirectory(const std::string& pat
         if (!isPathInside(root_, resolved)) {
             throw invalidPath();
         }
+        if (!path.empty()) {
+            rejectProtectedPath(resolved);
+        }
 
         std::error_code error;
         if (!std::filesystem::exists(resolved, error)) {
@@ -181,6 +184,9 @@ FileContent FilesystemFileStore::readFile(const std::string& path) const {
         if (!content.empty()) {
             stream.read(content.data(), static_cast<std::streamsize>(content.size()));
         }
+        if (stream.gcount() != static_cast<std::streamsize>(content.size())) {
+            throw storageError();
+        }
         if (!stream && !stream.eof()) {
             throw storageError();
         }
@@ -251,7 +257,8 @@ std::filesystem::path FilesystemFileStore::resolveManagedPath(const std::string&
     }
 
     for (const auto& part : requested) {
-        if (part == "." || part == "..") {
+        const auto component = part.string();
+        if (component == "." || component == ".." || component.find(':') != std::string::npos) {
             throw invalidPath();
         }
     }
@@ -264,10 +271,9 @@ std::filesystem::path FilesystemFileStore::resolveManagedPath(const std::string&
 }
 
 void FilesystemFileStore::rejectProtectedPath(const std::filesystem::path& resolved) const {
-    const auto filename = resolved.filename().string();
-    const auto extension = resolved.extension().string();
+    const auto filename = lowerAscii(resolved.filename().string());
+    const auto extension = lowerAscii(resolved.extension().string());
     if (filename == "user_data.dat" ||
-        extension == ".TUX" ||
         extension == ".tux" ||
         extension == ".tlog") {
         throw permissionDenied();

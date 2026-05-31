@@ -119,6 +119,17 @@ bool expectBackendExceptionOneOf(
     return expect(false, message);
 }
 
+bool expectEntry(
+    const tundraux::backend::FileEntry& entry,
+    const std::string& name,
+    const std::string& path,
+    tundraux::backend::FileEntryType type
+) {
+    return expect(entry.name == name, "filesystem listDirectory name mismatch") &&
+        expect(entry.path == path, "filesystem listDirectory path mismatch") &&
+        expect(entry.type == type, "filesystem listDirectory type mismatch");
+}
+
 } // namespace
 
 int main() {
@@ -166,14 +177,23 @@ int main() {
         std::filesystem::path("tundraux_backend_file_store_tests");
     TempDirectory tempRoot(root);
     std::filesystem::create_directories(tempRoot.path() / "docs");
+    std::filesystem::create_directories(tempRoot.path() / "Alpha");
+    std::filesystem::create_directories(tempRoot.path() / "beta");
+    std::ofstream(tempRoot.path() / "Zoo.txt") << "zoo";
+    std::ofstream(tempRoot.path() / "apple.txt") << "apple";
     std::ofstream(tempRoot.path() / "docs" / "note.txt") << "hello";
     std::ofstream(tempRoot.path() / "secret.TUX") << "protected";
     std::ofstream(tempRoot.path() / "audit.tlog") << "protected";
+    std::ofstream(tempRoot.path() / "USER_DATA.DAT") << "protected";
 
     FilesystemFileStore store(tempRoot.path().string());
 
     const auto entries = store.listDirectory("");
-    if (!expect(!entries.empty(), "filesystem listDirectory root should return entries")) return 1;
+    if (!expect(entries.size() >= 5, "filesystem listDirectory root should return entries")) return 1;
+    if (!expectEntry(entries[0], "Alpha", "Alpha", FileEntryType::Directory)) return 1;
+    if (!expectEntry(entries[1], "beta", "beta", FileEntryType::Directory)) return 1;
+    if (!expectEntry(entries[2], "docs", "docs", FileEntryType::Directory)) return 1;
+    if (!expectEntry(entries[3], "apple.txt", "apple.txt", FileEntryType::File)) return 1;
 
     const auto note = store.readFile("docs/note.txt");
     if (!expect(note.content == "hello", "filesystem readFile content mismatch")) return 1;
@@ -195,6 +215,32 @@ int main() {
         "audit.tlog should fail with PermissionDenied",
         ErrorCode::PermissionDenied,
         [&store]() { (void)store.readFile("audit.tlog"); })) return 1;
+    if (!expectBackendException(
+        "secret.TuX should fail with PermissionDenied",
+        ErrorCode::PermissionDenied,
+        [&store]() { (void)store.readFile("secret.TuX"); })) return 1;
+    if (!expectBackendException(
+        "audit.TLOG write should fail with PermissionDenied",
+        ErrorCode::PermissionDenied,
+        [&store]() { store.writeFile("audit.TLOG", "x"); })) return 1;
+    if (!expectBackendException(
+        "USER_DATA.DAT should fail with PermissionDenied",
+        ErrorCode::PermissionDenied,
+        [&store]() { (void)store.readFile("USER_DATA.DAT"); })) return 1;
+    std::filesystem::create_directories(tempRoot.path() / "protected.TLOG");
+    if (!expectBackendException(
+        "protected.TLOG listDirectory should fail with PermissionDenied",
+        ErrorCode::PermissionDenied,
+        [&store]() { (void)store.listDirectory("protected.TLOG"); })) return 1;
+    if (!expectBackendExceptionOneOf(
+        "user_data.dat:stream write should fail with InvalidPath or PermissionDenied",
+        ErrorCode::InvalidPath,
+        ErrorCode::PermissionDenied,
+        [&store]() { store.writeFile("user_data.dat:stream", "x"); })) return 1;
+    if (!expectBackendException(
+        "docs/new.txt:stream write should fail with InvalidPath",
+        ErrorCode::InvalidPath,
+        [&store]() { store.writeFile("docs/new.txt:stream", "x"); })) return 1;
 
     return 0;
 }
