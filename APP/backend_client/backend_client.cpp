@@ -3,7 +3,6 @@
 #include "json.hpp"
 
 #include <cmath>
-#include <limits>
 #include <stdexcept>
 #include <utility>
 
@@ -16,6 +15,7 @@ constexpr const char* transportErrorCode = "TransportError";
 constexpr const char* transportErrorMessage = "Backend unavailable.";
 constexpr const char* invalidResponseCode = "InvalidResponse";
 constexpr const char* invalidResponseMessage = "Invalid backend response.";
+constexpr double maxSafeJsonInteger = 9007199254740991.0;
 
 template <typename T>
 ClientResult<T> errorResult(std::string code, std::string message) {
@@ -98,7 +98,7 @@ FrontendFileEntry parseFileEntry(const JsonValue& value) {
         !std::isfinite(sizeValue.asNumber()) ||
         sizeValue.asNumber() < 0.0 ||
         std::floor(sizeValue.asNumber()) != sizeValue.asNumber() ||
-        sizeValue.asNumber() > static_cast<double>(std::numeric_limits<unsigned long long>::max())) {
+        sizeValue.asNumber() > maxSafeJsonInteger) {
         throw std::logic_error("expected size number");
     }
 

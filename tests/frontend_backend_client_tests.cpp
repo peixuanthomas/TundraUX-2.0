@@ -203,6 +203,28 @@ bool runListDirectoryTest() {
         expect(result.value[0].size == 5ULL, "list directory entry size mismatch");
 }
 
+bool runListDirectoryMaxSafeSizeTest() {
+    FakeTransport transport;
+    transport.nextResponse = R"({"id":"1","result":{"entries":[{"name":"large.bin","path":"docs/large.bin","type":"file","size":9007199254740991}]}})";
+    tundraux::frontend::BackendClient client(transport);
+
+    const auto result = client.listDirectory("session-1", "docs");
+
+    return expect(result.ok, "list directory max safe size should succeed") &&
+        expect(result.value.size() == 1, "list directory max safe size entry count mismatch") &&
+        expect(result.value[0].size == 9007199254740991ULL, "list directory max safe size mismatch");
+}
+
+bool runListDirectoryUnsafeSizeTest() {
+    FakeTransport transport;
+    transport.nextResponse = R"({"id":"1","result":{"entries":[{"name":"large.bin","path":"docs/large.bin","type":"file","size":9007199254740992}]}})";
+    tundraux::frontend::BackendClient client(transport);
+
+    const auto result = client.listDirectory("session-1", "docs");
+
+    return expectInvalidResponse(result, "list directory unsafe size");
+}
+
 bool runListDirectoryFractionalSizeTest() {
     FakeTransport transport;
     transport.nextResponse = R"({"id":"1","result":{"entries":[{"name":"note.txt","path":"docs/note.txt","type":"file","size":5.9}]}})";
@@ -262,6 +284,8 @@ int main() {
     if (!runTransportFailureTest()) return 1;
     if (!runWriteFileTest()) return 1;
     if (!runListDirectoryTest()) return 1;
+    if (!runListDirectoryMaxSafeSizeTest()) return 1;
+    if (!runListDirectoryUnsafeSizeTest()) return 1;
     if (!runListDirectoryFractionalSizeTest()) return 1;
     if (!runListDirectoryNegativeSizeTest()) return 1;
     if (!runLoginTest()) return 1;
