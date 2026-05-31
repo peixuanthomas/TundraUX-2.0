@@ -216,6 +216,56 @@ bool runMalformedStorageProcessTest(const std::filesystem::path& backendExePath)
     return true;
 }
 
+bool runGuestSessionProcessTest(const std::filesystem::path& backendExePath) {
+    const auto base = std::filesystem::temp_directory_path() / "tundraux_backend_stdio_process_guest_session";
+    const auto stdinPath = base.string() + ".stdin.txt";
+    const auto stdoutPath = base.string() + ".stdout.txt";
+    const auto stderrPath = base.string() + ".stderr.txt";
+    {
+        std::ofstream file(stdinPath, std::ios::binary | std::ios::trunc);
+        file << R"({"id":"1","method":"session.startGuestSession","params":{}})" << "\n";
+    }
+
+    const bool succeeded = runProcessCommand(backendExePath, "", stdinPath, stdoutPath, stderrPath);
+    std::string stdoutText = readTextFile(stdoutPath);
+    const std::string stderrText = readTextFile(stderrPath);
+    std::filesystem::remove(stdinPath);
+    std::filesystem::remove(stdoutPath);
+    std::filesystem::remove(stderrPath);
+
+    if (!succeeded) {
+        std::cerr << "guest session process should exit zero\n";
+        return false;
+    }
+    if (!stderrText.empty()) {
+        std::cerr << "guest session process wrote stderr: " << stderrText << "\n";
+        return false;
+    }
+    if (!stdoutText.empty() && stdoutText.back() == '\n') {
+        stdoutText.pop_back();
+    }
+    if (!stdoutText.empty() && stdoutText.back() == '\r') {
+        stdoutText.pop_back();
+    }
+
+    const auto parsed = tundraux::backend::parseJson(stdoutText);
+    if (!parsed.ok) {
+        std::cerr << "guest session process stdout should parse: " << stdoutText << "\n";
+        return false;
+    }
+    const auto& object = parsed.value.asObject();
+    const auto& result = object.at("result").asObject();
+    const auto& user = result.at("user").asObject();
+    if (object.at("id").asString() != "1" ||
+        result.at("sessionId").asString() != "session-1" ||
+        user.at("type").asString() != "guest" ||
+        !user.at("name").asString().empty()) {
+        std::cerr << "guest session process stdout has wrong protocol fields: " << stdoutText << "\n";
+        return false;
+    }
+    return true;
+}
+
 bool runProcessTests(const std::filesystem::path& backendExePath) {
     if (backendExePath.empty() || !std::filesystem::exists(backendExePath)) {
         std::cerr << "backend stdio executable path is missing or does not exist: "
@@ -223,7 +273,8 @@ bool runProcessTests(const std::filesystem::path& backendExePath) {
         return false;
     }
 
-    return runInvalidCliProcessTest(backendExePath, "--bad", "unknown_arg") &&
+    return runGuestSessionProcessTest(backendExePath) &&
+        runInvalidCliProcessTest(backendExePath, "--bad", "unknown_arg") &&
         runInvalidCliProcessTest(backendExePath, "--user-data", "missing_user_data_value") &&
         runMalformedStorageProcessTest(backendExePath);
 }

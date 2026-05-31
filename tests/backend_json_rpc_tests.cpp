@@ -131,6 +131,34 @@ bool runDispatcherTest() {
         if (!expect(user.asObject().find("password") == user.asObject().end(), "list users should not expose password field")) return false;
     }
 
+    const std::string logoutResponse = dispatcher.handleLine(R"({"id":"10","method":"session.logout","params":{"sessionId":"session-1"}})");
+    const auto logout = parseJson(logoutResponse);
+    if (!expect(logout.ok, "logout response should parse: " + logoutResponse)) return false;
+    const auto& logoutObject = logout.value.asObject();
+    if (!expect(logoutObject.at("id").asString() == "10", "logout response id mismatch")) return false;
+    if (!expect(logoutObject.find("error") == logoutObject.end(), "logout should not return error")) return false;
+    if (!expect(logoutObject.at("result").type() == JsonValue::Type::Object, "logout result should be an object")) return false;
+
+    const std::string whoamiAfterLogoutResponse = dispatcher.handleLine(R"({"id":"11","method":"session.whoami","params":{"sessionId":"session-1"}})");
+    const auto whoamiAfterLogout = parseJson(whoamiAfterLogoutResponse);
+    if (!expect(whoamiAfterLogout.ok, "whoami after logout response should parse: " + whoamiAfterLogoutResponse)) return false;
+    const auto& whoamiAfterLogoutUser = whoamiAfterLogout.value.asObject().at("result").asObject().at("user").asObject();
+    if (!expect(whoamiAfterLogout.value.asObject().at("id").asString() == "11", "whoami after logout response id mismatch")) return false;
+    if (!expect(whoamiAfterLogoutUser.at("type").asString() == "guest", "whoami after logout user type mismatch")) return false;
+    if (!expect(whoamiAfterLogoutUser.at("name").asString().empty(), "whoami after logout user name should be empty")) return false;
+
+    const std::string guestListResponse = dispatcher.handleLine(R"({"id":"12","method":"user.listUsers","params":{"sessionId":"session-1"}})");
+    const auto guestList = parseJson(guestListResponse);
+    if (!expect(guestList.ok, "guest list response should parse: " + guestListResponse)) return false;
+    if (!expect(guestList.value.asObject().at("id").asString() == "12", "guest list response id mismatch")) return false;
+    if (!expect(guestList.value.asObject().at("error").asObject().at("code").asString() == "PermissionDenied", "guest list users code mismatch")) return false;
+
+    const std::string invalidLoginParamsResponse = dispatcher.handleLine(R"({"id":"13","method":"session.login","params":{"sessionId":"session-1","username":"alice"}})");
+    const auto invalidLoginParams = parseJson(invalidLoginParamsResponse);
+    if (!expect(invalidLoginParams.ok, "invalid login params response should parse: " + invalidLoginParamsResponse)) return false;
+    if (!expect(invalidLoginParams.value.asObject().at("id").asString() == "13", "invalid login params response id mismatch")) return false;
+    if (!expect(invalidLoginParams.value.asObject().at("error").asObject().at("code").asString() == "InvalidParams", "invalid login params code mismatch")) return false;
+
     const std::string unknownResponse = dispatcher.handleLine(R"({"id":"4","method":"missing.method","params":{}})");
     const auto unknown = parseJson(unknownResponse);
     if (!expect(unknown.ok, "unknown response should parse: " + unknownResponse)) return false;
