@@ -15,6 +15,7 @@ set(TUNDRATUI_BUILD_EXAMPLES ON CACHE BOOL "Build TundraTUI example programs.")
 add_subdirectory(TundraTUI)
 
 add_library(tundraux_backend_core
+    BACKEND/core/file_service.cpp
     BACKEND/core/json.cpp
     BACKEND/core/json_rpc.cpp
     BACKEND/core/session_service.cpp
@@ -281,6 +282,22 @@ target_compile_features(backend_core_tests
 )
 
 add_test(NAME backend_core_tests COMMAND backend_core_tests)
+
+add_executable(backend_file_service_tests
+    tests/backend_file_service_tests.cpp
+)
+
+target_link_libraries(backend_file_service_tests
+    PRIVATE
+        tundraux_backend_core
+)
+
+target_compile_features(backend_file_service_tests
+    PRIVATE
+        cxx_std_17
+)
+
+add_test(NAME backend_file_service_tests COMMAND backend_file_service_tests)
 
 add_executable(backend_json_rpc_tests
     tests/backend_json_rpc_tests.cpp
