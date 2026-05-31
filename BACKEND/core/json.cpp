@@ -70,9 +70,13 @@ private:
     }
 
     void skipWhitespace() {
-        while (!isAtEnd() && std::isspace(static_cast<unsigned char>(peek())) != 0) {
+        while (!isAtEnd() && isJsonWhitespace(peek())) {
             ++position_;
         }
+    }
+
+    static bool isJsonWhitespace(char ch) {
+        return ch == ' ' || ch == '\t' || ch == '\n' || ch == '\r';
     }
 
     JsonValue parseValue() {

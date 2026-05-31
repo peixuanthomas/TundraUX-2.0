@@ -94,6 +94,8 @@ int main() {
     if (!expectInvalidJson(R"({"a":1,})", "trailing object comma should fail")) return 1;
     if (!expectInvalidJson(R"({"id":"a","id":"b"})", "duplicate object key should fail")) return 1;
     if (!expectInvalidJson("1e3", "exponent notation should remain unsupported")) return 1;
+    if (!expectInvalidJson("\f{}", "form feed outside string should fail")) return 1;
+    if (!expectInvalidJson("[1\v]", "vertical tab outside string should fail")) return 1;
     if (!expectInvalidJson(std::string("\"line\nbreak\""), "raw newline in string should fail")) return 1;
 
     const auto escaped = parseJson(R"("line\n\tbreak")");
