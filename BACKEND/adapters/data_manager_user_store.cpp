@@ -24,13 +24,33 @@ private:
     std::streambuf* previous_;
 };
 
-bool isExistingNonEmptyFile(const std::string& filename) {
+enum class StorageState {
+    Missing,
+    Invalid,
+    ExistingEmptyFile,
+    ExistingNonEmptyFile
+};
+
+StorageState classifyStorage(const std::string& filename) {
     std::error_code error;
-    if (!std::filesystem::exists(filename, error) || error) {
-        return false;
+    const bool exists = std::filesystem::exists(filename, error);
+    if (error) {
+        return StorageState::Invalid;
     }
+    if (!exists) {
+        return StorageState::Missing;
+    }
+
+    const bool regularFile = std::filesystem::is_regular_file(filename, error);
+    if (error || !regularFile) {
+        return StorageState::Invalid;
+    }
+
     const auto size = std::filesystem::file_size(filename, error);
-    return !error && size > 0;
+    if (error) {
+        return StorageState::Invalid;
+    }
+    return size == 0 ? StorageState::ExistingEmptyFile : StorageState::ExistingNonEmptyFile;
 }
 
 BackendUser toBackendUser(const USER& user) {
@@ -59,22 +79,34 @@ DataManagerUserStore::DataManagerUserStore(std::string filename)
     : filename_(std::move(filename)) {}
 
 std::vector<BackendUser> DataManagerUserStore::listUsers() const {
-    const bool shouldHaveUsers = isExistingNonEmptyFile(filename_);
+    const StorageState storage = classifyStorage(filename_);
+    if (storage == StorageState::Invalid || storage == StorageState::ExistingEmptyFile) {
+        throw std::runtime_error("Unable to read user data.");
+    }
+
     ScopedStdoutSilencer silenceStdout;
     DataManager dataManager(filename_);
     std::vector<BackendUser> out;
     for (const auto& user : dataManager.GetAllUsers()) {
         out.push_back(toBackendUser(user));
     }
-    if (shouldHaveUsers && out.empty()) {
+    if (storage == StorageState::ExistingNonEmptyFile && out.empty()) {
         throw std::runtime_error("Unable to read user data.");
     }
     return out;
 }
 
 bool DataManagerUserStore::updateUser(const std::string& name, const BackendUser& user) {
+    const StorageState storage = classifyStorage(filename_);
+    if (storage == StorageState::Invalid || storage == StorageState::ExistingEmptyFile) {
+        throw std::runtime_error("Unable to read user data.");
+    }
+
     ScopedStdoutSilencer silenceStdout;
     DataManager dataManager(filename_);
+    if (storage == StorageState::ExistingNonEmptyFile && dataManager.GetAllUsers().empty()) {
+        throw std::runtime_error("Unable to read user data.");
+    }
     return dataManager.UpdateUser(name, toLegacyUser(user));
 }
 
