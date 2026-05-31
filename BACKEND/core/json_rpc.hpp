@@ -5,7 +5,6 @@
 #include "session_service.hpp"
 #include "user_service.hpp"
 
-#include <memory>
 #include <string>
 
 namespace tundraux::backend {
@@ -20,9 +19,7 @@ public:
 private:
     SessionService& sessions_;
     UserService& users_;
-    std::unique_ptr<FileStore> fallbackFileStore_;
-    std::unique_ptr<FileService> fallbackFiles_;
-    FileService& files_;
+    FileService* files_ = nullptr;
 
     JsonValue dispatch(const std::string& method, const JsonValue::Object& params);
     JsonValue errorResponse(const JsonValue& id, ErrorCode code, const std::string& message) const;

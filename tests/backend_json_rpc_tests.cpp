@@ -274,6 +274,35 @@ bool runDispatcherTest() {
     return true;
 }
 
+bool runDispatcherWithoutFileServiceTest() {
+    using tundraux::backend::JsonRpcDispatcher;
+    using tundraux::backend::parseJson;
+    using tundraux::backend::SessionService;
+    using tundraux::backend::UserService;
+
+    InMemoryUserStore store;
+    SessionService sessions(store);
+    UserService users(store, sessions);
+    JsonRpcDispatcher dispatcher(sessions, users);
+
+    const std::string guestResponse = dispatcher.handleLine(R"({"id":"1","method":"session.startGuestSession","params":{}})");
+    const auto guest = parseJson(guestResponse);
+    if (!expect(guest.ok, "two-arg guest response should parse: " + guestResponse)) return false;
+    if (!expect(guest.value.asObject().at("id").asString() == "1", "two-arg guest response id mismatch")) return false;
+    if (!expect(guest.value.asObject().find("error") == guest.value.asObject().end(), "two-arg guest should not return error")) return false;
+    const std::string sessionId = guest.value.asObject().at("result").asObject().at("sessionId").asString();
+
+    const std::string fileResponse = dispatcher.handleLine(
+        R"({"id":"2","method":"file.readFile","params":{"sessionId":")" + sessionId + R"(","path":"docs/note.txt"}})"
+    );
+    const auto file = parseJson(fileResponse);
+    if (!expect(file.ok, "two-arg file response should parse: " + fileResponse)) return false;
+    if (!expect(file.value.asObject().at("id").asString() == "2", "two-arg file response id mismatch")) return false;
+    if (!expect(file.value.asObject().at("error").asObject().at("code").asString() == "UnknownMethod", "two-arg file code mismatch")) return false;
+
+    return true;
+}
+
 int main() {
     using tundraux::backend::JsonValue;
     using tundraux::backend::parseJson;
@@ -339,6 +368,7 @@ int main() {
     if (!expect(wrongTypeThrew, "wrong-type accessor should throw")) return 1;
 
     if (!expect(runDispatcherTest(), "json rpc dispatcher behavior failed")) return 1;
+    if (!expect(runDispatcherWithoutFileServiceTest(), "json rpc dispatcher without file service behavior failed")) return 1;
 
     return 0;
 }

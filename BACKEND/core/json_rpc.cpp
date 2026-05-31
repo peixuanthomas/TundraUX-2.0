@@ -1,10 +1,8 @@
 #include "json_rpc.hpp"
 
 #include <exception>
-#include <memory>
 #include <string>
 #include <utility>
-#include <vector>
 
 namespace tundraux::backend {
 namespace {
@@ -29,21 +27,6 @@ public:
 private:
     ErrorCode code_;
     std::string message_;
-};
-
-class UnavailableFileStore final : public FileStore {
-public:
-    std::vector<FileEntry> listDirectory(const std::string&) const override {
-        throw BackendException(ErrorCode::StorageError, "File storage error.");
-    }
-
-    FileContent readFile(const std::string&) const override {
-        throw BackendException(ErrorCode::StorageError, "File storage error.");
-    }
-
-    void writeFile(const std::string&, const std::string&) override {
-        throw BackendException(ErrorCode::StorageError, "File storage error.");
-    }
 };
 
 JsonValue userToJson(const BackendUser& user) {
@@ -84,14 +67,10 @@ void throwIfFailed(const BackendError& error) {
 } // namespace
 
 JsonRpcDispatcher::JsonRpcDispatcher(SessionService& sessions, UserService& users, FileService& files)
-    : sessions_(sessions), users_(users), files_(files) {}
+    : sessions_(sessions), users_(users), files_(&files) {}
 
 JsonRpcDispatcher::JsonRpcDispatcher(SessionService& sessions, UserService& users)
-    : sessions_(sessions),
-      users_(users),
-      fallbackFileStore_(std::make_unique<UnavailableFileStore>()),
-      fallbackFiles_(std::make_unique<FileService>(*fallbackFileStore_, sessions_)),
-      files_(*fallbackFiles_) {}
+    : sessions_(sessions), users_(users) {}
 
 std::string JsonRpcDispatcher::handleLine(const std::string& line) {
     JsonValue id = JsonValue::null();
@@ -182,10 +161,10 @@ JsonValue JsonRpcDispatcher::dispatch(const std::string& method, const JsonValue
         return JsonValue::object({{"users", JsonValue::array(std::move(jsonUsers))}});
     }
 
-    if (method == "file.listDirectory") {
+    if (files_ != nullptr && method == "file.listDirectory") {
         const std::string sessionId = requiredStringParam(params, "sessionId");
         const std::string path = requiredStringParam(params, "path");
-        const auto result = files_.listDirectory(sessionId, path);
+        const auto result = files_->listDirectory(sessionId, path);
         if (!result.ok) {
             throwIfFailed(result.error);
         }
@@ -197,21 +176,21 @@ JsonValue JsonRpcDispatcher::dispatch(const std::string& method, const JsonValue
         return JsonValue::object({{"entries", JsonValue::array(std::move(entries))}});
     }
 
-    if (method == "file.readFile") {
+    if (files_ != nullptr && method == "file.readFile") {
         const std::string sessionId = requiredStringParam(params, "sessionId");
         const std::string path = requiredStringParam(params, "path");
-        const auto result = files_.readFile(sessionId, path);
+        const auto result = files_->readFile(sessionId, path);
         if (!result.ok) {
             throwIfFailed(result.error);
         }
         return JsonValue::object({{"content", JsonValue::string(result.value.content)}});
     }
 
-    if (method == "file.writeFile") {
+    if (files_ != nullptr && method == "file.writeFile") {
         const std::string sessionId = requiredStringParam(params, "sessionId");
         const std::string path = requiredStringParam(params, "path");
         const std::string content = requiredStringParam(params, "content");
-        const auto result = files_.writeFile(sessionId, path, content);
+        const auto result = files_->writeFile(sessionId, path, content);
         if (!result.ok) {
             throwIfFailed(result.error);
         }
