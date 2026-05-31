@@ -2,6 +2,7 @@
 /build-*
 /.vscode
 /.worktrees
+/.superpowers
 TundraUX 2.0.code-workspace
 memory.md
 todo
