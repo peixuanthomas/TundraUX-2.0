@@ -66,6 +66,22 @@ public:
         writtenPath = path;
         writtenContent = content;
     }
+
+    void deleteFile(const std::string&) override {}
+
+    void renameFile(const std::string&, const std::string&, bool) override {}
+
+    void copyFile(const std::string&, const std::string&, bool) override {}
+
+    void moveFile(const std::string&, const std::string&, bool) override {}
+
+    void createDirectory(const std::string&) override {}
+
+    void removeDirectory(const std::string&, bool) override {}
+
+    std::vector<tundraux::backend::FileEntry> search(const std::string&, const std::string&) const override {
+        return {};
+    }
 };
 
 } // namespace
