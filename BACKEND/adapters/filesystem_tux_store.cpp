@@ -107,6 +107,19 @@ bool isValidComponent(const std::string& component) {
     });
 }
 
+bool isReservedDosDeviceName(const std::string& component) {
+    const auto lower = lowerAscii(component);
+    if (lower == "con" || lower == "prn" || lower == "aux" || lower == "nul") {
+        return true;
+    }
+    if (lower.size() == 4 &&
+        (lower.rfind("com", 0) == 0 || lower.rfind("lpt", 0) == 0) &&
+        lower[3] >= '1' && lower[3] <= '9') {
+        return true;
+    }
+    return false;
+}
+
 std::vector<std::string> splitApiPath(const std::string& path, bool allowRoot) {
     if (path.empty()) {
         if (allowRoot) {
@@ -126,7 +139,7 @@ std::vector<std::string> splitApiPath(const std::string& path, bool allowRoot) {
     std::stringstream stream(path);
     std::string part;
     while (std::getline(stream, part, '/')) {
-        if (part == "." || part == ".." || !isValidComponent(part)) {
+        if (part == "." || part == ".." || !isValidComponent(part) || isReservedDosDeviceName(part)) {
             throw invalidPath();
         }
         parts.push_back(part);
@@ -269,6 +282,23 @@ void replaceFile(const std::filesystem::path& from, const std::filesystem::path&
 #endif
 }
 
+void moveFileReplacingDestination(const std::filesystem::path& from, const std::filesystem::path& to) {
+#ifdef _WIN32
+    if (!MoveFileExW(
+            from.wstring().c_str(),
+            to.wstring().c_str(),
+            MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH)) {
+        throw storageError();
+    }
+#else
+    std::error_code error;
+    std::filesystem::rename(from, to, error);
+    if (error) {
+        throw storageError();
+    }
+#endif
+}
+
 std::filesystem::path tempPathFor(const std::filesystem::path& destination) {
     const auto ticks = std::chrono::steady_clock::now().time_since_epoch().count();
     const auto threadId = std::hash<std::thread::id>{}(std::this_thread::get_id());
@@ -363,7 +393,7 @@ std::vector<FileEntry> FilesystemTuxStore::list(const std::string& path) const {
         std::vector<FileEntry> entries;
         for (const auto& entry : std::filesystem::directory_iterator(directory)) {
             const auto name = entry.path().filename().string();
-            if (name == "temp") {
+            if (lowerAscii(name) == "temp") {
                 continue;
             }
             if (isReparseOrSymlink(entry.path())) {
@@ -525,15 +555,13 @@ void FilesystemTuxStore::moveFile(const std::string& from, const std::string& to
         if (error) {
             throw storageError();
         }
-        if (overwrite && std::filesystem::exists(destination, error)) {
-            std::filesystem::remove(destination, error);
+        if (overwrite) {
+            moveFileReplacingDestination(source, destination);
+        } else {
+            std::filesystem::rename(source, destination, error);
             if (error) {
                 throw storageError();
             }
-        }
-        std::filesystem::rename(source, destination, error);
-        if (error) {
-            throw storageError();
         }
     } catch (const BackendException&) {
         throw;
@@ -584,7 +612,7 @@ std::vector<FileEntry> FilesystemTuxStore::search(const std::string& root, const
                 error.clear();
                 continue;
             }
-            if (iterator->path().filename() == "temp" && iterator->is_directory(error)) {
+            if (lowerAscii(iterator->path().filename().string()) == "temp" && iterator->is_directory(error)) {
                 iterator.disable_recursion_pending();
                 error.clear();
                 continue;

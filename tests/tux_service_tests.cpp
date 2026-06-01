@@ -16,6 +16,13 @@
 #include <utility>
 #include <vector>
 
+#ifdef _WIN32
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#include <windows.h>
+#endif
+
 namespace {
 
 class InMemoryUserStore final : public tundraux::backend::UserStore {
@@ -115,6 +122,19 @@ bool expectResultCode(
 ) {
     return expect(!result.ok, message + " should fail") &&
         expect(result.error.code == code, message + " code mismatch");
+}
+
+bool expectBackendException(
+    const std::string& message,
+    tundraux::backend::ErrorCode expected,
+    const std::function<void()>& action
+) {
+    try {
+        action();
+    } catch (const tundraux::backend::BackendException& error) {
+        return expect(error.code() == expected, message + " code mismatch");
+    }
+    return expect(false, message + " should fail");
 }
 
 tundraux::backend::ServiceResult<tundraux::backend::SessionInfo> login(
@@ -460,6 +480,92 @@ bool tux_debug_user_can_access_other_users_file() {
         expect(read.value.content == "debug-visible", "debug read content mismatch");
 }
 
+bool tux_root_list_and_search_hide_mixed_case_temp() {
+    TempDirectory temp(uniqueTempPath());
+    std::filesystem::create_directories(temp.path() / "Temp");
+    tundraux::backend::FilesystemTuxStore tempStore((temp.path() / "Temp").string());
+    tempStore.create("hidden", tundraux::backend::TuxMetadata{"alice", "alice", 1, 1}, false);
+    tundraux::backend::FilesystemTuxStore store(temp.path().string());
+
+    const auto entries = store.list("");
+    const auto results = store.search("", "hidden");
+
+    bool hasTempDirectory = false;
+    for (const auto& entry : entries) {
+        if (entry.name == "Temp") {
+            hasTempDirectory = true;
+        }
+    }
+
+    return expect(!hasTempDirectory, "root list should hide mixed-case Temp") &&
+        expect(results.empty(), "root search should hide files under mixed-case Temp");
+}
+
+bool tux_reserved_device_components_are_rejected() {
+    TempDirectory temp(uniqueTempPath());
+    tundraux::backend::FilesystemTuxStore store(temp.path().string());
+    const tundraux::backend::TuxMetadata metadata{"alice", "alice", 1, 1};
+
+    return expectBackendException(
+        "CON create should fail",
+        tundraux::backend::ErrorCode::InvalidPath,
+        [&store, &metadata]() { store.create("CON", metadata, false); }) &&
+        expectBackendException(
+        "NUL child create should fail",
+        tundraux::backend::ErrorCode::InvalidPath,
+        [&store, &metadata]() { store.create("docs/NUL", metadata, false); }) &&
+        expectBackendException(
+        "COM1 create should fail",
+        tundraux::backend::ErrorCode::InvalidPath,
+        [&store, &metadata]() { store.create("COM1", metadata, false); }) &&
+        expectBackendException(
+        "LPT9 create should fail",
+        tundraux::backend::ErrorCode::InvalidPath,
+        [&store, &metadata]() { store.create("archive/LPT9", metadata, false); });
+}
+
+bool tux_failed_overwrite_move_preserves_destination() {
+#ifdef _WIN32
+    TempDirectory temp(uniqueTempPath());
+    tundraux::backend::FilesystemTuxStore store(temp.path().string());
+    const tundraux::backend::TuxMetadata metadata{"alice", "alice", 1, 1};
+    store.create("source", metadata, false);
+    store.write("source", "source", metadata);
+    store.create("destination", metadata, false);
+    store.write("destination", "destination", metadata);
+
+    const auto sourcePath = temp.path() / "source.TUX";
+    const HANDLE lock = CreateFileW(
+        sourcePath.wstring().c_str(),
+        GENERIC_READ,
+        FILE_SHARE_READ,
+        nullptr,
+        OPEN_EXISTING,
+        FILE_ATTRIBUTE_NORMAL,
+        nullptr
+    );
+    if (lock == INVALID_HANDLE_VALUE) {
+        std::cerr << "Skipping failed overwrite move assertion: unable to lock source.\n";
+        return true;
+    }
+
+    bool rejected = false;
+    try {
+        store.moveFile("source", "destination", true);
+    } catch (const tundraux::backend::BackendException& error) {
+        rejected = error.code() == tundraux::backend::ErrorCode::StorageError;
+    }
+    CloseHandle(lock);
+
+    const auto destination = store.read("destination");
+    return expect(rejected, "locked overwrite move should fail with StorageError") &&
+        expect(destination.content == "destination", "failed overwrite move should preserve destination content");
+#else
+    std::cerr << "Skipping failed overwrite move assertion: Windows-only source lock behavior.\n";
+    return true;
+#endif
+}
+
 } // namespace
 
 int main() {
@@ -476,5 +582,8 @@ int main() {
     if (!tux_temp_paths_are_rejected()) return 1;
     if (!tux_rename_copy_move_success_paths_work()) return 1;
     if (!tux_debug_user_can_access_other_users_file()) return 1;
+    if (!tux_root_list_and_search_hide_mixed_case_temp()) return 1;
+    if (!tux_reserved_device_components_are_rejected()) return 1;
+    if (!tux_failed_overwrite_move_preserves_destination()) return 1;
     return 0;
 }
