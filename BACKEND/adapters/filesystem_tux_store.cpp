@@ -147,8 +147,10 @@ std::vector<std::string> splitApiPath(const std::string& path, bool allowRoot) {
     if (parts.empty() && !allowRoot) {
         throw invalidPath();
     }
-    if (!parts.empty() && lowerAscii(parts.front()) == "temp") {
-        throw invalidPath();
+    for (const auto& component : parts) {
+        if (lowerAscii(component) == "temp") {
+            throw invalidPath();
+        }
     }
     return parts;
 }
@@ -267,9 +269,9 @@ TuxContent readTuxFile(const std::filesystem::path& path, bool includeContent) {
 
 void replaceFile(const std::filesystem::path& from, const std::filesystem::path& to) {
 #ifdef _WIN32
-    if (!MoveFileExA(
-            from.string().c_str(),
-            to.string().c_str(),
+    if (!MoveFileExW(
+            from.wstring().c_str(),
+            to.wstring().c_str(),
             MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH)) {
         throw storageError();
     }

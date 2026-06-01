@@ -405,10 +405,17 @@ bool tux_temp_paths_are_rejected() {
 
     std::filesystem::create_directories(temp.path() / "temp");
     std::filesystem::rename(temp.path() / "source.TUX", temp.path() / "temp" / "existing.TUX");
+    std::filesystem::create_directories(temp.path() / "docs" / "Temp");
+    std::filesystem::copy_file(
+        temp.path() / "temp" / "existing.TUX",
+        temp.path() / "docs" / "Temp" / "nested.TUX"
+    );
     if (!expect(service.create(alice.value.sessionId, "source", false).ok, "source recreate should pass")) return false;
 
     const auto created = service.create(alice.value.sessionId, "temp/new", false);
+    const auto nestedCreated = service.create(alice.value.sessionId, "docs/Temp/new", false);
     const auto read = service.read(alice.value.sessionId, "temp/existing");
+    const auto nestedRead = service.read(alice.value.sessionId, "docs/Temp/nested");
     const auto written = service.write(alice.value.sessionId, "temp/existing", "x");
     const auto deleted = service.deleteFile(alice.value.sessionId, "temp/existing");
     const auto renamedFromTemp = service.renameFile(alice.value.sessionId, "temp/existing", "renamed", false);
@@ -417,9 +424,12 @@ bool tux_temp_paths_are_rejected() {
     const auto renamedToTemp = service.renameFile(alice.value.sessionId, "source", "temp/renamed", false);
     const auto copiedToTemp = service.copyFile(alice.value.sessionId, "source", "temp/copied", false);
     const auto movedToTemp = service.moveFile(alice.value.sessionId, "source", "temp/moved", false);
+    const auto copiedToNestedTemp = service.copyFile(alice.value.sessionId, "source", "docs/Temp/copied", false);
 
     return expectCode(created, tundraux::backend::ErrorCode::InvalidPath, "temp create") &&
+        expectCode(nestedCreated, tundraux::backend::ErrorCode::InvalidPath, "nested temp create") &&
         expectResultCode(read, tundraux::backend::ErrorCode::InvalidPath, "temp read") &&
+        expectResultCode(nestedRead, tundraux::backend::ErrorCode::InvalidPath, "nested temp read") &&
         expectCode(written, tundraux::backend::ErrorCode::InvalidPath, "temp write") &&
         expectCode(deleted, tundraux::backend::ErrorCode::InvalidPath, "temp delete") &&
         expectCode(renamedFromTemp, tundraux::backend::ErrorCode::InvalidPath, "temp rename source") &&
@@ -428,6 +438,7 @@ bool tux_temp_paths_are_rejected() {
         expectCode(renamedToTemp, tundraux::backend::ErrorCode::InvalidPath, "temp rename destination") &&
         expectCode(copiedToTemp, tundraux::backend::ErrorCode::InvalidPath, "temp copy destination") &&
         expectCode(movedToTemp, tundraux::backend::ErrorCode::InvalidPath, "temp move destination") &&
+        expectCode(copiedToNestedTemp, tundraux::backend::ErrorCode::InvalidPath, "nested temp copy destination") &&
         expect(std::filesystem::exists(temp.path() / "source.TUX"), "denied temp move should keep source");
 }
 
