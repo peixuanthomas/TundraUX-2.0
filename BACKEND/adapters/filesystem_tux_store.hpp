@@ -24,8 +24,11 @@ public:
     std::vector<FileEntry> search(const std::string& root, const std::string& query) const override;
 
 private:
+    std::filesystem::path configuredRoot_;
     std::filesystem::path root_;
 
+    void ensureTrustedRoot() const;
+    void rejectUnsafeExistingPathComponents(const std::filesystem::path& resolved) const;
     std::filesystem::path resolveDirectoryPath(const std::string& path, bool allowRoot) const;
     std::filesystem::path resolveFilePath(const std::string& path) const;
     FileEntry entryFromPath(const std::filesystem::path& path) const;

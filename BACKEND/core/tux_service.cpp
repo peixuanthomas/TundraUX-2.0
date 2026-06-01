@@ -58,6 +58,45 @@ bool TuxService::canAccess(const BackendUser& user, const TuxMetadata& metadata)
     return isPrivileged(user) || (!user.name.empty() && metadata.creator == user.name);
 }
 
+std::vector<FileEntry> TuxService::filterVisibleEntries(const BackendUser& user, std::vector<FileEntry> entries) const {
+    if (isPrivileged(user)) {
+        return entries;
+    }
+
+    std::vector<FileEntry> filtered;
+    for (auto& entry : entries) {
+        if (entry.type == FileEntryType::Directory) {
+            filtered.push_back(std::move(entry));
+            continue;
+        }
+        if (canAccess(user, store_.metadata(entry.path))) {
+            filtered.push_back(std::move(entry));
+        }
+    }
+    return filtered;
+}
+
+void TuxService::requireDestinationAccessForOverwrite(
+    const BackendUser& user,
+    const std::string& path,
+    bool overwrite
+) const {
+    if (!overwrite) {
+        return;
+    }
+
+    try {
+        const auto destination = store_.metadata(path);
+        if (!canAccess(user, destination)) {
+            throw BackendException(ErrorCode::PermissionDenied, kAccessDeniedMessage);
+        }
+    } catch (const BackendException& error) {
+        if (error.code() != ErrorCode::NotFound) {
+            throw;
+        }
+    }
+}
+
 TuxMetadata TuxService::newMetadata(const BackendUser& user) const {
     const auto now = currentTime();
     return TuxMetadata{user.name, user.name, now, now};
@@ -76,7 +115,7 @@ ServiceResult<std::vector<FileEntry>> TuxService::list(const std::string& sessio
     }
 
     try {
-        return ServiceResult<std::vector<FileEntry>>::success(store_.list(path));
+        return ServiceResult<std::vector<FileEntry>>::success(filterVisibleEntries(access.value, store_.list(path)));
     } catch (const BackendException& error) {
         return ServiceResult<std::vector<FileEntry>>::failure(error.code(), error.what());
     } catch (const std::exception&) {
@@ -176,6 +215,7 @@ ServiceResult<EmptyResult> TuxService::renameFile(
         if (!canAccess(access.value, existing)) {
             throw BackendException(ErrorCode::PermissionDenied, kAccessDeniedMessage);
         }
+        requireDestinationAccessForOverwrite(access.value, to, overwrite);
         store_.renameFile(from, to, overwrite);
     });
 }
@@ -196,6 +236,7 @@ ServiceResult<EmptyResult> TuxService::copyFile(
         if (!canAccess(access.value, source.metadata)) {
             throw BackendException(ErrorCode::PermissionDenied, kAccessDeniedMessage);
         }
+        requireDestinationAccessForOverwrite(access.value, to, overwrite);
         store_.copyFile(from, to, newMetadata(access.value), overwrite);
     });
 }
@@ -216,6 +257,7 @@ ServiceResult<EmptyResult> TuxService::moveFile(
         if (!canAccess(access.value, existing)) {
             throw BackendException(ErrorCode::PermissionDenied, kAccessDeniedMessage);
         }
+        requireDestinationAccessForOverwrite(access.value, to, overwrite);
         store_.moveFile(from, to, overwrite);
     });
 }
@@ -231,7 +273,7 @@ ServiceResult<std::vector<FileEntry>> TuxService::search(
     }
 
     try {
-        return ServiceResult<std::vector<FileEntry>>::success(store_.search(root, query));
+        return ServiceResult<std::vector<FileEntry>>::success(filterVisibleEntries(access.value, store_.search(root, query)));
     } catch (const BackendException& error) {
         return ServiceResult<std::vector<FileEntry>>::failure(error.code(), error.what());
     } catch (const std::exception&) {

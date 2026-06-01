@@ -28,6 +28,8 @@ private:
 
     ServiceResult<BackendUser> requireTuxAccess(const std::string& sessionId) const;
     bool canAccess(const BackendUser& user, const TuxMetadata& metadata) const;
+    std::vector<FileEntry> filterVisibleEntries(const BackendUser& user, std::vector<FileEntry> entries) const;
+    void requireDestinationAccessForOverwrite(const BackendUser& user, const std::string& path, bool overwrite) const;
     TuxMetadata newMetadata(const BackendUser& user) const;
     TuxMetadata updatedMetadata(const BackendUser& user, TuxMetadata metadata) const;
 };

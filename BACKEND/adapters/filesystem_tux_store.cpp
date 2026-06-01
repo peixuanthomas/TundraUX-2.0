@@ -28,6 +28,7 @@ constexpr std::size_t kMaxContentLength = 16u * 1024u * 1024u;
 constexpr const char* kInvalidPathMessage = "Invalid path.";
 constexpr const char* kNotFoundMessage = "File not found.";
 constexpr const char* kAlreadyExistsMessage = "Destination already exists.";
+constexpr const char* kAccessDeniedMessage = "Access denied.";
 constexpr const char* kStorageErrorMessage = "TUX storage error.";
 constexpr const char* kCorruptTuxMessage = "TUX file is corrupt or unsupported.";
 
@@ -41,6 +42,10 @@ BackendException notFound() {
 
 BackendException alreadyExists() {
     return BackendException(ErrorCode::AlreadyExists, kAlreadyExistsMessage);
+}
+
+BackendException permissionDenied() {
+    return BackendException(ErrorCode::PermissionDenied, kAccessDeniedMessage);
 }
 
 BackendException storageError() {
@@ -76,6 +81,24 @@ std::filesystem::path stableAbsolutePath(const std::filesystem::path& path) {
         return canonical;
     }
     return std::filesystem::absolute(path).lexically_normal();
+}
+
+bool isReparseOrSymlink(const std::filesystem::path& path) {
+    std::error_code error;
+    const auto status = std::filesystem::symlink_status(path, error);
+    if (!error && std::filesystem::is_symlink(status)) {
+        return true;
+    }
+
+#ifdef _WIN32
+    const auto attributes = GetFileAttributesW(path.wstring().c_str());
+    if (attributes != INVALID_FILE_ATTRIBUTES &&
+        (attributes & FILE_ATTRIBUTE_REPARSE_POINT) != 0) {
+        return true;
+    }
+#endif
+
+    return false;
 }
 
 bool isValidComponent(const std::string& component) {
@@ -133,7 +156,8 @@ std::string stripTuxExtension(std::string path) {
 
 bool isTuxFile(const std::filesystem::directory_entry& entry) {
     std::error_code error;
-    return entry.is_regular_file(error) && !error && entry.path().extension() == ".TUX";
+    return !isReparseOrSymlink(entry.path()) &&
+        entry.is_regular_file(error) && !error && entry.path().extension() == ".TUX";
 }
 
 void readExact(std::ifstream& in, void* destination, std::size_t size) {
@@ -309,11 +333,16 @@ void rejectSamePath(const std::filesystem::path& from, const std::filesystem::pa
 } // namespace
 
 FilesystemTuxStore::FilesystemTuxStore(std::string root)
-    : root_(stableAbsolutePath(std::filesystem::path(std::move(root)))) {}
+    : configuredRoot_(std::filesystem::absolute(std::filesystem::path(std::move(root))).lexically_normal()),
+      root_(stableAbsolutePath(configuredRoot_)) {
+    ensureTrustedRoot();
+}
 
 std::vector<FileEntry> FilesystemTuxStore::list(const std::string& path) const {
     try {
+        ensureTrustedRoot();
         const auto directory = resolveDirectoryPath(path, true);
+        rejectUnsafeExistingPathComponents(directory);
         std::error_code error;
         if (!std::filesystem::exists(directory, error)) {
             if (error) {
@@ -332,6 +361,9 @@ std::vector<FileEntry> FilesystemTuxStore::list(const std::string& path) const {
         for (const auto& entry : std::filesystem::directory_iterator(directory)) {
             const auto name = entry.path().filename().string();
             if (name == "temp") {
+                continue;
+            }
+            if (isReparseOrSymlink(entry.path())) {
                 continue;
             }
             std::error_code statusError;
@@ -363,7 +395,10 @@ std::vector<FileEntry> FilesystemTuxStore::list(const std::string& path) const {
 
 TuxMetadata FilesystemTuxStore::metadata(const std::string& path) const {
     try {
-        return readTuxFile(resolveFilePath(path), false).metadata;
+        ensureTrustedRoot();
+        const auto target = resolveFilePath(path);
+        rejectUnsafeExistingPathComponents(target);
+        return readTuxFile(target, false).metadata;
     } catch (const BackendException&) {
         throw;
     } catch (const std::exception&) {
@@ -373,7 +408,10 @@ TuxMetadata FilesystemTuxStore::metadata(const std::string& path) const {
 
 TuxContent FilesystemTuxStore::read(const std::string& path) const {
     try {
-        return readTuxFile(resolveFilePath(path), true);
+        ensureTrustedRoot();
+        const auto target = resolveFilePath(path);
+        rejectUnsafeExistingPathComponents(target);
+        return readTuxFile(target, true);
     } catch (const BackendException&) {
         throw;
     } catch (const std::exception&) {
@@ -383,7 +421,9 @@ TuxContent FilesystemTuxStore::read(const std::string& path) const {
 
 void FilesystemTuxStore::create(const std::string& path, const TuxMetadata& metadata, bool overwrite) {
     try {
+        ensureTrustedRoot();
         const auto destination = resolveFilePath(path);
+        rejectUnsafeExistingPathComponents(destination);
         rejectExistingDestination(destination, overwrite);
         writeTuxFile(destination, "", metadata);
     } catch (const BackendException&) {
@@ -395,7 +435,9 @@ void FilesystemTuxStore::create(const std::string& path, const TuxMetadata& meta
 
 void FilesystemTuxStore::write(const std::string& path, const std::string& content, const TuxMetadata& metadata) {
     try {
+        ensureTrustedRoot();
         const auto destination = resolveFilePath(path);
+        rejectUnsafeExistingPathComponents(destination);
         writeTuxFile(destination, content, metadata);
     } catch (const BackendException&) {
         throw;
@@ -406,7 +448,9 @@ void FilesystemTuxStore::write(const std::string& path, const std::string& conte
 
 void FilesystemTuxStore::deleteFile(const std::string& path) {
     try {
+        ensureTrustedRoot();
         const auto target = resolveFilePath(path);
+        rejectUnsafeExistingPathComponents(target);
         std::error_code error;
         if (!std::filesystem::exists(target, error)) {
             if (error) {
@@ -436,8 +480,11 @@ void FilesystemTuxStore::renameFile(const std::string& from, const std::string& 
 
 void FilesystemTuxStore::copyFile(const std::string& from, const std::string& to, const TuxMetadata& metadata, bool overwrite) {
     try {
+        ensureTrustedRoot();
         const auto source = resolveFilePath(from);
         const auto destination = resolveFilePath(to);
+        rejectUnsafeExistingPathComponents(source);
+        rejectUnsafeExistingPathComponents(destination);
         rejectSamePath(source, destination);
         rejectExistingDestination(destination, overwrite);
         const auto sourceContent = readTuxFile(source, true);
@@ -451,8 +498,11 @@ void FilesystemTuxStore::copyFile(const std::string& from, const std::string& to
 
 void FilesystemTuxStore::moveFile(const std::string& from, const std::string& to, bool overwrite) {
     try {
+        ensureTrustedRoot();
         const auto source = resolveFilePath(from);
         const auto destination = resolveFilePath(to);
+        rejectUnsafeExistingPathComponents(source);
+        rejectUnsafeExistingPathComponents(destination);
         rejectSamePath(source, destination);
         rejectExistingDestination(destination, overwrite);
         std::error_code error;
@@ -491,7 +541,9 @@ void FilesystemTuxStore::moveFile(const std::string& from, const std::string& to
 
 std::vector<FileEntry> FilesystemTuxStore::search(const std::string& root, const std::string& query) const {
     try {
+        ensureTrustedRoot();
         const auto directory = resolveDirectoryPath(root, true);
+        rejectUnsafeExistingPathComponents(directory);
         std::error_code error;
         if (!std::filesystem::exists(directory, error)) {
             if (error) {
@@ -522,6 +574,13 @@ std::vector<FileEntry> FilesystemTuxStore::search(const std::string& root, const
                 error.clear();
                 continue;
             }
+            if (isReparseOrSymlink(iterator->path())) {
+                if (iterator->is_directory(error)) {
+                    iterator.disable_recursion_pending();
+                }
+                error.clear();
+                continue;
+            }
             if (iterator->path().filename() == "temp" && iterator->is_directory(error)) {
                 iterator.disable_recursion_pending();
                 error.clear();
@@ -549,6 +608,46 @@ std::vector<FileEntry> FilesystemTuxStore::search(const std::string& root, const
         throw;
     } catch (const std::exception&) {
         throw storageError();
+    }
+}
+
+void FilesystemTuxStore::ensureTrustedRoot() const {
+    std::error_code error;
+    const bool exists = std::filesystem::exists(configuredRoot_, error);
+    if (error) {
+        throw storageError();
+    }
+    if (!exists) {
+        return;
+    }
+    if (isReparseOrSymlink(configuredRoot_)) {
+        throw permissionDenied();
+    }
+    const auto resolvedRoot = stableAbsolutePath(configuredRoot_);
+    if (resolvedRoot != root_) {
+        throw permissionDenied();
+    }
+}
+
+void FilesystemTuxStore::rejectUnsafeExistingPathComponents(const std::filesystem::path& resolved) const {
+    const auto relative = resolved.lexically_relative(root_);
+    if (relative.empty()) {
+        return;
+    }
+
+    auto current = root_;
+    for (const auto& part : relative) {
+        current /= part;
+        if (isReparseOrSymlink(current)) {
+            throw permissionDenied();
+        }
+        std::error_code error;
+        if (!std::filesystem::exists(current, error)) {
+            return;
+        }
+        if (error) {
+            throw storageError();
+        }
     }
 }
 

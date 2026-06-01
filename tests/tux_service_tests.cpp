@@ -252,6 +252,91 @@ bool invalid_traversal_path_is_rejected() {
         expectCode(create, tundraux::backend::ErrorCode::InvalidPath, "traversal create");
 }
 
+bool tux_regular_user_list_and_search_hide_other_users_files() {
+    TempDirectory temp(uniqueTempPath());
+    InMemoryUserStore users({
+        {"user", "alice", "Password1", "hint", 0},
+        {"user", "bob", "Password1", "hint", 0}
+    });
+    tundraux::backend::SessionService sessions(users);
+    tundraux::backend::FilesystemTuxStore store(temp.path().string());
+    tundraux::backend::TuxService service(store, sessions);
+
+    const auto alice = login(sessions, "alice", "Password1");
+    const auto bob = login(sessions, "bob", "Password1");
+    if (!expect(alice.ok, "alice login should pass")) return false;
+    if (!expect(bob.ok, "bob login should pass")) return false;
+    if (!expect(service.create(alice.value.sessionId, "shared/alice_doc", false).ok, "alice create should pass")) return false;
+    if (!expect(service.create(bob.value.sessionId, "shared/bob_doc", false).ok, "bob create should pass")) return false;
+
+    const auto listed = service.list(bob.value.sessionId, "shared");
+    const auto searched = service.search(bob.value.sessionId, "shared", "doc");
+    if (!expect(listed.ok, "bob filtered list should pass")) return false;
+    if (!expect(searched.ok, "bob filtered search should pass")) return false;
+
+    return expect(listed.value.size() == 1, "bob list should contain only own file") &&
+        expect(listed.value[0].path == "shared/bob_doc", "bob list path mismatch") &&
+        expect(searched.value.size() == 1, "bob search should contain only own file") &&
+        expect(searched.value[0].path == "shared/bob_doc", "bob search path mismatch");
+}
+
+bool tux_regular_user_cannot_overwrite_other_users_destination() {
+    TempDirectory temp(uniqueTempPath());
+    InMemoryUserStore users({
+        {"user", "alice", "Password1", "hint", 0},
+        {"user", "bob", "Password1", "hint", 0}
+    });
+    tundraux::backend::SessionService sessions(users);
+    tundraux::backend::FilesystemTuxStore store(temp.path().string());
+    tundraux::backend::TuxService service(store, sessions);
+
+    const auto alice = login(sessions, "alice", "Password1");
+    const auto bob = login(sessions, "bob", "Password1");
+    if (!expect(alice.ok, "alice login should pass")) return false;
+    if (!expect(bob.ok, "bob login should pass")) return false;
+    if (!expect(service.create(alice.value.sessionId, "shared/alice_dest", false).ok, "alice dest create should pass")) return false;
+    if (!expect(service.write(alice.value.sessionId, "shared/alice_dest", "alice").ok, "alice dest write should pass")) return false;
+    if (!expect(service.create(bob.value.sessionId, "shared/bob_rename", false).ok, "bob rename source create should pass")) return false;
+    if (!expect(service.create(bob.value.sessionId, "shared/bob_copy", false).ok, "bob copy source create should pass")) return false;
+    if (!expect(service.create(bob.value.sessionId, "shared/bob_move", false).ok, "bob move source create should pass")) return false;
+
+    const auto renamed = service.renameFile(bob.value.sessionId, "shared/bob_rename", "shared/alice_dest", true);
+    const auto copied = service.copyFile(bob.value.sessionId, "shared/bob_copy", "shared/alice_dest", true);
+    const auto moved = service.moveFile(bob.value.sessionId, "shared/bob_move", "shared/alice_dest", true);
+    const auto aliceRead = service.read(alice.value.sessionId, "shared/alice_dest");
+
+    return expectCode(renamed, tundraux::backend::ErrorCode::PermissionDenied, "bob overwrite rename") &&
+        expectCode(copied, tundraux::backend::ErrorCode::PermissionDenied, "bob overwrite copy") &&
+        expectCode(moved, tundraux::backend::ErrorCode::PermissionDenied, "bob overwrite move") &&
+        expect(aliceRead.ok, "alice destination read should pass after denied overwrites") &&
+        expect(aliceRead.value.content == "alice", "alice destination content should remain unchanged");
+}
+
+bool tux_store_rejects_symlink_traversal() {
+    TempDirectory temp(uniqueTempPath());
+    TempDirectory outside(uniqueTempPath());
+    tundraux::backend::FilesystemTuxStore outsideStore(outside.path().string());
+    outsideStore.create("secret", tundraux::backend::TuxMetadata{"alice", "alice", 1, 1}, false);
+
+    std::error_code error;
+    std::filesystem::create_directory_symlink(outside.path(), temp.path() / "link", error);
+    if (error) {
+        std::cerr << "Skipping TUX symlink traversal assertion: " << error.message() << "\n";
+        return true;
+    }
+
+    tundraux::backend::FilesystemTuxStore store(temp.path().string());
+    bool rejected = false;
+    try {
+        (void)store.read("link/secret");
+    } catch (const tundraux::backend::BackendException& failure) {
+        rejected = failure.code() == tundraux::backend::ErrorCode::PermissionDenied ||
+            failure.code() == tundraux::backend::ErrorCode::InvalidPath;
+    }
+
+    return expect(rejected, "TUX store should reject symlink traversal");
+}
+
 } // namespace
 
 int main() {
@@ -261,5 +346,8 @@ int main() {
     if (!tux_guest_is_denied_for_list_and_create()) return 1;
     if (!corrupt_tux_file_returns_storage_error()) return 1;
     if (!invalid_traversal_path_is_rejected()) return 1;
+    if (!tux_regular_user_list_and_search_hide_other_users_files()) return 1;
+    if (!tux_regular_user_cannot_overwrite_other_users_destination()) return 1;
+    if (!tux_store_rejects_symlink_traversal()) return 1;
     return 0;
 }
