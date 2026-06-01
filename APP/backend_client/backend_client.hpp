@@ -41,6 +41,7 @@ public:
     explicit BackendClient(BackendLineTransport& transport);
 
     ClientResult<FrontendSession> startGuestSession();
+    ClientResult<FrontendSession> startSession(const FrontendUser& user);
     ClientResult<FrontendSession> login(
         const std::string& sessionId,
         const std::string& username,

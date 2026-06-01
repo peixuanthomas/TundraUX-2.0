@@ -197,6 +197,23 @@ ClientResult<FrontendSession> BackendClient::startGuestSession() {
     );
 }
 
+ClientResult<FrontendSession> BackendClient::startSession(const FrontendUser& user) {
+    JsonValue::Object userParams{
+        {"name", JsonValue::string(user.name)},
+        {"type", JsonValue::string(user.type)}
+    };
+    JsonValue::Object params{
+        {"user", JsonValue::object(std::move(userParams))}
+    };
+    return sendRequest<FrontendSession>(
+        transport_,
+        nextRequestId(),
+        "session.startSession",
+        std::move(params),
+        [](const JsonValue& result) { return parseSession(result); }
+    );
+}
+
 ClientResult<FrontendSession> BackendClient::login(
     const std::string& sessionId,
     const std::string& username,

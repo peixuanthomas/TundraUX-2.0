@@ -89,9 +89,13 @@ bool BackendRuntime::initialize(const BackendRuntimeOptions& options, std::strin
     }
 
     auto backendClient = std::make_unique<BackendClient>(*transport);
-    const auto session = backendClient->startGuestSession();
+    const bool startsAsGuest = options.startupUserType.empty() ||
+        (options.startupUserType == "guest" && options.startupUserName.empty());
+    const auto session = startsAsGuest
+        ? backendClient->startGuestSession()
+        : backendClient->startSession(FrontendUser{options.startupUserName, options.startupUserType});
     if (!session.ok) {
-        error = "Failed to start backend guest session: " + session.message;
+        error = "Failed to start backend session: " + session.message;
         transport->stop();
         legacyDirect_ = false;
         return false;

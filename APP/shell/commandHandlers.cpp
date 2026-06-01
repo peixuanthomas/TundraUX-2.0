@@ -16,6 +16,7 @@
 #include "account_settings.hpp"
 #include "audit_log.hpp"
 #include "backend_runtime.hpp"
+#include "build_info.hpp"
 #include "color.hpp"
 #include "editor.hpp"
 #include "manageusers.hpp"
@@ -513,8 +514,7 @@ void handleTuxFileCommand(const std::string&, USER& currentUser) {
 }
 
 void handleInfoCommand(const std::string&) {
-    constexpr const char* BUILD = "Build: " __TIMESTAMP__;
-    colorcout("cyan", "TundraUX 2.0 " + std::string(BUILD) + "\n");
+    colorcout("cyan", "TundraUX 2.0 Build: " + std::string(tundraux::build_info::timestamp()) + "\n");
 }
 
 void handleManageUsersCommand(const std::string&, USER& currentUser) {

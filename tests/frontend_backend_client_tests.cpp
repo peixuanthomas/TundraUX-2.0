@@ -85,6 +85,29 @@ bool runStartGuestSessionTest() {
         expectRequestMethod(transport, "session.startGuestSession", "start guest");
 }
 
+bool runStartSessionTest() {
+    FakeTransport transport;
+    transport.nextResponse = R"({"id":"1","result":{"sessionId":"debug-1","user":{"name":"debug","type":"debug"}}})";
+    tundraux::frontend::BackendClient client(transport);
+
+    const auto result = client.startSession(tundraux::frontend::FrontendUser{"debug", "debug"});
+
+    tundraux::backend::JsonValue parsed;
+    const auto* request = parseRequestObject(transport, "start session", parsed);
+    if (request == nullptr) {
+        return false;
+    }
+    const auto& params = request->at("params").asObject();
+    const auto& user = params.at("user").asObject();
+    return expect(result.ok, "start session should succeed") &&
+        expect(result.value.sessionId == "debug-1", "start session id mismatch") &&
+        expect(result.value.user.name == "debug", "start session user name mismatch") &&
+        expect(result.value.user.type == "debug", "start session user type mismatch") &&
+        expect(request->at("method").asString() == "session.startSession", "start session method mismatch") &&
+        expect(user.at("name").asString() == "debug", "start session name param mismatch") &&
+        expect(user.at("type").asString() == "debug", "start session type param mismatch");
+}
+
 bool runListUsersErrorTest() {
     FakeTransport transport;
     transport.nextResponse = R"({"id":"1","error":{"code":"PermissionDenied","message":"Admin access required."}})";
@@ -358,6 +381,7 @@ int main(int argc, char* argv[]) {
     }
 
     if (!runStartGuestSessionTest()) return 1;
+    if (!runStartSessionTest()) return 1;
     if (!runListUsersErrorTest()) return 1;
     if (!runReadFileSuccessTest()) return 1;
     if (!runWhoamiMalformedResponseTest()) return 1;

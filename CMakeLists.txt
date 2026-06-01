@@ -14,6 +14,18 @@ option(TUNDRAUX_DEBUG_STARTUP "Start TundraUX2 in debug mode without logging in.
 set(TUNDRATUI_BUILD_EXAMPLES ON CACHE BOOL "Build TundraTUI example programs.")
 add_subdirectory(TundraTUI)
 
+set(TUNDRAUX_GENERATED_DIR "${CMAKE_CURRENT_BINARY_DIR}/generated")
+set(TUNDRAUX_BUILD_INFO_HEADER "${TUNDRAUX_GENERATED_DIR}/tundraux_build_info_generated.hpp")
+
+add_custom_target(tundraux_generate_build_info
+    COMMAND ${CMAKE_COMMAND}
+        -DOUTPUT_FILE=${TUNDRAUX_BUILD_INFO_HEADER}
+        -P ${PROJECT_SOURCE_DIR}/cmake/GenerateBuildInfo.cmake
+    BYPRODUCTS ${TUNDRAUX_BUILD_INFO_HEADER}
+    COMMENT "Generating TundraUX build timestamp"
+    VERBATIM
+)
+
 add_library(tundraux_backend_core
     BACKEND/core/file_service.cpp
     BACKEND/core/json.cpp
@@ -122,6 +134,7 @@ set(TUNDRAUX_USER_SOURCES
 
 set(TUNDRAUX_SYSTEM_SOURCES
     SYSTEM/audit/audit_log.cpp
+    SYSTEM/build_info/build_info.cpp
     SYSTEM/crypto/crypto.cpp
     SYSTEM/debug/debug.cpp
 )
@@ -146,10 +159,12 @@ target_include_directories(${PROJECT_NAME}
         ${PROJECT_SOURCE_DIR}/USER/account
         ${PROJECT_SOURCE_DIR}/USER/udata
         ${PROJECT_SOURCE_DIR}/SYSTEM/audit
+        ${PROJECT_SOURCE_DIR}/SYSTEM/build_info
         ${PROJECT_SOURCE_DIR}/SYSTEM/console
         ${PROJECT_SOURCE_DIR}/SYSTEM/crypto
         ${PROJECT_SOURCE_DIR}/SYSTEM/debug
         ${PROJECT_SOURCE_DIR}/BACKEND/core
+        ${TUNDRAUX_GENERATED_DIR}
 )
 
 target_link_libraries(${PROJECT_NAME}
@@ -163,7 +178,7 @@ target_compile_features(${PROJECT_NAME}
         cxx_std_17
 )
 
-add_dependencies(${PROJECT_NAME} tundraux_backend_stdio)
+add_dependencies(${PROJECT_NAME} tundraux_backend_stdio tundraux_generate_build_info)
 
 add_custom_command(TARGET ${PROJECT_NAME} POST_BUILD
     COMMAND ${CMAKE_COMMAND} -E copy_if_different
@@ -200,6 +215,26 @@ target_compile_features(audit_log_tests
 )
 
 add_test(NAME audit_log_tests COMMAND audit_log_tests)
+
+add_executable(build_info_tests
+    tests/build_info_tests.cpp
+    SYSTEM/build_info/build_info.cpp
+)
+
+target_include_directories(build_info_tests
+    PRIVATE
+        ${PROJECT_SOURCE_DIR}/SYSTEM/build_info
+        ${CMAKE_CURRENT_BINARY_DIR}/generated
+)
+
+target_compile_features(build_info_tests
+    PRIVATE
+        cxx_std_17
+)
+
+add_dependencies(build_info_tests tundraux_generate_build_info)
+
+add_test(NAME build_info_tests COMMAND build_info_tests)
 
 add_executable(explorer_permissions_tests
     tests/explorer_permissions_tests.cpp

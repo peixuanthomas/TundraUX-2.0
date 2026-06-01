@@ -48,7 +48,11 @@ std::string SessionService::nextSessionId() {
 }
 
 SessionInfo SessionService::startGuestSession() {
-    SessionInfo session{nextSessionId(), guestUser()};
+    return startSession(guestUser());
+}
+
+SessionInfo SessionService::startSession(BackendUser user) {
+    SessionInfo session{nextSessionId(), std::move(user)};
     sessions_[session.sessionId] = session.user;
     return session;
 }

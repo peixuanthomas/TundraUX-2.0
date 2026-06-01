@@ -42,6 +42,7 @@ public:
     explicit SessionService(UserStore& users);
 
     SessionInfo startGuestSession();
+    SessionInfo startSession(BackendUser user);
     ServiceResult<SessionInfo> login(
         const std::string& sessionId,
         const std::string& username,

@@ -1,4 +1,5 @@
 #include "debug.hpp"
+#include "build_info.hpp"
 #include "color.hpp"
 #include "editor.hpp"
 #include "hello.hpp"
@@ -234,8 +235,7 @@ void handleDebugForceLoginCommand(const std::string& input, USER& currentUser) {
 }
 
 void dbg_env() {
-    constexpr const char* BUILD_TIME = __TIMESTAMP__;
-    colorcout("cyan", "[DBG] Build timestamp : " + std::string(BUILD_TIME) + "\n");
+    colorcout("cyan", "[DBG] Build timestamp : " + std::string(tundraux::build_info::timestamp()) + "\n");
 #if defined(_MSC_VER)
     colorcout("cyan", "[DBG] Compiler        : MSVC " + std::to_string(_MSC_VER) + "\n");
 #elif defined(__GNUC__)

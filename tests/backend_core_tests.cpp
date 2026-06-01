@@ -64,6 +64,15 @@ int main() {
     if (!expect(secondGuest.sessionId != guest.sessionId, "guest session ids should be unique")) return 1;
     if (!expect(secondGuest.sessionId != "session-2", "second guest session id should not be predictable")) return 1;
 
+    const auto debugStartup = sessions.startSession(BackendUser{"debug", "debug", "", "", 0});
+    if (!expect(!debugStartup.sessionId.empty(), "debug startup session id is empty")) return 1;
+    if (!expect(debugStartup.sessionId != guest.sessionId, "debug startup session id should be unique")) return 1;
+    if (!expect(debugStartup.user.type == "debug", "debug startup type mismatch")) return 1;
+    if (!expect(debugStartup.user.name == "debug", "debug startup name mismatch")) return 1;
+    const auto debugStartupWhoami = sessions.whoami(debugStartup.sessionId);
+    if (!expect(debugStartupWhoami.ok, "debug startup whoami should pass")) return 1;
+    if (!expect(debugStartupWhoami.value.type == "debug", "debug startup whoami type mismatch")) return 1;
+
     const auto badLogin = sessions.login(guest.sessionId, "alice", "bad");
     if (!expect(!badLogin.ok, "bad login should fail")) return 1;
     if (!expect(badLogin.error.code == ErrorCode::AuthenticationFailed, "bad login error mismatch")) return 1;
@@ -121,6 +130,10 @@ int main() {
     if (!expect(resetWhoami.value.name.empty(), "reset persistence failure should not set session name")) return 1;
 
     UserService userService(store, sessions);
+    const auto debugStartupUsers = userService.listUsers(debugStartup.sessionId);
+    if (!expect(debugStartupUsers.ok, "debug startup listUsers should pass")) return 1;
+    if (!expect(debugStartupUsers.value.size() == 4, "debug startup listUsers count mismatch")) return 1;
+
     const auto missingUsers = userService.listUsers("missing");
     if (!expect(!missingUsers.ok, "missing session listUsers should fail")) return 1;
     if (!expect(missingUsers.error.code == ErrorCode::SessionExpired, "missing session listUsers error mismatch")) return 1;

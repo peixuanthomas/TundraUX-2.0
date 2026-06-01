@@ -60,6 +60,14 @@ std::string requiredStringParam(const JsonValue::Object& params, const std::stri
     return found->second.asString();
 }
 
+const JsonValue::Object& requiredObjectParam(const JsonValue::Object& params, const std::string& name) {
+    const auto found = params.find(name);
+    if (found == params.end() || found->second.type() != JsonValue::Type::Object) {
+        throw RpcError(ErrorCode::InvalidParams, "Missing or invalid parameter: " + name + ".");
+    }
+    return found->second.asObject();
+}
+
 void throwIfFailed(const BackendError& error) {
     throw RpcError(error.code, error.message);
 }
@@ -119,6 +127,17 @@ std::string JsonRpcDispatcher::handleLine(const std::string& line) {
 JsonValue JsonRpcDispatcher::dispatch(const std::string& method, const JsonValue::Object& params) {
     if (method == "session.startGuestSession") {
         return sessionToJson(sessions_.startGuestSession());
+    }
+
+    if (method == "session.startSession") {
+        const auto& user = requiredObjectParam(params, "user");
+        return sessionToJson(sessions_.startSession(BackendUser{
+            requiredStringParam(user, "type"),
+            requiredStringParam(user, "name"),
+            "",
+            "",
+            0
+        }));
     }
 
     if (method == "session.login") {

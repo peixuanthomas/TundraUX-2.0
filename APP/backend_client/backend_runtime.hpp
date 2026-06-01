@@ -14,6 +14,8 @@ struct BackendRuntimeOptions {
     std::string backendStdioPath;
     std::string userDataPath = "user_data.dat";
     std::string filesRoot = "Files";
+    std::string startupUserType = "guest";
+    std::string startupUserName;
 };
 
 class BackendRuntime {

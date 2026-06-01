@@ -10,6 +10,14 @@
 #include <string>
 #include <fstream>
 
+#ifndef TUNDRAUX_DEFAULT_USER_TYPE
+#define TUNDRAUX_DEFAULT_USER_TYPE "guest"
+#endif
+
+#ifndef TUNDRAUX_DEFAULT_USER_NAME
+#define TUNDRAUX_DEFAULT_USER_NAME ""
+#endif
+
 namespace {
 
 tundraux::frontend::BackendRuntime* backendRuntimeForExit = nullptr;
@@ -64,6 +72,8 @@ int enterShell(tundraux::frontend::BackendRuntime& backendRuntime, const tundrau
 
 int main(int argc, char* argv[]) {
     tundraux::frontend::BackendRuntimeOptions backendOptions;
+    backendOptions.startupUserType = TUNDRAUX_DEFAULT_USER_TYPE;
+    backendOptions.startupUserName = TUNDRAUX_DEFAULT_USER_NAME;
     if (!parseArgs(argc, argv, backendOptions)) {
         printUsage();
         pause();
