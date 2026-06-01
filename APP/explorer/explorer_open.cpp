@@ -37,6 +37,11 @@ void openSelected(ExplorerState& state) {
     }
     const std::string selectedPath = pathToDisplayString(selected.path);
 
+    if (state.backend != nullptr) {
+        state.message = redMessage("Opening files is disabled in backend mode until editor I/O uses backend RPC.");
+        return;
+    }
+
     if (extensionOf(selected.path) == ".tux") {
         tundraux::audit::logEvent("explorer", "open " + selectedPath);
         std::cout << "\x1b[?25h" << std::flush;

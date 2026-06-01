@@ -1678,6 +1678,11 @@ void file_editor(
         else if (cmd=="rmdir" || cmd=="rd") { std::string d; std::getline(iss>>std::ws, d); removeTuxDir(d); }
         else if (cmd=="ex" || cmd=="export") {
             std::string f; std::getline(iss>>std::ws, f);
+            if (g_tuxBackend != nullptr) {
+                colorcout("RED","Export is disabled in backend mode until it is served by backend RPC.\n");
+                logTuxOperation("export", "denied", f.empty() ? "(empty)" : f, "backend mode unsupported");
+                continue;
+            }
             if (!hasPrivilege()) {
                 colorcout("RED","Access denied: You don't have the required privileges\n");
                 logTuxOperation("export", "denied", f.empty() ? "(empty)" : f, "insufficient privilege");
@@ -1687,6 +1692,11 @@ void file_editor(
         }
         else if (cmd=="im" || cmd=="import") {
             std::string f; std::getline(iss>>std::ws, f);
+            if (g_tuxBackend != nullptr) {
+                colorcout("RED","Import is disabled in backend mode until it is served by backend RPC.\n");
+                logTuxOperation("import", "denied", f.empty() ? "(empty)" : f, "backend mode unsupported");
+                continue;
+            }
             if (!hasPrivilege()) {
                 colorcout("RED","Access denied: You don't have the required privileges\n");
                 logTuxOperation("import", "denied", f.empty() ? "(empty)" : f, "insufficient privilege");
@@ -1695,6 +1705,10 @@ void file_editor(
             importTxtFile(f);
         }
         else if (cmd=="m" || cmd=="meta" || cmd=="metadata" || cmd=="info") {
+            if (g_tuxBackend != nullptr) {
+                colorcout("RED","Metadata is disabled in backend mode until it is served by backend RPC.\n");
+                continue;
+            }
             if (!hasPrivilege()) { colorcout("RED","Access denied: You don't have the required privileges\n"); continue; }
             std::string f; std::getline(iss>>std::ws, f); viewMetadata(f);
         }

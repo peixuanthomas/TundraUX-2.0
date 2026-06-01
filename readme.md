@@ -1,8 +1,8 @@
 # TundraUX 2.0
 
-TundraUX 2.0 is a Windows-only C++ console application that combines a small interactive shell, user account management, and an encrypted `.TUX` file manager.
+TundraUX 2.0 is a C++ console application that combines a small interactive shell, user account management, and an encrypted `.TUX` file manager.
 
-The project is built with CMake and C++17. It uses Windows console APIs for screen control, colored output, hidden password input, command history, and the inline editor.
+The project is built with CMake and C++17. The full frontend uses Windows console APIs for screen control, colored output, hidden password input, command history, and the inline editor. The local backend is built separately and is intended to stay cross-platform.
 
 ## Features
 
@@ -18,11 +18,11 @@ The project is built with CMake and C++17. It uses Windows console APIs for scre
 
 ## Requirements
 
-- Windows
+- Windows for the full frontend
 - CMake 3.15 or newer
 - A C++17-capable compiler, such as MSVC or MinGW-w64
 
-This project currently stops configuration on non-Windows systems because it depends on Windows-specific console APIs.
+On non-Windows systems, configure a backend-only build with `TUNDRAUX_BUILD_FRONTEND=OFF`; this is also the default outside Windows.
 
 ## Build
 
@@ -33,15 +33,22 @@ cmake --build build
 
 The main frontend executable is named `TundraUX2`.
 
-### Backend Phase 2 And Phase 3 First Batch
+For a backend-only build:
 
-The project also builds `tundraux_backend_stdio`, the local backend process boundary for the frontend/backend split. It exposes line-delimited JSON-RPC over stdin/stdout and supports session startup, login/logout/whoami, user listing, and plain file operations (`file.listDirectory`, `file.readFile`, `file.writeFile`).
+```powershell
+cmake -B build-backend -DTUNDRAUX_BUILD_FRONTEND=OFF
+cmake --build build-backend
+```
 
-`TundraUX2` now starts the local stdio backend by default. The main shell account commands (`login`, `logout`, `whoami`, `listuser`) and the plain text editor path (`edit <filename>`) use the backend in default mode. Use `--legacy-direct` to run the previous direct frontend logic for debugging.
+### Backend Split Status
+
+The project also builds `tundraux_backend_stdio`, the local backend process boundary for the frontend/backend split. It exposes line-delimited JSON-RPC over stdin/stdout and supports sessions, login/logout, current-profile lookup, user listing and account mutations, strict-mode state, plain file operations, and TUX file operations.
+
+`TundraUX2` now starts the local stdio backend by default. In default backend mode, `login`, `logout`, `whoami`, `listuser`, `modify`, `strict`, `edit <filename>`, system command authorization for `/<cmd>`, Explorer first-batch file operations, and TUX File Manager first-batch file commands are served through `tundraux_backend_stdio`. Use `--legacy-direct` to run the previous direct frontend logic for debugging.
 
 Phase 3 first-batch file migration moves Explorer and main TUX File Manager file operations through the local backend. Explorer refresh, folder creation, delete, copy/move paste, and search use backend APIs. TUX File Manager list/create/view/edit/delete/rename/copy/move/find/mkdir/rmdir use backend APIs.
 
-TUX import/export/metadata commands, full audit API migration, HTTP transport, remote access, and shared daemon mode remain future work.
+While the split is incomplete, backend mode intentionally disables local direct paths that would bypass backend authorization: `manageuser`, `importdata`, `export log`, Explorer direct file open, and TUX import/export/metadata. User management TUI migration, audit API migration, HTTP transport, remote access, and shared daemon mode remain future work.
 
 ## Validation
 
@@ -89,10 +96,10 @@ The main shell prompt changes according to the current session:
 | `logout` | Log out the current user |
 | `modify` | Change the current user's password or password hint |
 | `listuser` | List registered users |
-| `manageuser` | Open the user management interface; admin/debug only |
+| `manageuser` | Open the user management interface; admin/debug only; disabled in backend mode until migrated |
 | `TUXfile` | Open the TUX File Manager; user/admin/debug only |
 | `edit [filename]` | Open the text editor for a plain file under `Files` |
-| `importdata` | Import legacy user data; admin/debug only |
+| `importdata` | Import legacy user data; admin/debug only; disabled in backend mode |
 | `time` | Show local time and Unix timestamp |
 | `license` | Display the license text |
 | `info` | Show build information |
@@ -102,7 +109,7 @@ The main shell prompt changes according to the current session:
 
 Debug-only commands are hidden from normal help output and include editor backend inspection, forced login, display color testing, and diagnostic utilities.
 
-In the default backend mode, `login`, `logout`, `whoami`, `listuser`, `edit <filename>`, Explorer first-batch file operations, and TUX File Manager first-batch file commands are served through `tundraux_backend_stdio`. `listuser` is available only to admin/debug users in backend mode. Legacy direct mode is available with `--legacy-direct`.
+In the default backend mode, `login`, `logout`, `whoami`, `listuser`, `modify`, `strict`, `edit <filename>`, Explorer first-batch file operations, and TUX File Manager first-batch file commands are served through `tundraux_backend_stdio`. `listuser` is available only to admin/debug users in backend mode. Legacy direct mode is available with `--legacy-direct`.
 
 ## User Roles
 
@@ -113,7 +120,7 @@ In the default backend mode, `login`, `logout`, `whoami`, `listuser`, `edit <fil
 | `admin` | Can manage users and use privileged TUX import/export/metadata commands |
 | `debug` | Has unrestricted development access |
 
-Login failures are counted per user. After more than 7 failed attempts, the account is disabled until an admin or debug user resets the count through user management.
+Login failures are counted per user. After more than 7 failed attempts, the account is disabled until an admin or debug user resets the count through user management. In backend mode, the user-management TUI is currently disabled until its backend migration is complete.
 
 Password changes made through `modify` require:
 
@@ -194,7 +201,7 @@ These commands require `admin` or `debug`.
 
 ## Editor
 
-The editor can be opened from the main shell for plain files or from the TUX File Manager for `.TUX` files.
+The editor can be opened from the main shell for plain files or from the TUX File Manager for `.TUX` files. In backend mode, direct Explorer file open is disabled until Explorer editor I/O is migrated to backend RPC.
 
 | Key | Action |
 | --- | --- |

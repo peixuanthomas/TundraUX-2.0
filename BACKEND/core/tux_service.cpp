@@ -11,6 +11,7 @@ namespace {
 
 constexpr const char* kAccessDeniedMessage = "Access denied.";
 constexpr const char* kTuxStorageErrorMessage = "TUX storage error.";
+constexpr const char* kReadUserDataError = "Unable to read user data.";
 
 bool isPrivileged(const BackendUser& user) {
     std::string type = user.type;
@@ -18,6 +19,10 @@ bool isPrivileged(const BackendUser& user) {
         return static_cast<char>(std::tolower(ch));
     });
     return type == "admin" || type == "debug";
+}
+
+bool isSyntheticDebugUser(const BackendUser& user) {
+    return isPrivileged(user) && user.type == "debug" && user.name == "debug" && user.password.empty();
 }
 
 std::time_t currentTime() {
@@ -40,18 +45,38 @@ ServiceResult<EmptyResult> runTuxMutation(Func func) {
 
 } // namespace
 
-TuxService::TuxService(TuxStore& store, const SessionService& sessions)
-    : store_(store), sessions_(sessions) {}
+TuxService::TuxService(TuxStore& store, const SessionService& sessions, const UserStore& users)
+    : store_(store), sessions_(sessions), users_(users) {}
 
 ServiceResult<BackendUser> TuxService::requireTuxAccess(const std::string& sessionId) const {
     const auto session = sessions_.requireSession(sessionId);
     if (!session.ok) {
         return ServiceResult<BackendUser>::failure(session.error.code, session.error.message);
     }
-    if (session.value.type == "guest") {
+    if (session.value.type == "guest" || session.value.name.empty()) {
         return ServiceResult<BackendUser>::failure(ErrorCode::PermissionDenied, kAccessDeniedMessage);
     }
-    return session;
+    if (isSyntheticDebugUser(session.value)) {
+        return ServiceResult<BackendUser>::success(session.value);
+    }
+
+    std::vector<BackendUser> users;
+    try {
+        users = users_.listUsers();
+    } catch (const std::exception&) {
+        return ServiceResult<BackendUser>::failure(ErrorCode::StorageError, kReadUserDataError);
+    }
+
+    const auto found = std::find_if(users.begin(), users.end(), [&](const BackendUser& user) {
+        return user.name == session.value.name;
+    });
+    if (found == users.end()) {
+        return ServiceResult<BackendUser>::failure(ErrorCode::NotFound, "User not found.");
+    }
+    if (found->type == "guest" || found->name.empty() || found->failedCount > 7) {
+        return ServiceResult<BackendUser>::failure(ErrorCode::PermissionDenied, kAccessDeniedMessage);
+    }
+    return ServiceResult<BackendUser>::success(*found);
 }
 
 bool TuxService::canAccess(const BackendUser& user, const TuxMetadata& metadata) const {

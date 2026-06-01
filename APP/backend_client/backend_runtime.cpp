@@ -3,6 +3,9 @@
 #include "backend_process.hpp"
 
 #include <filesystem>
+#include <iomanip>
+#include <random>
+#include <sstream>
 #include <string>
 #include <utility>
 #include <vector>
@@ -20,6 +23,20 @@ namespace {
 
 std::string pathToString(const std::filesystem::path& path) {
     return path.u8string();
+}
+
+std::string randomToken() {
+    std::random_device device;
+    std::ostringstream out;
+    out << std::hex << std::setfill('0');
+    for (int i = 0; i < 4; ++i) {
+        out << std::setw(8) << device();
+    }
+    return out.str();
+}
+
+bool isDebugStartup(const BackendRuntimeOptions& options) {
+    return options.startupUserType == "debug" && !options.startupUserName.empty();
 }
 
 std::filesystem::path currentExecutableDirectoryPath() {
@@ -111,19 +128,18 @@ bool BackendRuntime::initialize(const BackendRuntimeOptions& options, std::strin
         return false;
     }
 
+    const std::string debugSessionToken = isDebugStartup(options) ? randomToken() : std::string{};
     auto transport = std::make_unique<BackendProcessTransport>();
-    if (!transport->start(backendPath, options.userDataPath, filesRoot)) {
+    if (!transport->start(backendPath, options.userDataPath, filesRoot, debugSessionToken)) {
         error = "Failed to start backend stdio process: " + backendPath;
         legacyDirect_ = false;
         return false;
     }
 
     auto backendClient = std::make_unique<BackendClient>(*transport);
-    const bool startsAsGuest = options.startupUserType.empty() ||
-        (options.startupUserType == "guest" && options.startupUserName.empty());
-    const auto session = startsAsGuest
-        ? backendClient->startGuestSession()
-        : backendClient->startSession(FrontendUser{options.startupUserName, options.startupUserType});
+    const auto session = isDebugStartup(options)
+        ? backendClient->startDebugSession(debugSessionToken)
+        : backendClient->startGuestSession();
     if (!session.ok) {
         error = "Failed to start backend session: " + session.message;
         transport->stop();

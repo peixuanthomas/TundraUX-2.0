@@ -2,6 +2,7 @@
 
 #include "session_service.hpp"
 #include "tux_store.hpp"
+#include "user_store.hpp"
 
 #include <string>
 #include <vector>
@@ -10,7 +11,7 @@ namespace tundraux::backend {
 
 class TuxService {
 public:
-    TuxService(TuxStore& store, const SessionService& sessions);
+    TuxService(TuxStore& store, const SessionService& sessions, const UserStore& users);
 
     ServiceResult<std::vector<FileEntry>> list(const std::string& sessionId, const std::string& path) const;
     ServiceResult<TuxContent> read(const std::string& sessionId, const std::string& path) const;
@@ -25,6 +26,7 @@ public:
 private:
     TuxStore& store_;
     const SessionService& sessions_;
+    const UserStore& users_;
 
     ServiceResult<BackendUser> requireTuxAccess(const std::string& sessionId) const;
     bool canAccess(const BackendUser& user, const TuxMetadata& metadata) const;

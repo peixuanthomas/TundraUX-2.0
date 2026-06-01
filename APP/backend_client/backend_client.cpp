@@ -58,12 +58,36 @@ std::string requiredStringField(const JsonValue::Object& object, const std::stri
     return field.asString();
 }
 
+std::string optionalStringField(const JsonValue::Object& object, const std::string& name) {
+    const auto* field = objectField(object, name);
+    if (field == nullptr) {
+        return "";
+    }
+    if (field->type() != JsonValue::Type::String) {
+        throw std::logic_error("expected string");
+    }
+    return field->asString();
+}
+
 bool requiredBooleanField(const JsonValue::Object& object, const std::string& name) {
     const auto& field = requiredObjectField(object, name);
     if (field.type() != JsonValue::Type::Boolean) {
         throw std::logic_error("expected boolean");
     }
     return field.asBoolean();
+}
+
+int optionalIntField(const JsonValue::Object& object, const std::string& name) {
+    const auto* field = objectField(object, name);
+    if (field == nullptr) {
+        return 0;
+    }
+    if (field->type() != JsonValue::Type::Number ||
+        !std::isfinite(field->asNumber()) ||
+        std::floor(field->asNumber()) != field->asNumber()) {
+        throw std::logic_error("expected integer");
+    }
+    return static_cast<int>(field->asNumber());
 }
 
 FrontendUser parseUser(const JsonValue& value) {
@@ -73,7 +97,9 @@ FrontendUser parseUser(const JsonValue& value) {
     const auto& object = value.asObject();
     return FrontendUser{
         requiredStringField(object, "name"),
-        requiredStringField(object, "type")
+        requiredStringField(object, "type"),
+        optionalStringField(object, "passwordHint"),
+        optionalIntField(object, "failedCount")
     };
 }
 
@@ -146,6 +172,19 @@ FrontendTuxContent parseTuxContent(const JsonValue& result) {
 
 JsonValue::Object paramsWithSession(const std::string& sessionId) {
     return JsonValue::Object{{"sessionId", JsonValue::string(sessionId)}};
+}
+
+JsonValue::Object userObjectParams(const FrontendUser& user, const std::string& password, bool includePassword) {
+    JsonValue::Object object{
+        {"name", JsonValue::string(user.name)},
+        {"type", JsonValue::string(user.type)},
+        {"passwordHint", JsonValue::string(user.passwordHint)},
+        {"failedCount", JsonValue::number(static_cast<double>(user.failedCount))}
+    };
+    if (includePassword) {
+        object.emplace("password", JsonValue::string(password));
+    }
+    return object;
 }
 
 JsonValue::Object paramsWithPath(const std::string& sessionId, const std::string& path) {
@@ -261,19 +300,12 @@ ClientResult<FrontendSession> BackendClient::startGuestSession() {
     );
 }
 
-ClientResult<FrontendSession> BackendClient::startSession(const FrontendUser& user) {
-    JsonValue::Object userParams{
-        {"name", JsonValue::string(user.name)},
-        {"type", JsonValue::string(user.type)}
-    };
-    JsonValue::Object params{
-        {"user", JsonValue::object(std::move(userParams))}
-    };
+ClientResult<FrontendSession> BackendClient::startDebugSession(const std::string& token) {
     return sendRequest<FrontendSession>(
         transport_,
         nextRequestId(),
-        "session.startSession",
-        std::move(params),
+        "session.startDebugSession",
+        JsonValue::Object{{"token", JsonValue::string(token)}},
         [](const JsonValue& result) { return parseSession(result); }
     );
 }
@@ -345,6 +377,145 @@ ClientResult<std::vector<FrontendUser>> BackendClient::listUsers(const std::stri
             }
             return parsedUsers;
         }
+    );
+}
+
+ClientResult<FrontendUser> BackendClient::currentProfile(const std::string& sessionId) {
+    return sendRequest<FrontendUser>(
+        transport_,
+        nextRequestId(),
+        "user.currentProfile",
+        paramsWithSession(sessionId),
+        [](const JsonValue& result) {
+            if (result.type() != JsonValue::Type::Object) {
+                throw std::logic_error("expected current profile result object");
+            }
+            return parseUser(requiredObjectField(result.asObject(), "user"));
+        }
+    );
+}
+
+ClientResult<bool> BackendClient::createUser(
+    const std::string& sessionId,
+    const FrontendUser& user,
+    const std::string& password
+) {
+    JsonValue::Object params = paramsWithSession(sessionId);
+    params.emplace("user", JsonValue::object(userObjectParams(user, password, true)));
+    return sendRequest<bool>(
+        transport_,
+        nextRequestId(),
+        "user.createUser",
+        std::move(params),
+        [](const JsonValue& result) { return parseOkResult(result); }
+    );
+}
+
+ClientResult<bool> BackendClient::updateUser(
+    const std::string& sessionId,
+    const std::string& originalName,
+    const FrontendUser& user,
+    bool passwordProvided,
+    const std::string& password
+) {
+    JsonValue::Object params = paramsWithSession(sessionId);
+    params.emplace("originalName", JsonValue::string(originalName));
+    params.emplace("passwordProvided", JsonValue::boolean(passwordProvided));
+    params.emplace("user", JsonValue::object(userObjectParams(user, password, passwordProvided)));
+    return sendRequest<bool>(
+        transport_,
+        nextRequestId(),
+        "user.updateUser",
+        std::move(params),
+        [](const JsonValue& result) { return parseOkResult(result); }
+    );
+}
+
+ClientResult<bool> BackendClient::deleteUser(const std::string& sessionId, const std::string& name) {
+    JsonValue::Object params = paramsWithSession(sessionId);
+    params.emplace("name", JsonValue::string(name));
+    return sendRequest<bool>(
+        transport_,
+        nextRequestId(),
+        "user.deleteUser",
+        std::move(params),
+        [](const JsonValue& result) { return parseOkResult(result); }
+    );
+}
+
+ClientResult<bool> BackendClient::resetFailedCount(const std::string& sessionId, const std::string& name) {
+    JsonValue::Object params = paramsWithSession(sessionId);
+    params.emplace("name", JsonValue::string(name));
+    return sendRequest<bool>(
+        transport_,
+        nextRequestId(),
+        "user.resetFailedCount",
+        std::move(params),
+        [](const JsonValue& result) { return parseOkResult(result); }
+    );
+}
+
+ClientResult<bool> BackendClient::disableUser(const std::string& sessionId, const std::string& name) {
+    JsonValue::Object params = paramsWithSession(sessionId);
+    params.emplace("name", JsonValue::string(name));
+    return sendRequest<bool>(
+        transport_,
+        nextRequestId(),
+        "user.disableUser",
+        std::move(params),
+        [](const JsonValue& result) { return parseOkResult(result); }
+    );
+}
+
+ClientResult<bool> BackendClient::updateOwnAccount(
+    const std::string& sessionId,
+    bool passwordProvided,
+    const std::string& password,
+    bool passwordHintProvided,
+    const std::string& passwordHint
+) {
+    JsonValue::Object params = paramsWithSession(sessionId);
+    params.emplace("passwordProvided", JsonValue::boolean(passwordProvided));
+    params.emplace("passwordHintProvided", JsonValue::boolean(passwordHintProvided));
+    if (passwordProvided) {
+        params.emplace("password", JsonValue::string(password));
+    }
+    if (passwordHintProvided) {
+        params.emplace("passwordHint", JsonValue::string(passwordHint));
+    }
+    return sendRequest<bool>(
+        transport_,
+        nextRequestId(),
+        "user.updateOwnAccount",
+        std::move(params),
+        [](const JsonValue& result) { return parseOkResult(result); }
+    );
+}
+
+ClientResult<bool> BackendClient::getStrictMode(const std::string& sessionId) {
+    return sendRequest<bool>(
+        transport_,
+        nextRequestId(),
+        "user.getStrictMode",
+        paramsWithSession(sessionId),
+        [](const JsonValue& result) {
+            if (result.type() != JsonValue::Type::Object) {
+                throw std::logic_error("expected strict result object");
+            }
+            return requiredBooleanField(result.asObject(), "enabled");
+        }
+    );
+}
+
+ClientResult<bool> BackendClient::setStrictMode(const std::string& sessionId, bool enabled) {
+    JsonValue::Object params = paramsWithSession(sessionId);
+    params.emplace("enabled", JsonValue::boolean(enabled));
+    return sendRequest<bool>(
+        transport_,
+        nextRequestId(),
+        "user.setStrictMode",
+        std::move(params),
+        [](const JsonValue& result) { return parseOkResult(result); }
     );
 }
 

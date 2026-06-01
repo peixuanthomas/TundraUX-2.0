@@ -1,6 +1,7 @@
 #include "json_rpc.hpp"
 
 #include <exception>
+#include <limits>
 #include <string>
 #include <utility>
 #include <vector>
@@ -33,7 +34,9 @@ private:
 JsonValue userToJson(const BackendUser& user) {
     return JsonValue::object({
         {"name", JsonValue::string(user.name)},
-        {"type", JsonValue::string(user.type)}
+        {"type", JsonValue::string(user.type)},
+        {"passwordHint", JsonValue::string(user.passwordHint)},
+        {"failedCount", JsonValue::number(static_cast<double>(user.failedCount))}
     });
 }
 
@@ -72,12 +75,60 @@ bool optionalBoolParam(const JsonValue::Object& params, const std::string& name,
     return found->second.asBoolean();
 }
 
+bool requiredBoolParam(const JsonValue::Object& params, const std::string& name) {
+    const auto found = params.find(name);
+    if (found == params.end() || found->second.type() != JsonValue::Type::Boolean) {
+        throw RpcError(ErrorCode::InvalidParams, "Missing or invalid parameter: " + name + ".");
+    }
+    return found->second.asBoolean();
+}
+
+std::string optionalStringParam(const JsonValue::Object& params, const std::string& name, const std::string& defaultValue = "") {
+    const auto found = params.find(name);
+    if (found == params.end()) {
+        return defaultValue;
+    }
+    if (found->second.type() != JsonValue::Type::String) {
+        throw RpcError(ErrorCode::InvalidParams, "Missing or invalid parameter: " + name + ".");
+    }
+    return found->second.asString();
+}
+
+int optionalIntParam(const JsonValue::Object& params, const std::string& name, int defaultValue = 0) {
+    const auto found = params.find(name);
+    if (found == params.end()) {
+        return defaultValue;
+    }
+    if (found->second.type() != JsonValue::Type::Number) {
+        throw RpcError(ErrorCode::InvalidParams, "Missing or invalid parameter: " + name + ".");
+    }
+    const double number = found->second.asNumber();
+    if (number < static_cast<double>(std::numeric_limits<int>::min()) ||
+        number > static_cast<double>(std::numeric_limits<int>::max()) ||
+        number != static_cast<double>(static_cast<int>(number))) {
+        throw RpcError(ErrorCode::InvalidParams, "Missing or invalid parameter: " + name + ".");
+    }
+    return static_cast<int>(number);
+}
+
 const JsonValue::Object& requiredObjectParam(const JsonValue::Object& params, const std::string& name) {
     const auto found = params.find(name);
     if (found == params.end() || found->second.type() != JsonValue::Type::Object) {
         throw RpcError(ErrorCode::InvalidParams, "Missing or invalid parameter: " + name + ".");
     }
     return found->second.asObject();
+}
+
+BackendUser userFromJson(const JsonValue::Object& object, bool requirePassword) {
+    BackendUser user;
+    user.type = requiredStringParam(object, "type");
+    user.name = requiredStringParam(object, "name");
+    user.password = requirePassword
+        ? requiredStringParam(object, "password")
+        : optionalStringParam(object, "password");
+    user.passwordHint = optionalStringParam(object, "passwordHint");
+    user.failedCount = optionalIntParam(object, "failedCount");
+    return user;
 }
 
 void throwIfFailed(const BackendError& error) {
@@ -94,14 +145,35 @@ JsonValue entriesToJson(const std::vector<FileEntry>& value) {
 
 } // namespace
 
-JsonRpcDispatcher::JsonRpcDispatcher(SessionService& sessions, UserService& users, FileService& files, TuxService& tux)
-    : sessions_(sessions), users_(users), files_(&files), tux_(&tux) {}
+JsonRpcDispatcher::JsonRpcDispatcher(
+    SessionService& sessions,
+    UserService& users,
+    FileService& files,
+    TuxService& tux,
+    std::string debugSessionToken
+) : sessions_(sessions),
+    users_(users),
+    files_(&files),
+    tux_(&tux),
+    debugSessionToken_(std::move(debugSessionToken)) {}
 
-JsonRpcDispatcher::JsonRpcDispatcher(SessionService& sessions, UserService& users, FileService& files)
-    : sessions_(sessions), users_(users), files_(&files) {}
+JsonRpcDispatcher::JsonRpcDispatcher(
+    SessionService& sessions,
+    UserService& users,
+    FileService& files,
+    std::string debugSessionToken
+) : sessions_(sessions),
+    users_(users),
+    files_(&files),
+    debugSessionToken_(std::move(debugSessionToken)) {}
 
-JsonRpcDispatcher::JsonRpcDispatcher(SessionService& sessions, UserService& users)
-    : sessions_(sessions), users_(users) {}
+JsonRpcDispatcher::JsonRpcDispatcher(
+    SessionService& sessions,
+    UserService& users,
+    std::string debugSessionToken
+) : sessions_(sessions),
+    users_(users),
+    debugSessionToken_(std::move(debugSessionToken)) {}
 
 std::string JsonRpcDispatcher::handleLine(const std::string& line) {
     JsonValue id = JsonValue::null();
@@ -152,15 +224,12 @@ JsonValue JsonRpcDispatcher::dispatch(const std::string& method, const JsonValue
         return sessionToJson(sessions_.startGuestSession());
     }
 
-    if (method == "session.startSession") {
-        const auto& user = requiredObjectParam(params, "user");
-        return sessionToJson(sessions_.startSession(BackendUser{
-            requiredStringParam(user, "type"),
-            requiredStringParam(user, "name"),
-            "",
-            "",
-            0
-        }));
+    if (method == "session.startDebugSession") {
+        const std::string token = requiredStringParam(params, "token");
+        if (debugSessionToken_.empty() || token != debugSessionToken_) {
+            throw RpcError(ErrorCode::PermissionDenied, "Access Denied.");
+        }
+        return sessionToJson(sessions_.startSession(BackendUser{"debug", "debug", "", "", 0}));
     }
 
     if (method == "session.login") {
@@ -201,6 +270,109 @@ JsonValue JsonRpcDispatcher::dispatch(const std::string& method, const JsonValue
             jsonUsers.push_back(userToJson(user));
         }
         return JsonValue::object({{"users", JsonValue::array(std::move(jsonUsers))}});
+    }
+
+    if (method == "user.currentProfile") {
+        const auto result = users_.currentProfile(requiredStringParam(params, "sessionId"));
+        if (!result.ok) {
+            throwIfFailed(result.error);
+        }
+        return JsonValue::object({{"user", userToJson(result.value)}});
+    }
+
+    if (method == "user.createUser") {
+        const auto& user = requiredObjectParam(params, "user");
+        const auto result = users_.createUser(
+            requiredStringParam(params, "sessionId"),
+            userFromJson(user, true)
+        );
+        if (!result.ok) {
+            throwIfFailed(result.error);
+        }
+        return JsonValue::object({{"ok", JsonValue::boolean(true)}});
+    }
+
+    if (method == "user.updateUser") {
+        const auto& user = requiredObjectParam(params, "user");
+        const bool passwordProvided = optionalBoolParam(params, "passwordProvided");
+        const auto result = users_.updateUser(
+            requiredStringParam(params, "sessionId"),
+            requiredStringParam(params, "originalName"),
+            userFromJson(user, passwordProvided),
+            passwordProvided
+        );
+        if (!result.ok) {
+            throwIfFailed(result.error);
+        }
+        return JsonValue::object({{"ok", JsonValue::boolean(true)}});
+    }
+
+    if (method == "user.deleteUser") {
+        const auto result = users_.deleteUser(
+            requiredStringParam(params, "sessionId"),
+            requiredStringParam(params, "name")
+        );
+        if (!result.ok) {
+            throwIfFailed(result.error);
+        }
+        return JsonValue::object({{"ok", JsonValue::boolean(true)}});
+    }
+
+    if (method == "user.resetFailedCount") {
+        const auto result = users_.resetFailedCount(
+            requiredStringParam(params, "sessionId"),
+            requiredStringParam(params, "name")
+        );
+        if (!result.ok) {
+            throwIfFailed(result.error);
+        }
+        return JsonValue::object({{"ok", JsonValue::boolean(true)}});
+    }
+
+    if (method == "user.disableUser") {
+        const auto result = users_.disableUser(
+            requiredStringParam(params, "sessionId"),
+            requiredStringParam(params, "name")
+        );
+        if (!result.ok) {
+            throwIfFailed(result.error);
+        }
+        return JsonValue::object({{"ok", JsonValue::boolean(true)}});
+    }
+
+    if (method == "user.updateOwnAccount") {
+        const bool passwordProvided = optionalBoolParam(params, "passwordProvided");
+        const bool passwordHintProvided = optionalBoolParam(params, "passwordHintProvided");
+        const auto result = users_.updateOwnAccount(
+            requiredStringParam(params, "sessionId"),
+            passwordProvided,
+            passwordProvided ? requiredStringParam(params, "password") : std::string{},
+            passwordHintProvided,
+            passwordHintProvided ? requiredStringParam(params, "passwordHint") : std::string{}
+        );
+        if (!result.ok) {
+            throwIfFailed(result.error);
+        }
+        return JsonValue::object({{"ok", JsonValue::boolean(true)}});
+    }
+
+    if (method == "user.getStrictMode") {
+        const auto result = users_.getStrictMode(requiredStringParam(params, "sessionId"));
+        if (!result.ok) {
+            throwIfFailed(result.error);
+        }
+        return JsonValue::object({{"enabled", JsonValue::boolean(result.value)}});
+    }
+
+    if (method == "user.setStrictMode") {
+        const auto result = users_.setStrictMode(
+            requiredStringParam(params, "sessionId"),
+            requiredBoolParam(params, "enabled")
+        );
+        if (!result.ok) {
+            throwIfFailed(result.error);
+        }
+        return JsonValue::object({{"ok", JsonValue::boolean(true)}});
     }
 
     if (files_ != nullptr && method == "file.listDirectory") {

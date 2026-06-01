@@ -5,9 +5,13 @@ project(TundraUX2
     LANGUAGES CXX
 )
 
-if(NOT WIN32)
-    message(FATAL_ERROR "TundraUX2 currently requires Windows-specific console APIs.")
+if(WIN32)
+    set(TUNDRAUX_BUILD_FRONTEND_DEFAULT ON)
+else()
+    set(TUNDRAUX_BUILD_FRONTEND_DEFAULT OFF)
 endif()
+
+option(TUNDRAUX_BUILD_FRONTEND "Build the Windows console frontend and frontend tests." ${TUNDRAUX_BUILD_FRONTEND_DEFAULT})
 
 option(TUNDRAUX_DEBUG_STARTUP "Start TundraUX2 in debug mode without logging in." ON)
 
@@ -92,6 +96,113 @@ target_compile_features(tundraux_backend_stdio
     PRIVATE
         cxx_std_17
 )
+
+enable_testing()
+
+add_executable(backend_core_tests
+    tests/backend_core_tests.cpp
+)
+
+target_include_directories(backend_core_tests
+    PRIVATE
+        ${PROJECT_SOURCE_DIR}/BACKEND/core
+)
+
+target_link_libraries(backend_core_tests
+    PRIVATE
+        tundraux_backend_core
+)
+
+target_compile_features(backend_core_tests
+    PRIVATE
+        cxx_std_17
+)
+
+add_test(NAME backend_core_tests COMMAND backend_core_tests)
+
+add_executable(backend_file_service_tests
+    tests/backend_file_service_tests.cpp
+)
+
+target_link_libraries(backend_file_service_tests
+    PRIVATE
+        tundraux_backend_adapters
+)
+
+target_compile_features(backend_file_service_tests
+    PRIVATE
+        cxx_std_17
+)
+
+add_test(NAME backend_file_service_tests COMMAND backend_file_service_tests)
+
+add_executable(tux_service_tests
+    tests/tux_service_tests.cpp
+)
+
+target_include_directories(tux_service_tests
+    PRIVATE
+        ${PROJECT_SOURCE_DIR}/BACKEND/core
+        ${PROJECT_SOURCE_DIR}/BACKEND/adapters
+)
+
+target_link_libraries(tux_service_tests
+    PRIVATE
+        tundraux_backend_core
+        tundraux_backend_adapters
+)
+
+target_compile_features(tux_service_tests
+    PRIVATE
+        cxx_std_17
+)
+
+add_test(NAME tux_service_tests COMMAND tux_service_tests)
+
+add_executable(backend_json_rpc_tests
+    tests/backend_json_rpc_tests.cpp
+)
+
+target_link_libraries(backend_json_rpc_tests
+    PRIVATE
+        tundraux_backend_core
+)
+
+target_compile_features(backend_json_rpc_tests
+    PRIVATE
+        cxx_std_17
+)
+
+add_test(NAME backend_json_rpc_tests COMMAND backend_json_rpc_tests)
+
+add_executable(backend_stdio_tests
+    tests/backend_stdio_tests.cpp
+)
+
+target_include_directories(backend_stdio_tests
+    PRIVATE
+        ${PROJECT_SOURCE_DIR}/SYSTEM/crypto
+)
+
+target_link_libraries(backend_stdio_tests
+    PRIVATE
+        tundraux_backend_core
+        tundraux_backend_adapters
+)
+
+target_compile_features(backend_stdio_tests
+    PRIVATE
+        cxx_std_17
+)
+
+add_dependencies(backend_stdio_tests tundraux_backend_stdio)
+
+add_test(NAME backend_stdio_tests COMMAND backend_stdio_tests $<TARGET_FILE:tundraux_backend_stdio>)
+
+if(TUNDRAUX_BUILD_FRONTEND)
+if(NOT WIN32)
+    message(FATAL_ERROR "TUNDRAUX_BUILD_FRONTEND requires Windows-specific console APIs.")
+endif()
 
 add_executable(${PROJECT_NAME})
 
@@ -189,8 +300,6 @@ add_custom_command(TARGET ${PROJECT_NAME} POST_BUILD
         $<TARGET_FILE:tundraux_backend_stdio>
         $<TARGET_FILE_DIR:${PROJECT_NAME}>
 )
-
-enable_testing()
 
 add_executable(audit_log_tests
     tests/audit_log_tests.cpp
@@ -326,106 +435,6 @@ target_compile_features(tundratui_footer_hint_tests
 
 add_test(NAME tundratui_footer_hint_tests COMMAND tundratui_footer_hint_tests)
 
-add_executable(backend_core_tests
-    tests/backend_core_tests.cpp
-)
-
-target_include_directories(backend_core_tests
-    PRIVATE
-        ${PROJECT_SOURCE_DIR}/BACKEND/core
-)
-
-target_link_libraries(backend_core_tests
-    PRIVATE
-        tundraux_backend_core
-)
-
-target_compile_features(backend_core_tests
-    PRIVATE
-        cxx_std_17
-)
-
-add_test(NAME backend_core_tests COMMAND backend_core_tests)
-
-add_executable(backend_file_service_tests
-    tests/backend_file_service_tests.cpp
-)
-
-target_link_libraries(backend_file_service_tests
-    PRIVATE
-        tundraux_backend_adapters
-)
-
-target_compile_features(backend_file_service_tests
-    PRIVATE
-        cxx_std_17
-)
-
-add_test(NAME backend_file_service_tests COMMAND backend_file_service_tests)
-
-add_executable(tux_service_tests
-    tests/tux_service_tests.cpp
-)
-
-target_include_directories(tux_service_tests
-    PRIVATE
-        ${PROJECT_SOURCE_DIR}/BACKEND/core
-        ${PROJECT_SOURCE_DIR}/BACKEND/adapters
-)
-
-target_link_libraries(tux_service_tests
-    PRIVATE
-        tundraux_backend_core
-        tundraux_backend_adapters
-)
-
-target_compile_features(tux_service_tests
-    PRIVATE
-        cxx_std_17
-)
-
-add_test(NAME tux_service_tests COMMAND tux_service_tests)
-
-add_executable(backend_json_rpc_tests
-    tests/backend_json_rpc_tests.cpp
-)
-
-target_link_libraries(backend_json_rpc_tests
-    PRIVATE
-        tundraux_backend_core
-)
-
-target_compile_features(backend_json_rpc_tests
-    PRIVATE
-        cxx_std_17
-)
-
-add_test(NAME backend_json_rpc_tests COMMAND backend_json_rpc_tests)
-
-add_executable(backend_stdio_tests
-    tests/backend_stdio_tests.cpp
-)
-
-target_include_directories(backend_stdio_tests
-    PRIVATE
-        ${PROJECT_SOURCE_DIR}/SYSTEM/crypto
-)
-
-target_link_libraries(backend_stdio_tests
-    PRIVATE
-        tundraux_backend_core
-        tundraux_backend_adapters
-)
-
-target_compile_features(backend_stdio_tests
-    PRIVATE
-        cxx_std_17
-)
-
-add_dependencies(backend_stdio_tests tundraux_backend_stdio)
-
-add_test(NAME backend_stdio_tests COMMAND backend_stdio_tests $<TARGET_FILE:tundraux_backend_stdio>)
-
 add_executable(frontend_backend_client_tests
     tests/frontend_backend_client_tests.cpp
     APP/backend_client/backend_client.cpp
@@ -488,4 +497,6 @@ else()
             TUNDRAUX_DEFAULT_USER_TYPE="guest"
             TUNDRAUX_DEFAULT_USER_NAME=""
     )
+endif()
+
 endif()

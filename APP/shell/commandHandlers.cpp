@@ -308,6 +308,39 @@ void displayLocalWhoami(const USER& currentUser) {
         colorcout("white", "Current user: " + currentUser.name + " (" + currentUser.type + ")\n");
     }
 }
+
+void syncCurrentUserToGuest(USER& currentUser) {
+    currentUser = guestUser();
+    tundraux::audit::setCurrentUser(currentUser);
+}
+
+bool syncCurrentUserFromBackend(USER& currentUser, tundraux::frontend::BackendRuntime& backendRuntime) {
+    auto* client = backendRuntime.client();
+    if (client == nullptr || backendRuntime.sessionId().empty()) {
+        syncCurrentUserToGuest(currentUser);
+        return false;
+    }
+
+    const auto profile = client->currentProfile(backendRuntime.sessionId());
+    if (profile.ok) {
+        currentUser = shellUserFromBackend(profile.value);
+        tundraux::audit::setCurrentUser(currentUser);
+        return true;
+    }
+
+    syncCurrentUserToGuest(currentUser);
+    return false;
+}
+
+void recoverBackendGuestSession(USER& currentUser, tundraux::frontend::BackendRuntime& backendRuntime) {
+    backendRuntime.setSessionId("");
+    if (refreshBackendGuestSession(backendRuntime)) {
+        if (syncCurrentUserFromBackend(currentUser, backendRuntime)) {
+            return;
+        }
+    }
+    syncCurrentUserToGuest(currentUser);
+}
 }
 
 void handleLoginCommand(
@@ -394,7 +427,14 @@ void handleExitCommand(const std::string&) {
     exit(0);
 }
 
-void handleImportDataCommand(const std::string&) {
+void handleImportDataCommand(
+    const std::string&,
+    tundraux::frontend::BackendRuntime* backendRuntime
+) {
+    if (usesBackend(backendRuntime)) {
+        colorcout("red", "Import data is disabled in backend mode until it is served by backend RPC.\n");
+        return;
+    }
     ReadOldFile();
 }
 
@@ -410,8 +450,12 @@ void handleTimeCommand(const std::string&) {
     colorcout("white", "Timestamp: " + std::to_string(ts) + "\n");
 }
 
-void handleModifyCommand(const std::string&, USER& currentUser) {
-    open_account_settings(currentUser);
+void handleModifyCommand(
+    const std::string&,
+    USER& currentUser,
+    tundraux::frontend::BackendRuntime* backendRuntime
+) {
+    open_account_settings(currentUser, backendRuntime);
 }
 
 void renderShellHeader() {
@@ -521,7 +565,15 @@ void handleInfoCommand(const std::string&) {
     colorcout("cyan", "TundraUX 2.0 Build: " + std::string(tundraux::build_info::timestamp()) + "\n");
 }
 
-void handleManageUsersCommand(const std::string&, USER& currentUser) {
+void handleManageUsersCommand(
+    const std::string&,
+    USER& currentUser,
+    tundraux::frontend::BackendRuntime* backendRuntime
+) {
+    if (usesBackend(backendRuntime)) {
+        colorcout("red", "User management is disabled in backend mode until it is served by backend RPC.\n");
+        return;
+    }
     manage_users(currentUser);
 }
 
@@ -644,7 +696,7 @@ void handleWhoamiCommand(
         return;
     }
 
-    const auto result = client->whoami(backendRuntime->sessionId());
+    const auto result = client->currentProfile(backendRuntime->sessionId());
     if (!result.ok) {
         colorcout("yellow", backendFailureMessage("Unable to query backend session.", result.errorCode) + "\n");
         return;
@@ -655,7 +707,11 @@ void handleWhoamiCommand(
     displayLocalWhoami(currentUser);
 }
 
-void handleStrictCommand(const std::string& input, USER& currentUser) {
+void handleStrictCommand(
+    const std::string& input,
+    USER& currentUser,
+    tundraux::frontend::BackendRuntime* backendRuntime
+) {
     std::istringstream iss(input);
     std::string command;
     std::string action;
@@ -664,6 +720,62 @@ void handleStrictCommand(const std::string& input, USER& currentUser) {
 
     if (!extra.empty()) {
         colorcout("yellow", "Usage: strict <status|on|off>\n");
+        return;
+    }
+
+    if (usesBackend(backendRuntime)) {
+        auto* client = backendRuntime->client();
+        if (client == nullptr) {
+            syncCurrentUserToGuest(currentUser);
+            colorcout("red", "Backend unavailable.\n");
+            return;
+        }
+        if (!ensureBackendSession(*backendRuntime)) {
+            syncCurrentUserToGuest(currentUser);
+            return;
+        }
+
+        syncCurrentUserFromBackend(currentUser, *backendRuntime);
+
+        if (action.empty() || action == "status") {
+            const auto strictResult = client->getStrictMode(backendRuntime->sessionId());
+            if (!strictResult.ok) {
+                if (strictResult.errorCode == "SessionExpired") {
+                    recoverBackendGuestSession(currentUser, *backendRuntime);
+                } else if (strictResult.errorCode == "PermissionDenied") {
+                    syncCurrentUserFromBackend(currentUser, *backendRuntime);
+                }
+                colorcout("yellow", backendFailureMessage("Unable to query strict mode.", strictResult.errorCode) + "\n");
+                return;
+            }
+
+            tundraux::audit::refreshStrictMode();
+            colorcout("white", "Strict mode: " + std::string(strictResult.value ? "on" : "off") + "\n");
+            tundraux::audit::logEvent("strict", "status " + std::string(strictResult.value ? "on" : "off"));
+            return;
+        }
+
+        if (action != "on" && action != "off") {
+            colorcout("yellow", "Usage: strict <status|on|off>\n");
+            return;
+        }
+
+        const bool enabled = action == "on";
+        const auto setResult = client->setStrictMode(backendRuntime->sessionId(), enabled);
+        if (!setResult.ok) {
+            if (setResult.errorCode == "SessionExpired") {
+                recoverBackendGuestSession(currentUser, *backendRuntime);
+            } else if (setResult.errorCode == "PermissionDenied") {
+                syncCurrentUserFromBackend(currentUser, *backendRuntime);
+            }
+            colorcout("red", backendFailureMessage("Failed to update strict mode.", setResult.errorCode) + "\n");
+            return;
+        }
+
+        tundraux::audit::setCurrentUser(currentUser);
+        tundraux::audit::refreshStrictMode();
+        tundraux::audit::logEvent("strict", enabled ? "enabled" : "disabled");
+        colorcout("green", enabled ? "Strict mode enabled.\n" : "Strict mode disabled.\n");
         return;
     }
 
@@ -687,17 +799,16 @@ void handleStrictCommand(const std::string& input, USER& currentUser) {
     }
 
     tundraux::audit::setCurrentUser(currentUser);
-    if (enabled) {
-        tundraux::audit::refreshStrictMode();
-        tundraux::audit::logEvent("strict", "enabled");
-    } else {
-        tundraux::audit::logEvent("strict", "disabled");
-        tundraux::audit::refreshStrictMode();
-    }
+    tundraux::audit::refreshStrictMode();
+    tundraux::audit::logEvent("strict", enabled ? "enabled" : "disabled");
     colorcout("green", enabled ? "Strict mode enabled.\n" : "Strict mode disabled.\n");
 }
 
-void handleExportCommand(const std::string& input, USER& currentUser) {
+void handleExportCommand(
+    const std::string& input,
+    USER& currentUser,
+    tundraux::frontend::BackendRuntime* backendRuntime
+) {
     std::istringstream iss(input);
     std::string command;
     std::string subcommand;
@@ -708,6 +819,11 @@ void handleExportCommand(const std::string& input, USER& currentUser) {
 
     if (subcommand != "log" || path.empty()) {
         colorcout("yellow", "Usage: export log <tlog-file>\n");
+        return;
+    }
+
+    if (usesBackend(backendRuntime)) {
+        colorcout("red", "Export log is disabled in backend mode until it is served by backend RPC.\n");
         return;
     }
 

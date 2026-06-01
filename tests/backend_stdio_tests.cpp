@@ -30,7 +30,7 @@ bool runGuestSessionSmokeTest() {
     tundraux::backend::FilesystemFileStore filesStore(
         (std::filesystem::temp_directory_path() / "tundraux_backend_stdio_smoke_files").string()
     );
-    tundraux::backend::FileService files(filesStore, sessions);
+    tundraux::backend::FileService files(filesStore, sessions, store);
     tundraux::backend::JsonRpcDispatcher dispatcher(sessions, users, files);
 
     const std::string response = dispatcher.handleLine(R"({"id":"1","method":"session.startGuestSession","params":{}})");
@@ -116,7 +116,7 @@ bool responseHasStorageErrorWithNoStdoutLeak(const std::filesystem::path& path, 
     tundraux::backend::UserService users(store, sessions);
     const auto filesRoot = uniqueTempPath(label + "_files");
     tundraux::backend::FilesystemFileStore filesStore(filesRoot.string());
-    tundraux::backend::FileService files(filesStore, sessions);
+    tundraux::backend::FileService files(filesStore, sessions, store);
     tundraux::backend::JsonRpcDispatcher dispatcher(sessions, users, files);
     const std::string sessionId = startGuestSession(dispatcher);
     if (sessionId.empty()) {

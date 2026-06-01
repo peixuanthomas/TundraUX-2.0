@@ -114,4 +114,68 @@ bool DataManagerUserStore::updateUser(const std::string& name, const BackendUser
     return dataManager.UpdateUser(name, toLegacyUser(user));
 }
 
+bool DataManagerUserStore::addUser(const BackendUser& user) {
+    const StorageState storage = classifyStorage(filename_);
+    if (storage == StorageState::Missing ||
+        storage == StorageState::Invalid ||
+        storage == StorageState::ExistingEmptyFile) {
+        throw std::runtime_error("Unable to read user data.");
+    }
+
+    ScopedStdoutSilencer silenceStdout;
+    DataManager dataManager(filename_);
+    if (storage == StorageState::ExistingNonEmptyFile && dataManager.GetAllUsers().empty()) {
+        throw std::runtime_error("Unable to read user data.");
+    }
+    return dataManager.AddUser(toLegacyUser(user));
+}
+
+bool DataManagerUserStore::removeUser(const std::string& name) {
+    const StorageState storage = classifyStorage(filename_);
+    if (storage == StorageState::Missing ||
+        storage == StorageState::Invalid ||
+        storage == StorageState::ExistingEmptyFile) {
+        throw std::runtime_error("Unable to read user data.");
+    }
+
+    ScopedStdoutSilencer silenceStdout;
+    DataManager dataManager(filename_);
+    if (storage == StorageState::ExistingNonEmptyFile && dataManager.GetAllUsers().empty()) {
+        throw std::runtime_error("Unable to read user data.");
+    }
+    return dataManager.RemoveUser(name);
+}
+
+bool DataManagerUserStore::getStrictMode() const {
+    const StorageState storage = classifyStorage(filename_);
+    if (storage == StorageState::Missing ||
+        storage == StorageState::Invalid ||
+        storage == StorageState::ExistingEmptyFile) {
+        throw std::runtime_error("Unable to read user data.");
+    }
+
+    ScopedStdoutSilencer silenceStdout;
+    DataManager dataManager(filename_);
+    if (storage == StorageState::ExistingNonEmptyFile && dataManager.GetAllUsers().empty()) {
+        throw std::runtime_error("Unable to read user data.");
+    }
+    return dataManager.GetStrictMode();
+}
+
+bool DataManagerUserStore::setStrictMode(bool enabled) {
+    const StorageState storage = classifyStorage(filename_);
+    if (storage == StorageState::Missing ||
+        storage == StorageState::Invalid ||
+        storage == StorageState::ExistingEmptyFile) {
+        throw std::runtime_error("Unable to read user data.");
+    }
+
+    ScopedStdoutSilencer silenceStdout;
+    DataManager dataManager(filename_);
+    if (storage == StorageState::ExistingNonEmptyFile && dataManager.GetAllUsers().empty()) {
+        throw std::runtime_error("Unable to read user data.");
+    }
+    return dataManager.SetStrictMode(enabled);
+}
+
 } // namespace tundraux::backend

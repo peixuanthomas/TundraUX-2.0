@@ -37,6 +37,87 @@ bool canRunSystemCommand(const USER& currentUser) {
     return currentUser.type == "admin" || currentUser.type == "debug";
 }
 
+bool usesBackendRuntime(tundraux::frontend::BackendRuntime* backendRuntime) {
+    return backendRuntime != nullptr && !backendRuntime->legacyDirect();
+}
+
+USER guestShellUser() {
+    return {
+        "guest",
+        "",
+        "",
+        "",
+        0
+    };
+}
+
+USER shellUserFromBackend(const tundraux::frontend::FrontendUser& user) {
+    return {
+        user.type,
+        user.name,
+        "",
+        "",
+        0
+    };
+}
+
+bool syncSystemCommandUserFromBackend(
+    USER& currentUser,
+    tundraux::frontend::BackendRuntime& backendRuntime,
+    std::string& denyMessage
+) {
+    auto* client = backendRuntime.client();
+    if (client == nullptr) {
+        currentUser = guestShellUser();
+        tundraux::audit::setCurrentUser(currentUser);
+        denyMessage = "Backend unavailable.";
+        return false;
+    }
+
+    if (backendRuntime.sessionId().empty()) {
+        const auto guestSession = client->startGuestSession();
+        if (!guestSession.ok) {
+            currentUser = guestShellUser();
+            tundraux::audit::setCurrentUser(currentUser);
+            denyMessage = guestSession.errorCode == "TransportError"
+                ? "Backend unavailable."
+                : "Backend session unavailable.";
+            return false;
+        }
+        backendRuntime.setSessionId(guestSession.value.sessionId);
+        currentUser = shellUserFromBackend(guestSession.value.user);
+        tundraux::audit::setCurrentUser(currentUser);
+    }
+
+    const auto profileResult = client->currentProfile(backendRuntime.sessionId());
+    if (profileResult.ok) {
+        currentUser = shellUserFromBackend(profileResult.value);
+        tundraux::audit::setCurrentUser(currentUser);
+        denyMessage = "Access Denied.";
+        return canRunSystemCommand(currentUser);
+    }
+
+    if (profileResult.errorCode == "SessionExpired") {
+        const auto guestSession = client->startGuestSession();
+        if (guestSession.ok) {
+            backendRuntime.setSessionId(guestSession.value.sessionId);
+            currentUser = shellUserFromBackend(guestSession.value.user);
+        } else {
+            currentUser = guestShellUser();
+        }
+        tundraux::audit::setCurrentUser(currentUser);
+        denyMessage = "Backend session expired.";
+        return false;
+    }
+
+    currentUser = guestShellUser();
+    tundraux::audit::setCurrentUser(currentUser);
+    denyMessage = profileResult.errorCode == "PermissionDenied"
+        ? "Access Denied."
+        : "Unable to verify backend identity.";
+    return false;
+}
+
 bool redrawsShellHeader(const std::string& input) {
     std::istringstream iss(input);
     std::string command;
@@ -98,6 +179,15 @@ void task_main(tundraux::frontend::BackendRuntime* backendRuntime) {
         historyIndex = -1;
 
         if (input.length() > 1 && input[0] == '/') {
+            if (usesBackendRuntime(backendRuntime)) {
+                std::string denyMessage;
+                if (!syncSystemCommandUserFromBackend(currentUser, *backendRuntime, denyMessage)) {
+                    tundraux::audit::logEvent("shell", "system denied backend");
+                    colorcout("red", denyMessage + "\n");
+                    continue;
+                }
+            }
+
             if (!canRunSystemCommand(currentUser)) {
                 tundraux::audit::logEvent("shell", "system denied");
                 colorcout("red", "Access Denied.\n");
