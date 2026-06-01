@@ -419,6 +419,44 @@ bool filesystem_file_store_rejects_regular_file_conflicts() {
            expect(nonEmptyRejected, "non-recursive rmdir should reject non-empty directory");
 }
 
+bool filesystem_file_store_rejects_temp_targets() {
+    TempDirectory temp(uniqueTempPath());
+    tundraux::backend::FilesystemFileStore store(temp.path().string());
+    store.writeFile("source.txt", "alpha");
+
+    bool createTempRejected = false;
+    bool writeTempChildRejected = false;
+    bool copyTempChildRejected = false;
+    bool moveTempChildRejected = false;
+    try {
+        store.createDirectory("temp");
+    } catch (const tundraux::backend::BackendException& error) {
+        createTempRejected = error.code() == tundraux::backend::ErrorCode::PermissionDenied;
+    }
+    try {
+        store.writeFile("temp/child.txt", "x");
+    } catch (const tundraux::backend::BackendException& error) {
+        writeTempChildRejected = error.code() == tundraux::backend::ErrorCode::PermissionDenied;
+    }
+    try {
+        store.copyFile("source.txt", "temp/copy.txt", false);
+    } catch (const tundraux::backend::BackendException& error) {
+        copyTempChildRejected = error.code() == tundraux::backend::ErrorCode::PermissionDenied;
+    }
+    try {
+        store.moveFile("source.txt", "temp/moved.txt", false);
+    } catch (const tundraux::backend::BackendException& error) {
+        moveTempChildRejected = error.code() == tundraux::backend::ErrorCode::PermissionDenied;
+    }
+
+    return expect(createTempRejected, "createDirectory should reject temp") &&
+           expect(writeTempChildRejected, "writeFile should reject temp child") &&
+           expect(copyTempChildRejected, "copyFile should reject temp child") &&
+           expect(moveTempChildRejected, "moveFile should reject temp child") &&
+           expect(!std::filesystem::exists(temp.path() / "temp"), "rejected temp operations should not create temp") &&
+           expect(store.readFile("source.txt").content == "alpha", "rejected temp move should keep source");
+}
+
 bool filesystem_file_store_move_does_not_fallback_on_regular_rename_failure() {
 #ifdef _WIN32
     TempDirectory temp(uniqueTempPath());
@@ -457,6 +495,46 @@ bool filesystem_file_store_move_does_not_fallback_on_regular_rename_failure() {
 #endif
 }
 
+bool filesystem_file_store_failed_overwrite_move_keeps_destination() {
+#ifdef _WIN32
+    TempDirectory temp(uniqueTempPath());
+    tundraux::backend::FilesystemFileStore store(temp.path().string());
+    store.writeFile("source.txt", "source");
+    store.writeFile("destination.txt", "destination");
+
+    const auto source = temp.path() / "source.txt";
+    const HANDLE lock = CreateFileW(
+        source.wstring().c_str(),
+        GENERIC_READ,
+        FILE_SHARE_READ,
+        nullptr,
+        OPEN_EXISTING,
+        FILE_ATTRIBUTE_NORMAL,
+        nullptr
+    );
+    if (lock == INVALID_HANDLE_VALUE) {
+        std::cerr << "Skipping failed overwrite move assertion: unable to lock test file.\n";
+        return true;
+    }
+
+    bool storageRejected = false;
+    try {
+        store.moveFile("source.txt", "destination.txt", true);
+    } catch (const tundraux::backend::BackendException& error) {
+        storageRejected = error.code() == tundraux::backend::ErrorCode::StorageError;
+    }
+    CloseHandle(lock);
+
+    return expect(storageRejected, "failed overwrite move should fail with StorageError") &&
+           expect(store.readFile("source.txt").content == "source", "failed overwrite move should keep source") &&
+           expect(
+               store.readFile("destination.txt").content == "destination",
+               "failed overwrite move should keep destination content");
+#else
+    return true;
+#endif
+}
+
 bool filesystem_file_store_recursive_remove_rejects_protected_descendant() {
     TempDirectory temp(uniqueTempPath());
     std::filesystem::create_directories(temp.path() / "docs");
@@ -483,9 +561,38 @@ bool filesystem_file_store_searches_by_name() {
     store.writeFile("docs/alpha.txt", "a");
     store.writeFile("docs/beta.txt", "b");
     store.createDirectory("docs/alpha-folder");
+    std::filesystem::create_directories(temp.path() / "docs" / "temp");
+    std::ofstream(temp.path() / "docs" / "alpha-secret.TUX") << "protected";
+    std::ofstream(temp.path() / "docs" / "temp" / "alpha-temp.txt") << "temp";
 
     const auto results = store.search("docs", "alpha");
-    return expect(results.size() == 2, "expected file and directory search matches");
+    bool foundFile = false;
+    bool foundDirectory = false;
+    bool foundProtected = false;
+    bool foundTemp = false;
+    for (const auto& result : results) {
+        if (result.name == "alpha.txt" &&
+            result.path == "docs/alpha.txt" &&
+            result.type == tundraux::backend::FileEntryType::File) {
+            foundFile = true;
+        }
+        if (result.name == "alpha-folder" &&
+            result.path == "docs/alpha-folder" &&
+            result.type == tundraux::backend::FileEntryType::Directory) {
+            foundDirectory = true;
+        }
+        if (result.name == "alpha-secret.TUX") {
+            foundProtected = true;
+        }
+        if (result.name == "alpha-temp.txt") {
+            foundTemp = true;
+        }
+    }
+    return expect(results.size() == 2, "expected file and directory search matches") &&
+           expect(foundFile, "search should return matching file entry") &&
+           expect(foundDirectory, "search should return matching directory entry") &&
+           expect(!foundProtected, "search should not return protected content") &&
+           expect(!foundTemp, "search should not return temp content");
 }
 
 } // namespace
@@ -503,7 +610,9 @@ int main() {
     if (!regular_file_operations_map_unknown_exceptions_to_storage_error()) return 1;
     if (!filesystem_file_store_mutates_regular_files()) return 1;
     if (!filesystem_file_store_rejects_regular_file_conflicts()) return 1;
+    if (!filesystem_file_store_rejects_temp_targets()) return 1;
     if (!filesystem_file_store_move_does_not_fallback_on_regular_rename_failure()) return 1;
+    if (!filesystem_file_store_failed_overwrite_move_keeps_destination()) return 1;
     if (!filesystem_file_store_recursive_remove_rejects_protected_descendant()) return 1;
     if (!filesystem_file_store_searches_by_name()) return 1;
 

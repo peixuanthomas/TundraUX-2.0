@@ -124,17 +124,9 @@ bool isProtectedRelativePath(const std::filesystem::path& relative) {
         const auto filename = lowerAscii(part.filename().string());
         const auto extension = lowerAscii(part.extension().string());
         if (filename == "user_data.dat" ||
+            filename == "temp" ||
             extension == ".tux" ||
             extension == ".tlog") {
-            return true;
-        }
-    }
-    return false;
-}
-
-bool isTempRelativePath(const std::filesystem::path& relative) {
-    for (const auto& part : relative) {
-        if (part.filename().string() == "temp") {
             return true;
         }
     }
@@ -153,6 +145,23 @@ bool isCrossDeviceRenameError(const std::error_code& error) {
 #endif
 
     return false;
+}
+
+std::filesystem::path availableSiblingPath(const std::filesystem::path& parent, const std::string& prefix) {
+    std::error_code error;
+    for (int attempt = 0; attempt < 1000; ++attempt) {
+        auto candidate = parent / (prefix + std::to_string(attempt) + ".tmp");
+        if (!std::filesystem::exists(candidate, error)) {
+            if (error) {
+                throw storageError();
+            }
+            return candidate;
+        }
+        if (error) {
+            throw storageError();
+        }
+    }
+    throw storageError();
 }
 
 } // namespace
@@ -503,10 +512,13 @@ void FilesystemFileStore::moveFile(const std::string& from, const std::string& t
         }
         rejectProtectedPath(destination);
 
+        bool destinationExists = false;
+        std::filesystem::path backupDestination;
         if (std::filesystem::exists(destination, error)) {
             if (error) {
                 throw storageError();
             }
+            destinationExists = true;
             const auto existingTarget = canonicalExistingPath(destination);
             if (!isPathInside(root_, existingTarget)) {
                 throw invalidPath();
@@ -518,8 +530,15 @@ void FilesystemFileStore::moveFile(const std::string& from, const std::string& t
                 }
                 throw invalidPath();
             }
-            if (overwrite && (!std::filesystem::remove(existingTarget, error) || error)) {
-                throw storageError();
+            if (overwrite) {
+                backupDestination = availableSiblingPath(
+                    parent,
+                    ".tundraux-move-backup-" + destination.filename().string() + "-"
+                );
+                std::filesystem::rename(destination, backupDestination, error);
+                if (error) {
+                    throw storageError();
+                }
             }
         } else if (error) {
             throw storageError();
@@ -527,9 +546,19 @@ void FilesystemFileStore::moveFile(const std::string& from, const std::string& t
 
         std::filesystem::rename(source, destination, error);
         if (!error) {
+            if (destinationExists) {
+                std::filesystem::remove(backupDestination, error);
+                if (error) {
+                    throw storageError();
+                }
+            }
             return;
         }
         if (!isCrossDeviceRenameError(error)) {
+            if (destinationExists) {
+                error.clear();
+                std::filesystem::rename(backupDestination, destination, error);
+            }
             throw storageError();
         }
 
@@ -538,10 +567,25 @@ void FilesystemFileStore::moveFile(const std::string& from, const std::string& t
             : std::filesystem::copy_options::none;
         error.clear();
         if (!std::filesystem::copy_file(source, destination, options, error) || error) {
+            if (destinationExists) {
+                error.clear();
+                std::filesystem::rename(backupDestination, destination, error);
+            }
             throw storageError();
         }
         if (!std::filesystem::remove(source, error) || error) {
+            if (destinationExists) {
+                std::error_code rollbackError;
+                std::filesystem::remove(destination, rollbackError);
+                std::filesystem::rename(backupDestination, destination, rollbackError);
+            }
             throw storageError();
+        }
+        if (destinationExists) {
+            std::filesystem::remove(backupDestination, error);
+            if (error) {
+                throw storageError();
+            }
         }
     } catch (const BackendException&) {
         throw;
@@ -608,31 +652,47 @@ void FilesystemFileStore::removeDirectory(const std::string& path, bool recursiv
         }
 
         if (recursive) {
-            const auto options = std::filesystem::directory_options::skip_permission_denied;
-            std::filesystem::recursive_directory_iterator iterator(resolved, options, error);
-            if (error) {
-                throw storageError();
-            }
-            const std::filesystem::recursive_directory_iterator end;
-            for (; iterator != end; iterator.increment(error)) {
-                if (error) {
+            const auto removeTree = [&](const auto& self, const std::filesystem::path& directory) -> void {
+                rejectUnsafeExistingPathComponents(directory);
+                rejectProtectedPath(directory);
+                if (isReparseOrSymlink(directory)) {
+                    throw permissionDenied();
+                }
+
+                std::error_code walkError;
+                for (const auto& entry : std::filesystem::directory_iterator(directory)) {
+                    const auto child = entry.path();
+                    rejectUnsafeExistingPathComponents(child);
+                    rejectProtectedPath(child);
+                    if (isReparseOrSymlink(child)) {
+                        throw permissionDenied();
+                    }
+
+                    const auto status = entry.symlink_status(walkError);
+                    if (walkError) {
+                        throw storageError();
+                    }
+                    if (std::filesystem::is_directory(status)) {
+                        self(self, child);
+                    } else {
+                        std::filesystem::remove(child, walkError);
+                        if (walkError) {
+                            throw storageError();
+                        }
+                    }
+                }
+
+                rejectUnsafeExistingPathComponents(directory);
+                rejectProtectedPath(directory);
+                if (isReparseOrSymlink(directory)) {
+                    throw permissionDenied();
+                }
+                std::filesystem::remove(directory, walkError);
+                if (walkError) {
                     throw storageError();
                 }
-                const auto descendant = iterator->path();
-                if (isReparseOrSymlink(descendant)) {
-                    throw permissionDenied();
-                }
-
-                const auto relative = descendant.lexically_relative(root_);
-                if (isProtectedRelativePath(relative) || isTempRelativePath(relative)) {
-                    throw permissionDenied();
-                }
-            }
-
-            std::filesystem::remove_all(resolved, error);
-            if (error) {
-                throw storageError();
-            }
+            };
+            removeTree(removeTree, resolved);
         } else if (!std::filesystem::remove(resolved, error) || error) {
             throw storageError();
         }
