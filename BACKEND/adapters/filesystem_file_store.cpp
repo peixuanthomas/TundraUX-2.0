@@ -166,6 +166,44 @@ std::filesystem::path availableSiblingPath(const std::filesystem::path& parent, 
 
 } // namespace
 
+namespace filesystem_file_store_detail {
+
+using RemovePath = bool (*)(const std::filesystem::path&, std::error_code&);
+
+bool removePath(const std::filesystem::path& path, std::error_code& error) {
+    return std::filesystem::remove(path, error);
+}
+
+void removeSourceAfterFallbackCopy(
+    const std::filesystem::path& source,
+    const std::filesystem::path& destination,
+    bool destinationExists,
+    const std::filesystem::path& backupDestination,
+    RemovePath removePath
+) {
+    std::error_code error;
+    if (!removePath(source, error) || error) {
+        if (destinationExists) {
+            std::error_code rollbackError;
+            std::filesystem::remove(destination, rollbackError);
+            std::filesystem::rename(backupDestination, destination, rollbackError);
+        } else {
+            std::error_code cleanupError;
+            std::filesystem::remove(destination, cleanupError);
+        }
+        throw storageError();
+    }
+
+    if (destinationExists) {
+        std::filesystem::remove(backupDestination, error);
+        if (error) {
+            throw storageError();
+        }
+    }
+}
+
+} // namespace filesystem_file_store_detail
+
 FilesystemFileStore::FilesystemFileStore(std::string root)
     : configuredRoot_(lexicalAbsolutePath(std::filesystem::path(std::move(root)))),
       root_(stableAbsolutePath(configuredRoot_)) {
@@ -573,20 +611,13 @@ void FilesystemFileStore::moveFile(const std::string& from, const std::string& t
             }
             throw storageError();
         }
-        if (!std::filesystem::remove(source, error) || error) {
-            if (destinationExists) {
-                std::error_code rollbackError;
-                std::filesystem::remove(destination, rollbackError);
-                std::filesystem::rename(backupDestination, destination, rollbackError);
-            }
-            throw storageError();
-        }
-        if (destinationExists) {
-            std::filesystem::remove(backupDestination, error);
-            if (error) {
-                throw storageError();
-            }
-        }
+        filesystem_file_store_detail::removeSourceAfterFallbackCopy(
+            source,
+            destination,
+            destinationExists,
+            backupDestination,
+            filesystem_file_store_detail::removePath
+        );
     } catch (const BackendException&) {
         throw;
     } catch (const std::exception&) {
