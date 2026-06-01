@@ -31,6 +31,7 @@ add_library(tundraux_backend_core
     BACKEND/core/json.cpp
     BACKEND/core/json_rpc.cpp
     BACKEND/core/session_service.cpp
+    BACKEND/core/tux_service.cpp
     BACKEND/core/user_service.cpp
 )
 
@@ -47,6 +48,7 @@ target_compile_features(tundraux_backend_core
 add_library(tundraux_backend_adapters
     BACKEND/adapters/data_manager_user_store.cpp
     BACKEND/adapters/filesystem_file_store.cpp
+    BACKEND/adapters/filesystem_tux_store.cpp
 )
 
 target_include_directories(tundraux_backend_adapters
@@ -348,6 +350,29 @@ target_compile_features(backend_file_service_tests
 )
 
 add_test(NAME backend_file_service_tests COMMAND backend_file_service_tests)
+
+add_executable(tux_service_tests
+    tests/tux_service_tests.cpp
+)
+
+target_include_directories(tux_service_tests
+    PRIVATE
+        ${PROJECT_SOURCE_DIR}/BACKEND/core
+        ${PROJECT_SOURCE_DIR}/BACKEND/adapters
+)
+
+target_link_libraries(tux_service_tests
+    PRIVATE
+        tundraux_backend_core
+        tundraux_backend_adapters
+)
+
+target_compile_features(tux_service_tests
+    PRIVATE
+        cxx_std_17
+)
+
+add_test(NAME tux_service_tests COMMAND tux_service_tests)
 
 add_executable(backend_json_rpc_tests
     tests/backend_json_rpc_tests.cpp
