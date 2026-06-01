@@ -147,62 +147,19 @@ bool isCrossDeviceRenameError(const std::error_code& error) {
     return false;
 }
 
-std::filesystem::path availableSiblingPath(const std::filesystem::path& parent, const std::string& prefix) {
+void removeSourceAfterNewDestinationFallbackCopy(
+    const std::filesystem::path& source,
+    const std::filesystem::path& destination
+) {
     std::error_code error;
-    for (int attempt = 0; attempt < 1000; ++attempt) {
-        auto candidate = parent / (prefix + std::to_string(attempt) + ".tmp");
-        if (!std::filesystem::exists(candidate, error)) {
-            if (error) {
-                throw storageError();
-            }
-            return candidate;
-        }
-        if (error) {
-            throw storageError();
-        }
+    if (!std::filesystem::remove(source, error) || error) {
+        std::error_code cleanupError;
+        std::filesystem::remove(destination, cleanupError);
+        throw storageError();
     }
-    throw storageError();
 }
 
 } // namespace
-
-namespace filesystem_file_store_detail {
-
-using RemovePath = bool (*)(const std::filesystem::path&, std::error_code&);
-
-bool removePath(const std::filesystem::path& path, std::error_code& error) {
-    return std::filesystem::remove(path, error);
-}
-
-void removeSourceAfterFallbackCopy(
-    const std::filesystem::path& source,
-    const std::filesystem::path& destination,
-    bool destinationExists,
-    const std::filesystem::path& backupDestination,
-    RemovePath removePath
-) {
-    std::error_code error;
-    if (!removePath(source, error) || error) {
-        if (destinationExists) {
-            std::error_code rollbackError;
-            std::filesystem::remove(destination, rollbackError);
-            std::filesystem::rename(backupDestination, destination, rollbackError);
-        } else {
-            std::error_code cleanupError;
-            std::filesystem::remove(destination, cleanupError);
-        }
-        throw storageError();
-    }
-
-    if (destinationExists) {
-        std::filesystem::remove(backupDestination, error);
-        if (error) {
-            throw storageError();
-        }
-    }
-}
-
-} // namespace filesystem_file_store_detail
 
 FilesystemFileStore::FilesystemFileStore(std::string root)
     : configuredRoot_(lexicalAbsolutePath(std::filesystem::path(std::move(root)))),
@@ -551,7 +508,6 @@ void FilesystemFileStore::moveFile(const std::string& from, const std::string& t
         rejectProtectedPath(destination);
 
         bool destinationExists = false;
-        std::filesystem::path backupDestination;
         if (std::filesystem::exists(destination, error)) {
             if (error) {
                 throw storageError();
@@ -568,56 +524,26 @@ void FilesystemFileStore::moveFile(const std::string& from, const std::string& t
                 }
                 throw invalidPath();
             }
-            if (overwrite) {
-                backupDestination = availableSiblingPath(
-                    parent,
-                    ".tundraux-move-backup-" + destination.filename().string() + "-"
-                );
-                std::filesystem::rename(destination, backupDestination, error);
-                if (error) {
-                    throw storageError();
-                }
-            }
         } else if (error) {
             throw storageError();
         }
 
         std::filesystem::rename(source, destination, error);
         if (!error) {
-            if (destinationExists) {
-                std::filesystem::remove(backupDestination, error);
-                if (error) {
-                    throw storageError();
-                }
-            }
             return;
         }
         if (!isCrossDeviceRenameError(error)) {
-            if (destinationExists) {
-                error.clear();
-                std::filesystem::rename(backupDestination, destination, error);
-            }
+            throw storageError();
+        }
+        if (destinationExists) {
             throw storageError();
         }
 
-        const auto options = overwrite
-            ? std::filesystem::copy_options::overwrite_existing
-            : std::filesystem::copy_options::none;
         error.clear();
-        if (!std::filesystem::copy_file(source, destination, options, error) || error) {
-            if (destinationExists) {
-                error.clear();
-                std::filesystem::rename(backupDestination, destination, error);
-            }
+        if (!std::filesystem::copy_file(source, destination, std::filesystem::copy_options::none, error) || error) {
             throw storageError();
         }
-        filesystem_file_store_detail::removeSourceAfterFallbackCopy(
-            source,
-            destination,
-            destinationExists,
-            backupDestination,
-            filesystem_file_store_detail::removePath
-        );
+        removeSourceAfterNewDestinationFallbackCopy(source, destination);
     } catch (const BackendException&) {
         throw;
     } catch (const std::exception&) {

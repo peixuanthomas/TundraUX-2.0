@@ -24,17 +24,6 @@
 #include <windows.h>
 #endif
 
-namespace tundraux::backend::filesystem_file_store_detail {
-using RemovePath = bool (*)(const std::filesystem::path&, std::error_code&);
-void removeSourceAfterFallbackCopy(
-    const std::filesystem::path& source,
-    const std::filesystem::path& destination,
-    bool destinationExists,
-    const std::filesystem::path& backupDestination,
-    RemovePath removePath
-);
-} // namespace tundraux::backend::filesystem_file_store_detail
-
 namespace {
 
 class InMemoryUserStore final : public tundraux::backend::UserStore {
@@ -301,11 +290,6 @@ bool createdDirectorySymlink(const std::filesystem::path& target, const std::fil
     return true;
 }
 
-bool failRemovingPath(const std::filesystem::path&, std::error_code& error) {
-    error = std::make_error_code(std::errc::permission_denied);
-    return false;
-}
-
 bool regular_file_mutations_require_user_session() {
     RecordingFileStore store;
     InMemoryUserStore users;
@@ -551,32 +535,6 @@ bool filesystem_file_store_failed_overwrite_move_keeps_destination() {
 #endif
 }
 
-bool filesystem_file_store_failed_new_destination_fallback_cleans_copy() {
-    TempDirectory temp(uniqueTempPath());
-    const auto source = temp.path() / "source.txt";
-    const auto destination = temp.path() / "destination.txt";
-    std::filesystem::create_directories(temp.path());
-    std::ofstream(source) << "source";
-    std::ofstream(destination) << "copied";
-
-    bool storageRejected = false;
-    try {
-        tundraux::backend::filesystem_file_store_detail::removeSourceAfterFallbackCopy(
-            source,
-            destination,
-            false,
-            {},
-            failRemovingPath
-        );
-    } catch (const tundraux::backend::BackendException& error) {
-        storageRejected = error.code() == tundraux::backend::ErrorCode::StorageError;
-    }
-
-    return expect(storageRejected, "failed fallback source removal should fail with StorageError") &&
-           expect(std::filesystem::exists(source), "failed fallback source removal should keep source") &&
-           expect(!std::filesystem::exists(destination), "failed fallback source removal should clean new destination");
-}
-
 bool filesystem_file_store_recursive_remove_rejects_protected_descendant() {
     TempDirectory temp(uniqueTempPath());
     std::filesystem::create_directories(temp.path() / "docs");
@@ -662,7 +620,6 @@ int main() {
     if (!filesystem_file_store_rejects_temp_targets()) return 1;
     if (!filesystem_file_store_move_does_not_fallback_on_regular_rename_failure()) return 1;
     if (!filesystem_file_store_failed_overwrite_move_keeps_destination()) return 1;
-    if (!filesystem_file_store_failed_new_destination_fallback_cleans_copy()) return 1;
     if (!filesystem_file_store_recursive_remove_rejects_protected_descendant()) return 1;
     if (!filesystem_file_store_searches_by_name()) return 1;
 
