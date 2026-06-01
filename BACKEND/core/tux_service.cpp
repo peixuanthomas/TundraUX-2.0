@@ -132,11 +132,11 @@ ServiceResult<TuxContent> TuxService::read(const std::string& sessionId, const s
     }
 
     try {
-        const auto content = store_.read(path);
-        if (!canAccess(access.value, content.metadata)) {
+        const auto metadata = store_.metadata(path);
+        if (!canAccess(access.value, metadata)) {
             return ServiceResult<TuxContent>::failure(ErrorCode::PermissionDenied, kAccessDeniedMessage);
         }
-        return ServiceResult<TuxContent>::success(content);
+        return ServiceResult<TuxContent>::success(store_.read(path));
     } catch (const BackendException& error) {
         return ServiceResult<TuxContent>::failure(error.code(), error.what());
     } catch (const std::exception&) {
@@ -232,8 +232,8 @@ ServiceResult<EmptyResult> TuxService::copyFile(
     }
 
     return runTuxMutation([this, &access, &from, &to, overwrite]() {
-        const auto source = store_.read(from);
-        if (!canAccess(access.value, source.metadata)) {
+        const auto source = store_.metadata(from);
+        if (!canAccess(access.value, source)) {
             throw BackendException(ErrorCode::PermissionDenied, kAccessDeniedMessage);
         }
         requireDestinationAccessForOverwrite(access.value, to, overwrite);

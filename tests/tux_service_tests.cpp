@@ -126,6 +126,16 @@ tundraux::backend::ServiceResult<tundraux::backend::SessionInfo> login(
     return sessions.login(guest.sessionId, username, password);
 }
 
+bool truncateLastByte(const std::filesystem::path& path) {
+    std::error_code error;
+    const auto size = std::filesystem::file_size(path, error);
+    if (error || size == 0) {
+        return false;
+    }
+    std::filesystem::resize_file(path, size - 1, error);
+    return !error;
+}
+
 bool tux_creator_can_create_read_write_and_delete() {
     TempDirectory temp(uniqueTempPath());
     InMemoryUserStore users({{"user", "alice", "Password1", "hint", 0}});
@@ -337,6 +347,119 @@ bool tux_store_rejects_symlink_traversal() {
     return expect(rejected, "TUX store should reject symlink traversal");
 }
 
+bool tux_unauthorized_read_and_copy_deny_before_content_parse() {
+    TempDirectory temp(uniqueTempPath());
+    InMemoryUserStore users({
+        {"user", "alice", "Password1", "hint", 0},
+        {"user", "bob", "Password1", "hint", 0}
+    });
+    tundraux::backend::SessionService sessions(users);
+    tundraux::backend::FilesystemTuxStore store(temp.path().string());
+    tundraux::backend::TuxService service(store, sessions);
+
+    const auto alice = login(sessions, "alice", "Password1");
+    const auto bob = login(sessions, "bob", "Password1");
+    if (!expect(alice.ok, "alice login should pass")) return false;
+    if (!expect(bob.ok, "bob login should pass")) return false;
+    if (!expect(service.create(alice.value.sessionId, "shared/corrupt", false).ok, "alice corrupt create should pass")) return false;
+    if (!expect(truncateLastByte(temp.path() / "shared" / "corrupt.TUX"), "test should corrupt only content length")) return false;
+
+    const auto bobRead = service.read(bob.value.sessionId, "shared/corrupt");
+    const auto bobCopy = service.copyFile(bob.value.sessionId, "shared/corrupt", "shared/bob_copy", false);
+    const auto aliceRead = service.read(alice.value.sessionId, "shared/corrupt");
+
+    return expectResultCode(bobRead, tundraux::backend::ErrorCode::PermissionDenied, "bob corrupt read") &&
+        expectCode(bobCopy, tundraux::backend::ErrorCode::PermissionDenied, "bob corrupt copy") &&
+        expectResultCode(aliceRead, tundraux::backend::ErrorCode::StorageError, "alice corrupt read");
+}
+
+bool tux_temp_paths_are_rejected() {
+    TempDirectory temp(uniqueTempPath());
+    InMemoryUserStore users({{"user", "alice", "Password1", "hint", 0}});
+    tundraux::backend::SessionService sessions(users);
+    tundraux::backend::FilesystemTuxStore store(temp.path().string());
+    tundraux::backend::TuxService service(store, sessions);
+    const auto alice = login(sessions, "alice", "Password1");
+    if (!expect(alice.ok, "alice login should pass")) return false;
+    if (!expect(service.create(alice.value.sessionId, "source", false).ok, "source create should pass")) return false;
+
+    std::filesystem::create_directories(temp.path() / "temp");
+    std::filesystem::rename(temp.path() / "source.TUX", temp.path() / "temp" / "existing.TUX");
+    if (!expect(service.create(alice.value.sessionId, "source", false).ok, "source recreate should pass")) return false;
+
+    const auto created = service.create(alice.value.sessionId, "temp/new", false);
+    const auto read = service.read(alice.value.sessionId, "temp/existing");
+    const auto written = service.write(alice.value.sessionId, "temp/existing", "x");
+    const auto deleted = service.deleteFile(alice.value.sessionId, "temp/existing");
+    const auto renamedFromTemp = service.renameFile(alice.value.sessionId, "temp/existing", "renamed", false);
+    const auto copiedFromTemp = service.copyFile(alice.value.sessionId, "temp/existing", "copied", false);
+    const auto movedFromTemp = service.moveFile(alice.value.sessionId, "temp/existing", "moved", false);
+    const auto renamedToTemp = service.renameFile(alice.value.sessionId, "source", "temp/renamed", false);
+    const auto copiedToTemp = service.copyFile(alice.value.sessionId, "source", "temp/copied", false);
+    const auto movedToTemp = service.moveFile(alice.value.sessionId, "source", "temp/moved", false);
+
+    return expectCode(created, tundraux::backend::ErrorCode::InvalidPath, "temp create") &&
+        expectResultCode(read, tundraux::backend::ErrorCode::InvalidPath, "temp read") &&
+        expectCode(written, tundraux::backend::ErrorCode::InvalidPath, "temp write") &&
+        expectCode(deleted, tundraux::backend::ErrorCode::InvalidPath, "temp delete") &&
+        expectCode(renamedFromTemp, tundraux::backend::ErrorCode::InvalidPath, "temp rename source") &&
+        expectCode(copiedFromTemp, tundraux::backend::ErrorCode::InvalidPath, "temp copy source") &&
+        expectCode(movedFromTemp, tundraux::backend::ErrorCode::InvalidPath, "temp move source") &&
+        expectCode(renamedToTemp, tundraux::backend::ErrorCode::InvalidPath, "temp rename destination") &&
+        expectCode(copiedToTemp, tundraux::backend::ErrorCode::InvalidPath, "temp copy destination") &&
+        expectCode(movedToTemp, tundraux::backend::ErrorCode::InvalidPath, "temp move destination") &&
+        expect(std::filesystem::exists(temp.path() / "source.TUX"), "denied temp move should keep source");
+}
+
+bool tux_rename_copy_move_success_paths_work() {
+    TempDirectory temp(uniqueTempPath());
+    InMemoryUserStore users({{"user", "alice", "Password1", "hint", 0}});
+    tundraux::backend::SessionService sessions(users);
+    tundraux::backend::FilesystemTuxStore store(temp.path().string());
+    tundraux::backend::TuxService service(store, sessions);
+    const auto alice = login(sessions, "alice", "Password1");
+    if (!expect(alice.ok, "alice login should pass")) return false;
+    if (!expect(service.create(alice.value.sessionId, "ops/source", false).ok, "source create should pass")) return false;
+    if (!expect(service.write(alice.value.sessionId, "ops/source", "payload").ok, "source write should pass")) return false;
+
+    const auto copied = service.copyFile(alice.value.sessionId, "ops/source", "ops/copied", false);
+    const auto renamed = service.renameFile(alice.value.sessionId, "ops/copied", "ops/renamed", false);
+    const auto moved = service.moveFile(alice.value.sessionId, "ops/renamed", "archive/moved", false);
+    const auto sourceRead = service.read(alice.value.sessionId, "ops/source");
+    const auto movedRead = service.read(alice.value.sessionId, "archive/moved");
+
+    return expect(copied.ok, "copy should pass") &&
+        expect(renamed.ok, "rename should pass") &&
+        expect(moved.ok, "move should pass") &&
+        expect(sourceRead.ok, "source read should pass") &&
+        expect(sourceRead.value.content == "payload", "copy should keep source content") &&
+        expect(movedRead.ok, "moved read should pass") &&
+        expect(movedRead.value.content == "payload", "moved content mismatch");
+}
+
+bool tux_debug_user_can_access_other_users_file() {
+    TempDirectory temp(uniqueTempPath());
+    InMemoryUserStore users({
+        {"user", "alice", "Password1", "hint", 0},
+        {"debug", "debugger", "Password1", "hint", 0}
+    });
+    tundraux::backend::SessionService sessions(users);
+    tundraux::backend::FilesystemTuxStore store(temp.path().string());
+    tundraux::backend::TuxService service(store, sessions);
+
+    const auto alice = login(sessions, "alice", "Password1");
+    const auto debug = login(sessions, "debugger", "Password1");
+    if (!expect(alice.ok, "alice login should pass")) return false;
+    if (!expect(debug.ok, "debug login should pass")) return false;
+    if (!expect(service.create(alice.value.sessionId, "shared/debug_doc", false).ok, "alice create should pass")) return false;
+    if (!expect(service.write(alice.value.sessionId, "shared/debug_doc", "debug-visible").ok, "alice write should pass")) return false;
+
+    const auto read = service.read(debug.value.sessionId, "shared/debug_doc");
+
+    return expect(read.ok, "debug read should pass") &&
+        expect(read.value.content == "debug-visible", "debug read content mismatch");
+}
+
 } // namespace
 
 int main() {
@@ -349,5 +472,9 @@ int main() {
     if (!tux_regular_user_list_and_search_hide_other_users_files()) return 1;
     if (!tux_regular_user_cannot_overwrite_other_users_destination()) return 1;
     if (!tux_store_rejects_symlink_traversal()) return 1;
+    if (!tux_unauthorized_read_and_copy_deny_before_content_parse()) return 1;
+    if (!tux_temp_paths_are_rejected()) return 1;
+    if (!tux_rename_copy_move_success_paths_work()) return 1;
+    if (!tux_debug_user_can_access_other_users_file()) return 1;
     return 0;
 }

@@ -134,6 +134,9 @@ std::vector<std::string> splitApiPath(const std::string& path, bool allowRoot) {
     if (parts.empty() && !allowRoot) {
         throw invalidPath();
     }
+    if (!parts.empty() && lowerAscii(parts.front()) == "temp") {
+        throw invalidPath();
+    }
     return parts;
 }
 
