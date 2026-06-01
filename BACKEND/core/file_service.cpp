@@ -18,6 +18,8 @@ ServiceResult<EmptyResult> runFileMutation(Func func) {
         return ServiceResult<EmptyResult>::failure(error.code(), error.what());
     } catch (const std::exception&) {
         return ServiceResult<EmptyResult>::failure(ErrorCode::StorageError, kFileStorageErrorMessage);
+    } catch (...) {
+        return ServiceResult<EmptyResult>::failure(ErrorCode::StorageError, kFileStorageErrorMessage);
     }
 }
 
@@ -193,6 +195,8 @@ ServiceResult<std::vector<FileEntry>> FileService::search(
     } catch (const BackendException& error) {
         return ServiceResult<std::vector<FileEntry>>::failure(error.code(), error.what());
     } catch (const std::exception&) {
+        return ServiceResult<std::vector<FileEntry>>::failure(ErrorCode::StorageError, kFileStorageErrorMessage);
+    } catch (...) {
         return ServiceResult<std::vector<FileEntry>>::failure(ErrorCode::StorageError, kFileStorageErrorMessage);
     }
 }

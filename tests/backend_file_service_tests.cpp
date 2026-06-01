@@ -91,6 +91,8 @@ public:
     std::vector<tundraux::backend::FileEntry> entries;
     std::string content;
     std::vector<std::string> calls;
+    bool throwUnknownOnDelete = false;
+    bool throwUnknownOnSearch = false;
 
     std::vector<tundraux::backend::FileEntry> listDirectory(const std::string& path) const override {
         const_cast<RecordingFileStore*>(this)->calls.push_back("list:" + path);
@@ -109,6 +111,9 @@ public:
 
     void deleteFile(const std::string& path) override {
         calls.push_back("delete:" + path);
+        if (throwUnknownOnDelete) {
+            throw 42;
+        }
     }
 
     void renameFile(const std::string& from, const std::string& to, bool overwrite) override {
@@ -133,6 +138,9 @@ public:
 
     std::vector<tundraux::backend::FileEntry> search(const std::string& root, const std::string& query) const override {
         const_cast<RecordingFileStore*>(this)->calls.push_back("search:" + root + ":" + query);
+        if (throwUnknownOnSearch) {
+            throw 42;
+        }
         return entries;
     }
 };
@@ -282,8 +290,28 @@ bool regular_file_mutations_require_user_session() {
     tundraux::backend::FileService service(store, sessions);
     const auto guest = sessions.startGuestSession();
 
-    return expect(!service.deleteFile(guest.sessionId, "a.txt").ok, "guest delete should fail") &&
-        expect(!service.createDirectory(guest.sessionId, "docs").ok, "guest mkdir should fail") &&
+    const auto deleted = service.deleteFile(guest.sessionId, "a.txt");
+    const auto renamed = service.renameFile(guest.sessionId, "a.txt", "b.txt", false);
+    const auto copied = service.copyFile(guest.sessionId, "a.txt", "b.txt", true);
+    const auto moved = service.moveFile(guest.sessionId, "a.txt", "docs/a.txt", false);
+    const auto created = service.createDirectory(guest.sessionId, "docs");
+    const auto removed = service.removeDirectory(guest.sessionId, "docs", false);
+    const auto searched = service.search(guest.sessionId, "", "a");
+
+    return expect(!deleted.ok, "guest delete should fail") &&
+        expect(deleted.error.code == tundraux::backend::ErrorCode::PermissionDenied, "guest delete code mismatch") &&
+        expect(!renamed.ok, "guest rename should fail") &&
+        expect(renamed.error.code == tundraux::backend::ErrorCode::PermissionDenied, "guest rename code mismatch") &&
+        expect(!copied.ok, "guest copy should fail") &&
+        expect(copied.error.code == tundraux::backend::ErrorCode::PermissionDenied, "guest copy code mismatch") &&
+        expect(!moved.ok, "guest move should fail") &&
+        expect(moved.error.code == tundraux::backend::ErrorCode::PermissionDenied, "guest move code mismatch") &&
+        expect(!created.ok, "guest mkdir should fail") &&
+        expect(created.error.code == tundraux::backend::ErrorCode::PermissionDenied, "guest mkdir code mismatch") &&
+        expect(!removed.ok, "guest rmdir should fail") &&
+        expect(removed.error.code == tundraux::backend::ErrorCode::PermissionDenied, "guest rmdir code mismatch") &&
+        expect(!searched.ok, "guest search should fail") &&
+        expect(searched.error.code == tundraux::backend::ErrorCode::PermissionDenied, "guest search code mismatch") &&
         expect(store.calls.empty(), "guest calls should not reach store");
 }
 
@@ -294,6 +322,7 @@ bool regular_file_mutations_delegate_for_logged_in_user() {
     tundraux::backend::FileService service(store, sessions);
     const auto guest = sessions.startGuestSession();
     const auto loggedIn = sessions.login(guest.sessionId, "alice", "Secret1");
+    if (!expect(loggedIn.ok, "alice login should pass before file mutations")) return false;
 
     const bool ok =
         service.deleteFile(loggedIn.value.sessionId, "old.txt").ok &&
@@ -304,8 +333,42 @@ bool regular_file_mutations_delegate_for_logged_in_user() {
         service.removeDirectory(loggedIn.value.sessionId, "archive", false).ok &&
         service.search(loggedIn.value.sessionId, "", "copy").ok;
 
+    const std::vector<std::string> expectedCalls{
+        "delete:old.txt",
+        "rename:old.txt:new.txt:0",
+        "copy:new.txt:copy.txt:1",
+        "move:copy.txt:archive/copy.txt:0",
+        "mkdir:archive",
+        "rmdir:archive:0",
+        "search::copy"
+    };
+
     return expect(ok, "logged-in file mutations should succeed") &&
-        expect(store.calls.size() == 7, "expected seven delegated calls");
+        expect(store.calls == expectedCalls, "logged-in delegated calls mismatch");
+}
+
+bool regular_file_operations_map_unknown_exceptions_to_storage_error() {
+    RecordingFileStore store;
+    store.throwUnknownOnDelete = true;
+    store.throwUnknownOnSearch = true;
+    InMemoryUserStore users;
+    tundraux::backend::SessionService sessions(users);
+    tundraux::backend::FileService service(store, sessions);
+    const auto guest = sessions.startGuestSession();
+    const auto loggedIn = sessions.login(guest.sessionId, "alice", "Secret1");
+    if (!expect(loggedIn.ok, "alice login should pass before file error mapping")) return false;
+
+    const auto deleted = service.deleteFile(loggedIn.value.sessionId, "old.txt");
+    const auto searched = service.search(loggedIn.value.sessionId, "", "old");
+
+    return expect(!deleted.ok, "unknown mutation exception should fail") &&
+        expect(
+            deleted.error.code == tundraux::backend::ErrorCode::StorageError,
+            "unknown mutation exception code mismatch") &&
+        expect(!searched.ok, "unknown search exception should fail") &&
+        expect(
+            searched.error.code == tundraux::backend::ErrorCode::StorageError,
+            "unknown search exception code mismatch");
 }
 
 } // namespace
@@ -320,6 +383,7 @@ int main() {
 
     if (!regular_file_mutations_require_user_session()) return 1;
     if (!regular_file_mutations_delegate_for_logged_in_user()) return 1;
+    if (!regular_file_operations_map_unknown_exceptions_to_storage_error()) return 1;
 
     const auto guest = sessions.startGuestSession();
     const auto guestList = service.listDirectory(guest.sessionId, "");
