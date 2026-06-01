@@ -119,6 +119,19 @@ std::string lexicalEntryPath(const std::string& directory, const std::string& na
     return (std::filesystem::path(directory) / name).generic_string();
 }
 
+bool isProtectedRelativePath(const std::filesystem::path& relative) {
+    for (const auto& part : relative) {
+        const auto filename = lowerAscii(part.filename().string());
+        const auto extension = lowerAscii(part.extension().string());
+        if (filename == "user_data.dat" ||
+            extension == ".tux" ||
+            extension == ".tlog") {
+            return true;
+        }
+    }
+    return false;
+}
+
 } // namespace
 
 FilesystemFileStore::FilesystemFileStore(std::string root)
@@ -306,6 +319,356 @@ void FilesystemFileStore::writeFile(const std::string& path, const std::string& 
     }
 }
 
+void FilesystemFileStore::deleteFile(const std::string& path) {
+    try {
+        ensureTrustedRoot();
+        const auto requested = resolveManagedPath(path, false);
+        rejectUnsafeExistingPathComponents(requested);
+        rejectProtectedPath(requested);
+        const auto resolved = canonicalExistingPath(requested);
+        if (!isPathInside(root_, resolved)) {
+            throw invalidPath();
+        }
+        rejectProtectedPath(resolved);
+
+        std::error_code error;
+        if (!std::filesystem::exists(resolved, error)) {
+            if (error) {
+                throw storageError();
+            }
+            throw notFound();
+        }
+        if (!std::filesystem::is_regular_file(resolved, error)) {
+            if (error) {
+                throw storageError();
+            }
+            throw invalidPath();
+        }
+        if (!std::filesystem::remove(resolved, error) || error) {
+            throw storageError();
+        }
+    } catch (const BackendException&) {
+        throw;
+    } catch (const std::exception&) {
+        throw storageError();
+    }
+}
+
+void FilesystemFileStore::renameFile(const std::string& from, const std::string& to, bool overwrite) {
+    moveFile(from, to, overwrite);
+}
+
+void FilesystemFileStore::copyFile(const std::string& from, const std::string& to, bool overwrite) {
+    try {
+        ensureTrustedRoot();
+        const auto requestedSource = resolveManagedPath(from, false);
+        const auto requestedDestination = resolveManagedPath(to, false);
+        rejectSamePath(requestedSource, requestedDestination);
+        rejectUnsafeExistingPathComponents(requestedSource);
+        rejectUnsafeExistingPathComponents(requestedDestination);
+        rejectProtectedPath(requestedSource);
+        rejectProtectedPath(requestedDestination);
+
+        const auto source = canonicalExistingPath(requestedSource);
+        if (!isPathInside(root_, source)) {
+            throw invalidPath();
+        }
+        rejectProtectedPath(source);
+
+        std::error_code error;
+        if (!std::filesystem::exists(source, error)) {
+            if (error) {
+                throw storageError();
+            }
+            throw notFound();
+        }
+        if (!std::filesystem::is_regular_file(source, error)) {
+            if (error) {
+                throw storageError();
+            }
+            throw invalidPath();
+        }
+
+        rejectExistingDestination(requestedDestination, overwrite);
+        std::filesystem::create_directories(requestedDestination.parent_path(), error);
+        if (error) {
+            throw storageError();
+        }
+        ensureTrustedRoot();
+        rejectUnsafeExistingPathComponents(requestedDestination);
+        const auto parent = canonicalExistingPath(requestedDestination.parent_path());
+        const auto destination = (parent / requestedDestination.filename()).lexically_normal();
+        if (!isPathInside(root_, parent) || !isPathInside(root_, destination)) {
+            throw invalidPath();
+        }
+        rejectProtectedPath(destination);
+
+        if (std::filesystem::exists(destination, error)) {
+            if (error) {
+                throw storageError();
+            }
+            const auto existingTarget = canonicalExistingPath(destination);
+            if (!isPathInside(root_, existingTarget)) {
+                throw invalidPath();
+            }
+            rejectProtectedPath(existingTarget);
+            if (!std::filesystem::is_regular_file(existingTarget, error)) {
+                if (error) {
+                    throw storageError();
+                }
+                throw invalidPath();
+            }
+        } else if (error) {
+            throw storageError();
+        }
+
+        const auto options = overwrite
+            ? std::filesystem::copy_options::overwrite_existing
+            : std::filesystem::copy_options::none;
+        if (!std::filesystem::copy_file(source, destination, options, error) || error) {
+            throw storageError();
+        }
+    } catch (const BackendException&) {
+        throw;
+    } catch (const std::exception&) {
+        throw storageError();
+    }
+}
+
+void FilesystemFileStore::moveFile(const std::string& from, const std::string& to, bool overwrite) {
+    try {
+        ensureTrustedRoot();
+        const auto requestedSource = resolveManagedPath(from, false);
+        const auto requestedDestination = resolveManagedPath(to, false);
+        rejectSamePath(requestedSource, requestedDestination);
+        rejectUnsafeExistingPathComponents(requestedSource);
+        rejectUnsafeExistingPathComponents(requestedDestination);
+        rejectProtectedPath(requestedSource);
+        rejectProtectedPath(requestedDestination);
+
+        const auto source = canonicalExistingPath(requestedSource);
+        if (!isPathInside(root_, source)) {
+            throw invalidPath();
+        }
+        rejectProtectedPath(source);
+
+        std::error_code error;
+        if (!std::filesystem::exists(source, error)) {
+            if (error) {
+                throw storageError();
+            }
+            throw notFound();
+        }
+        if (!std::filesystem::is_regular_file(source, error)) {
+            if (error) {
+                throw storageError();
+            }
+            throw invalidPath();
+        }
+
+        rejectExistingDestination(requestedDestination, overwrite);
+        std::filesystem::create_directories(requestedDestination.parent_path(), error);
+        if (error) {
+            throw storageError();
+        }
+        ensureTrustedRoot();
+        rejectUnsafeExistingPathComponents(requestedDestination);
+        const auto parent = canonicalExistingPath(requestedDestination.parent_path());
+        const auto destination = (parent / requestedDestination.filename()).lexically_normal();
+        if (!isPathInside(root_, parent) || !isPathInside(root_, destination)) {
+            throw invalidPath();
+        }
+        rejectProtectedPath(destination);
+
+        if (std::filesystem::exists(destination, error)) {
+            if (error) {
+                throw storageError();
+            }
+            const auto existingTarget = canonicalExistingPath(destination);
+            if (!isPathInside(root_, existingTarget)) {
+                throw invalidPath();
+            }
+            rejectProtectedPath(existingTarget);
+            if (!std::filesystem::is_regular_file(existingTarget, error)) {
+                if (error) {
+                    throw storageError();
+                }
+                throw invalidPath();
+            }
+            if (overwrite && (!std::filesystem::remove(existingTarget, error) || error)) {
+                throw storageError();
+            }
+        } else if (error) {
+            throw storageError();
+        }
+
+        std::filesystem::rename(source, destination, error);
+        if (!error) {
+            return;
+        }
+
+        const auto options = overwrite
+            ? std::filesystem::copy_options::overwrite_existing
+            : std::filesystem::copy_options::none;
+        error.clear();
+        if (!std::filesystem::copy_file(source, destination, options, error) || error) {
+            throw storageError();
+        }
+        if (!std::filesystem::remove(source, error) || error) {
+            throw storageError();
+        }
+    } catch (const BackendException&) {
+        throw;
+    } catch (const std::exception&) {
+        throw storageError();
+    }
+}
+
+void FilesystemFileStore::createDirectory(const std::string& path) {
+    try {
+        ensureTrustedRoot();
+        const auto resolved = resolveManagedPath(path, false);
+        rejectUnsafeExistingPathComponents(resolved);
+        rejectProtectedPath(resolved);
+        std::error_code error;
+        std::filesystem::create_directories(resolved, error);
+        if (error) {
+            throw storageError();
+        }
+        ensureTrustedRoot();
+        rejectUnsafeExistingPathComponents(resolved);
+        const auto created = canonicalExistingPath(resolved);
+        if (!isPathInside(root_, created)) {
+            throw invalidPath();
+        }
+        rejectProtectedPath(created);
+    } catch (const BackendException&) {
+        throw;
+    } catch (const std::exception&) {
+        throw storageError();
+    }
+}
+
+void FilesystemFileStore::removeDirectory(const std::string& path, bool recursive) {
+    try {
+        ensureTrustedRoot();
+        const auto requested = resolveManagedPath(path, false);
+        rejectUnsafeExistingPathComponents(requested);
+        rejectProtectedPath(requested);
+        const auto resolved = canonicalExistingPath(requested);
+        if (!isPathInside(root_, resolved)) {
+            throw invalidPath();
+        }
+        rejectProtectedPath(resolved);
+
+        std::error_code error;
+        if (!std::filesystem::exists(resolved, error)) {
+            if (error) {
+                throw storageError();
+            }
+            throw notFound();
+        }
+        if (!std::filesystem::is_directory(resolved, error)) {
+            if (error) {
+                throw storageError();
+            }
+            throw invalidPath();
+        }
+        if (!recursive && !std::filesystem::is_empty(resolved, error)) {
+            if (error) {
+                throw storageError();
+            }
+            throw BackendException(ErrorCode::Conflict, "Directory is not empty.");
+        }
+
+        if (recursive) {
+            std::filesystem::remove_all(resolved, error);
+            if (error) {
+                throw storageError();
+            }
+        } else if (!std::filesystem::remove(resolved, error) || error) {
+            throw storageError();
+        }
+    } catch (const BackendException&) {
+        throw;
+    } catch (const std::exception&) {
+        throw storageError();
+    }
+}
+
+std::vector<FileEntry> FilesystemFileStore::search(const std::string& root, const std::string& query) const {
+    try {
+        ensureTrustedRoot();
+        const auto requested = resolveManagedPath(root, true);
+        rejectUnsafeExistingPathComponents(requested);
+        rejectProtectedPath(requested);
+        const auto resolved = canonicalExistingPath(requested);
+        if (!isPathInside(root_, resolved)) {
+            throw invalidPath();
+        }
+        if (!root.empty()) {
+            rejectProtectedPath(resolved);
+        }
+
+        std::error_code error;
+        if (!std::filesystem::exists(resolved, error)) {
+            if (error) {
+                throw storageError();
+            }
+            throw notFound();
+        }
+        if (!std::filesystem::is_directory(resolved, error)) {
+            if (error) {
+                throw storageError();
+            }
+            throw invalidPath();
+        }
+
+        std::vector<FileEntry> results;
+        const auto loweredQuery = lowerAscii(query);
+        const auto options = std::filesystem::directory_options::skip_permission_denied;
+        std::filesystem::recursive_directory_iterator iterator(resolved, options, error);
+        if (error) {
+            throw storageError();
+        }
+        const std::filesystem::recursive_directory_iterator end;
+        for (; iterator != end; iterator.increment(error)) {
+            if (error) {
+                error.clear();
+                continue;
+            }
+
+            const auto& entryPath = iterator->path();
+            const auto name = entryPath.filename().string();
+            if (name == "temp" || isReparseOrSymlink(entryPath)) {
+                if (std::filesystem::is_directory(iterator->symlink_status(error))) {
+                    iterator.disable_recursion_pending();
+                }
+                error.clear();
+                continue;
+            }
+
+            const auto relative = entryPath.lexically_relative(root_);
+            if (isProtectedRelativePath(relative)) {
+                if (std::filesystem::is_directory(iterator->symlink_status(error))) {
+                    iterator.disable_recursion_pending();
+                }
+                error.clear();
+                continue;
+            }
+
+            if (lowerAscii(name).find(loweredQuery) != std::string::npos) {
+                results.push_back(entryFromPath(entryPath));
+            }
+        }
+        return results;
+    } catch (const BackendException&) {
+        throw;
+    } catch (const std::exception&) {
+        throw storageError();
+    }
+}
+
 void FilesystemFileStore::ensureTrustedRoot() const {
     std::error_code error;
     const bool exists = std::filesystem::exists(configuredRoot_, error);
@@ -381,15 +744,44 @@ void FilesystemFileStore::rejectProtectedPath(const std::filesystem::path& resol
         throw storageError();
     }
 
-    for (const auto& part : relative) {
-        const auto filename = lowerAscii(part.filename().string());
-        const auto extension = lowerAscii(part.extension().string());
-        if (filename == "user_data.dat" ||
-            extension == ".tux" ||
-            extension == ".tlog") {
-            throw permissionDenied();
+    if (isProtectedRelativePath(relative)) {
+        throw permissionDenied();
+    }
+}
+
+void FilesystemFileStore::rejectSamePath(const std::filesystem::path& from, const std::filesystem::path& to) const {
+    if (stableAbsolutePath(from) == stableAbsolutePath(to)) {
+        throw BackendException(ErrorCode::Conflict, "Source and destination are the same.");
+    }
+}
+
+void FilesystemFileStore::rejectExistingDestination(const std::filesystem::path& destination, bool overwrite) const {
+    std::error_code error;
+    if (std::filesystem::exists(destination, error) && !overwrite) {
+        throw BackendException(ErrorCode::AlreadyExists, "Destination already exists.");
+    }
+}
+
+FileEntry FilesystemFileStore::entryFromPath(const std::filesystem::path& path) const {
+    std::error_code error;
+    const auto status = std::filesystem::status(path, error);
+    if (error) {
+        throw BackendException(ErrorCode::StorageError, "File storage error.");
+    }
+    FileEntry entry;
+    entry.name = path.filename().string();
+    entry.path = std::filesystem::relative(path, root_, error).generic_string();
+    if (error) {
+        throw BackendException(ErrorCode::StorageError, "File storage error.");
+    }
+    entry.type = std::filesystem::is_directory(status) ? FileEntryType::Directory : FileEntryType::File;
+    if (std::filesystem::is_regular_file(status)) {
+        entry.size = std::filesystem::file_size(path, error);
+        if (error) {
+            entry.size = 0;
         }
     }
+    return entry;
 }
 
 } // namespace tundraux::backend

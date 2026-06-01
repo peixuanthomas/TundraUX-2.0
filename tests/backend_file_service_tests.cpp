@@ -371,6 +371,58 @@ bool regular_file_operations_map_unknown_exceptions_to_storage_error() {
             "unknown search exception code mismatch");
 }
 
+bool filesystem_file_store_mutates_regular_files() {
+    TempDirectory temp(uniqueTempPath());
+    tundraux::backend::FilesystemFileStore store(temp.path().string());
+
+    store.writeFile("docs/source.txt", "alpha");
+    store.createDirectory("archive");
+    store.copyFile("docs/source.txt", "archive/copy.txt", false);
+    const auto copied = store.readFile("archive/copy.txt");
+    store.renameFile("archive/copy.txt", "archive/renamed.txt", false);
+    store.moveFile("archive/renamed.txt", "moved.txt", false);
+    store.deleteFile("docs/source.txt");
+
+    return expect(copied.content == "alpha", "copied content mismatch") &&
+           expect(store.readFile("moved.txt").content == "alpha", "moved content mismatch");
+}
+
+bool filesystem_file_store_rejects_regular_file_conflicts() {
+    TempDirectory temp(uniqueTempPath());
+    tundraux::backend::FilesystemFileStore store(temp.path().string());
+    store.writeFile("a.txt", "a");
+    store.writeFile("b.txt", "b");
+    store.createDirectory("not_empty");
+    store.writeFile("not_empty/item.txt", "x");
+
+    bool existingRejected = false;
+    bool nonEmptyRejected = false;
+    try {
+        store.copyFile("a.txt", "b.txt", false);
+    } catch (const tundraux::backend::BackendException& error) {
+        existingRejected = error.code() == tundraux::backend::ErrorCode::AlreadyExists;
+    }
+    try {
+        store.removeDirectory("not_empty", false);
+    } catch (const tundraux::backend::BackendException& error) {
+        nonEmptyRejected = error.code() == tundraux::backend::ErrorCode::Conflict;
+    }
+
+    return expect(existingRejected, "copy should reject existing destination") &&
+           expect(nonEmptyRejected, "non-recursive rmdir should reject non-empty directory");
+}
+
+bool filesystem_file_store_searches_by_name() {
+    TempDirectory temp(uniqueTempPath());
+    tundraux::backend::FilesystemFileStore store(temp.path().string());
+    store.writeFile("docs/alpha.txt", "a");
+    store.writeFile("docs/beta.txt", "b");
+    store.createDirectory("docs/alpha-folder");
+
+    const auto results = store.search("docs", "alpha");
+    return expect(results.size() == 2, "expected file and directory search matches");
+}
+
 } // namespace
 
 int main() {
@@ -384,6 +436,9 @@ int main() {
     if (!regular_file_mutations_require_user_session()) return 1;
     if (!regular_file_mutations_delegate_for_logged_in_user()) return 1;
     if (!regular_file_operations_map_unknown_exceptions_to_storage_error()) return 1;
+    if (!filesystem_file_store_mutates_regular_files()) return 1;
+    if (!filesystem_file_store_rejects_regular_file_conflicts()) return 1;
+    if (!filesystem_file_store_searches_by_name()) return 1;
 
     const auto guest = sessions.startGuestSession();
     const auto guestList = service.listDirectory(guest.sessionId, "");
