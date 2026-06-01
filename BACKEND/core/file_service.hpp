@@ -25,6 +25,32 @@ public:
         const std::string& path,
         const std::string& content
     );
+    ServiceResult<EmptyResult> deleteFile(const std::string& sessionId, const std::string& path);
+    ServiceResult<EmptyResult> renameFile(
+        const std::string& sessionId,
+        const std::string& from,
+        const std::string& to,
+        bool overwrite
+    );
+    ServiceResult<EmptyResult> copyFile(
+        const std::string& sessionId,
+        const std::string& from,
+        const std::string& to,
+        bool overwrite
+    );
+    ServiceResult<EmptyResult> moveFile(
+        const std::string& sessionId,
+        const std::string& from,
+        const std::string& to,
+        bool overwrite
+    );
+    ServiceResult<EmptyResult> createDirectory(const std::string& sessionId, const std::string& path);
+    ServiceResult<EmptyResult> removeDirectory(const std::string& sessionId, const std::string& path, bool recursive);
+    ServiceResult<std::vector<FileEntry>> search(
+        const std::string& sessionId,
+        const std::string& root,
+        const std::string& query
+    ) const;
 
 private:
     FileStore& files_;

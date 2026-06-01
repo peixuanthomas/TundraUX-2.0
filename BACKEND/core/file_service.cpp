@@ -9,6 +9,18 @@ namespace {
 constexpr const char* kAccessDeniedMessage = "Access denied.";
 constexpr const char* kFileStorageErrorMessage = "File storage error.";
 
+template <typename Func>
+ServiceResult<EmptyResult> runFileMutation(Func func) {
+    try {
+        func();
+        return ServiceResult<EmptyResult>::success(EmptyResult{});
+    } catch (const BackendException& error) {
+        return ServiceResult<EmptyResult>::failure(error.code(), error.what());
+    } catch (const std::exception&) {
+        return ServiceResult<EmptyResult>::failure(ErrorCode::StorageError, kFileStorageErrorMessage);
+    }
+}
+
 } // namespace
 
 FileService::FileService(FileStore& files, const SessionService& sessions)
@@ -78,6 +90,110 @@ ServiceResult<EmptyResult> FileService::writeFile(
         return ServiceResult<EmptyResult>::failure(error.code(), error.what());
     } catch (const std::exception&) {
         return ServiceResult<EmptyResult>::failure(ErrorCode::StorageError, kFileStorageErrorMessage);
+    }
+}
+
+ServiceResult<EmptyResult> FileService::deleteFile(const std::string& sessionId, const std::string& path) {
+    const auto access = requireFileAccess(sessionId);
+    if (!access.ok) {
+        return ServiceResult<EmptyResult>::failure(access.error.code, access.error.message);
+    }
+
+    return runFileMutation([this, &path]() {
+        files_.deleteFile(path);
+    });
+}
+
+ServiceResult<EmptyResult> FileService::renameFile(
+    const std::string& sessionId,
+    const std::string& from,
+    const std::string& to,
+    bool overwrite
+) {
+    const auto access = requireFileAccess(sessionId);
+    if (!access.ok) {
+        return ServiceResult<EmptyResult>::failure(access.error.code, access.error.message);
+    }
+
+    return runFileMutation([this, &from, &to, overwrite]() {
+        files_.renameFile(from, to, overwrite);
+    });
+}
+
+ServiceResult<EmptyResult> FileService::copyFile(
+    const std::string& sessionId,
+    const std::string& from,
+    const std::string& to,
+    bool overwrite
+) {
+    const auto access = requireFileAccess(sessionId);
+    if (!access.ok) {
+        return ServiceResult<EmptyResult>::failure(access.error.code, access.error.message);
+    }
+
+    return runFileMutation([this, &from, &to, overwrite]() {
+        files_.copyFile(from, to, overwrite);
+    });
+}
+
+ServiceResult<EmptyResult> FileService::moveFile(
+    const std::string& sessionId,
+    const std::string& from,
+    const std::string& to,
+    bool overwrite
+) {
+    const auto access = requireFileAccess(sessionId);
+    if (!access.ok) {
+        return ServiceResult<EmptyResult>::failure(access.error.code, access.error.message);
+    }
+
+    return runFileMutation([this, &from, &to, overwrite]() {
+        files_.moveFile(from, to, overwrite);
+    });
+}
+
+ServiceResult<EmptyResult> FileService::createDirectory(const std::string& sessionId, const std::string& path) {
+    const auto access = requireFileAccess(sessionId);
+    if (!access.ok) {
+        return ServiceResult<EmptyResult>::failure(access.error.code, access.error.message);
+    }
+
+    return runFileMutation([this, &path]() {
+        files_.createDirectory(path);
+    });
+}
+
+ServiceResult<EmptyResult> FileService::removeDirectory(
+    const std::string& sessionId,
+    const std::string& path,
+    bool recursive
+) {
+    const auto access = requireFileAccess(sessionId);
+    if (!access.ok) {
+        return ServiceResult<EmptyResult>::failure(access.error.code, access.error.message);
+    }
+
+    return runFileMutation([this, &path, recursive]() {
+        files_.removeDirectory(path, recursive);
+    });
+}
+
+ServiceResult<std::vector<FileEntry>> FileService::search(
+    const std::string& sessionId,
+    const std::string& root,
+    const std::string& query
+) const {
+    const auto access = requireFileAccess(sessionId);
+    if (!access.ok) {
+        return ServiceResult<std::vector<FileEntry>>::failure(access.error.code, access.error.message);
+    }
+
+    try {
+        return ServiceResult<std::vector<FileEntry>>::success(files_.search(root, query));
+    } catch (const BackendException& error) {
+        return ServiceResult<std::vector<FileEntry>>::failure(error.code(), error.what());
+    } catch (const std::exception&) {
+        return ServiceResult<std::vector<FileEntry>>::failure(ErrorCode::StorageError, kFileStorageErrorMessage);
     }
 }
 

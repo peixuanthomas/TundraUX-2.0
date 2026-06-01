@@ -68,6 +68,73 @@ public:
         writtenPath = path;
         writtenContent = content;
     }
+
+    void deleteFile(const std::string&) override {}
+
+    void renameFile(const std::string&, const std::string&, bool) override {}
+
+    void copyFile(const std::string&, const std::string&, bool) override {}
+
+    void moveFile(const std::string&, const std::string&, bool) override {}
+
+    void createDirectory(const std::string&) override {}
+
+    void removeDirectory(const std::string&, bool) override {}
+
+    std::vector<tundraux::backend::FileEntry> search(const std::string&, const std::string&) const override {
+        return {};
+    }
+};
+
+class RecordingFileStore final : public tundraux::backend::FileStore {
+public:
+    std::vector<tundraux::backend::FileEntry> entries;
+    std::string content;
+    std::vector<std::string> calls;
+
+    std::vector<tundraux::backend::FileEntry> listDirectory(const std::string& path) const override {
+        const_cast<RecordingFileStore*>(this)->calls.push_back("list:" + path);
+        return entries;
+    }
+
+    tundraux::backend::FileContent readFile(const std::string& path) const override {
+        const_cast<RecordingFileStore*>(this)->calls.push_back("read:" + path);
+        return {content};
+    }
+
+    void writeFile(const std::string& path, const std::string& value) override {
+        calls.push_back("write:" + path + ":" + value);
+        content = value;
+    }
+
+    void deleteFile(const std::string& path) override {
+        calls.push_back("delete:" + path);
+    }
+
+    void renameFile(const std::string& from, const std::string& to, bool overwrite) override {
+        calls.push_back("rename:" + from + ":" + to + ":" + (overwrite ? "1" : "0"));
+    }
+
+    void copyFile(const std::string& from, const std::string& to, bool overwrite) override {
+        calls.push_back("copy:" + from + ":" + to + ":" + (overwrite ? "1" : "0"));
+    }
+
+    void moveFile(const std::string& from, const std::string& to, bool overwrite) override {
+        calls.push_back("move:" + from + ":" + to + ":" + (overwrite ? "1" : "0"));
+    }
+
+    void createDirectory(const std::string& path) override {
+        calls.push_back("mkdir:" + path);
+    }
+
+    void removeDirectory(const std::string& path, bool recursive) override {
+        calls.push_back("rmdir:" + path + ":" + (recursive ? "1" : "0"));
+    }
+
+    std::vector<tundraux::backend::FileEntry> search(const std::string& root, const std::string& query) const override {
+        const_cast<RecordingFileStore*>(this)->calls.push_back("search:" + root + ":" + query);
+        return entries;
+    }
 };
 
 class TempDirectory final {
@@ -208,6 +275,39 @@ bool createdDirectorySymlink(const std::filesystem::path& target, const std::fil
     return true;
 }
 
+bool regular_file_mutations_require_user_session() {
+    RecordingFileStore store;
+    InMemoryUserStore users;
+    tundraux::backend::SessionService sessions(users);
+    tundraux::backend::FileService service(store, sessions);
+    const auto guest = sessions.startGuestSession();
+
+    return expect(!service.deleteFile(guest.sessionId, "a.txt").ok, "guest delete should fail") &&
+        expect(!service.createDirectory(guest.sessionId, "docs").ok, "guest mkdir should fail") &&
+        expect(store.calls.empty(), "guest calls should not reach store");
+}
+
+bool regular_file_mutations_delegate_for_logged_in_user() {
+    RecordingFileStore store;
+    InMemoryUserStore users;
+    tundraux::backend::SessionService sessions(users);
+    tundraux::backend::FileService service(store, sessions);
+    const auto guest = sessions.startGuestSession();
+    const auto loggedIn = sessions.login(guest.sessionId, "alice", "Secret1");
+
+    const bool ok =
+        service.deleteFile(loggedIn.value.sessionId, "old.txt").ok &&
+        service.renameFile(loggedIn.value.sessionId, "old.txt", "new.txt", false).ok &&
+        service.copyFile(loggedIn.value.sessionId, "new.txt", "copy.txt", true).ok &&
+        service.moveFile(loggedIn.value.sessionId, "copy.txt", "archive/copy.txt", false).ok &&
+        service.createDirectory(loggedIn.value.sessionId, "archive").ok &&
+        service.removeDirectory(loggedIn.value.sessionId, "archive", false).ok &&
+        service.search(loggedIn.value.sessionId, "", "copy").ok;
+
+    return expect(ok, "logged-in file mutations should succeed") &&
+        expect(store.calls.size() == 7, "expected seven delegated calls");
+}
+
 } // namespace
 
 int main() {
@@ -217,6 +317,9 @@ int main() {
     SessionService sessions(users);
     InMemoryFileStore files;
     FileService service(files, sessions);
+
+    if (!regular_file_mutations_require_user_session()) return 1;
+    if (!regular_file_mutations_delegate_for_logged_in_user()) return 1;
 
     const auto guest = sessions.startGuestSession();
     const auto guestList = service.listDirectory(guest.sessionId, "");

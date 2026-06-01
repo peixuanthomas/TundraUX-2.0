@@ -50,6 +50,13 @@ public:
     virtual std::vector<FileEntry> listDirectory(const std::string& path) const = 0;
     virtual FileContent readFile(const std::string& path) const = 0;
     virtual void writeFile(const std::string& path, const std::string& content) = 0;
+    virtual void deleteFile(const std::string& path) = 0;
+    virtual void renameFile(const std::string& from, const std::string& to, bool overwrite) = 0;
+    virtual void copyFile(const std::string& from, const std::string& to, bool overwrite) = 0;
+    virtual void moveFile(const std::string& from, const std::string& to, bool overwrite) = 0;
+    virtual void createDirectory(const std::string& path) = 0;
+    virtual void removeDirectory(const std::string& path, bool recursive) = 0;
+    virtual std::vector<FileEntry> search(const std::string& root, const std::string& query) const = 0;
 };
 
 } // namespace tundraux::backend
