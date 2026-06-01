@@ -3,6 +3,8 @@
 #include "file_service.hpp"
 #include "file_store.hpp"
 #include "session_service.hpp"
+#include "tux_service.hpp"
+#include "tux_store.hpp"
 #include "user_service.hpp"
 #include "user_store.hpp"
 
@@ -10,8 +12,10 @@
 #include <iostream>
 #include <limits>
 #include <locale>
+#include <map>
 #include <stdexcept>
 #include <string>
+#include <utility>
 #include <vector>
 
 namespace {
@@ -42,6 +46,7 @@ class InMemoryFileStore final : public tundraux::backend::FileStore {
 public:
     std::string writtenPath;
     std::string writtenContent;
+    std::vector<std::string> calls;
 
     std::vector<tundraux::backend::FileEntry> listDirectory(const std::string& path) const override {
         if (path == "docs") {
@@ -63,24 +68,134 @@ public:
     }
 
     void writeFile(const std::string& path, const std::string& content) override {
+        calls.push_back("write:" + path + ":" + content);
         writtenPath = path;
         writtenContent = content;
     }
 
-    void deleteFile(const std::string&) override {}
+    void deleteFile(const std::string& path) override {
+        calls.push_back("delete:" + path);
+    }
 
-    void renameFile(const std::string&, const std::string&, bool) override {}
+    void renameFile(const std::string& from, const std::string& to, bool overwrite) override {
+        calls.push_back("rename:" + from + ":" + to + ":" + (overwrite ? "1" : "0"));
+    }
 
-    void copyFile(const std::string&, const std::string&, bool) override {}
+    void copyFile(const std::string& from, const std::string& to, bool overwrite) override {
+        calls.push_back("copy:" + from + ":" + to + ":" + (overwrite ? "1" : "0"));
+    }
 
-    void moveFile(const std::string&, const std::string&, bool) override {}
+    void moveFile(const std::string& from, const std::string& to, bool overwrite) override {
+        calls.push_back("move:" + from + ":" + to + ":" + (overwrite ? "1" : "0"));
+    }
 
-    void createDirectory(const std::string&) override {}
+    void createDirectory(const std::string& path) override {
+        calls.push_back("mkdir:" + path);
+    }
 
-    void removeDirectory(const std::string&, bool) override {}
+    void removeDirectory(const std::string& path, bool recursive) override {
+        calls.push_back("rmdir:" + path + ":" + (recursive ? "1" : "0"));
+    }
 
-    std::vector<tundraux::backend::FileEntry> search(const std::string&, const std::string&) const override {
-        return {};
+    std::vector<tundraux::backend::FileEntry> search(const std::string& root, const std::string& query) const override {
+        const_cast<InMemoryFileStore*>(this)->calls.push_back("search:" + root + ":" + query);
+        return {
+            {"match.txt", root.empty() ? "match.txt" : root + "/match.txt", tundraux::backend::FileEntryType::File, 7}
+        };
+    }
+};
+
+class InMemoryTuxStore final : public tundraux::backend::TuxStore {
+public:
+    std::map<std::string, tundraux::backend::TuxContent> files;
+    std::vector<std::string> calls;
+
+    std::vector<tundraux::backend::FileEntry> list(const std::string& path) const override {
+        const_cast<InMemoryTuxStore*>(this)->calls.push_back("list:" + path);
+        std::vector<tundraux::backend::FileEntry> entries;
+        for (const auto& file : files) {
+            entries.push_back({
+                file.first,
+                file.first,
+                tundraux::backend::FileEntryType::File,
+                file.second.content.size()
+            });
+        }
+        return entries;
+    }
+
+    tundraux::backend::TuxMetadata metadata(const std::string& path) const override {
+        const auto found = files.find(path);
+        if (found == files.end()) {
+            throw tundraux::backend::BackendException(tundraux::backend::ErrorCode::NotFound, "TUX file not found.");
+        }
+        return found->second.metadata;
+    }
+
+    tundraux::backend::TuxContent read(const std::string& path) const override {
+        const_cast<InMemoryTuxStore*>(this)->calls.push_back("read:" + path);
+        const auto found = files.find(path);
+        if (found == files.end()) {
+            throw tundraux::backend::BackendException(tundraux::backend::ErrorCode::NotFound, "TUX file not found.");
+        }
+        return found->second;
+    }
+
+    void create(const std::string& path, const tundraux::backend::TuxMetadata& metadata, bool overwrite) override {
+        calls.push_back("create:" + path + ":" + (overwrite ? "1" : "0"));
+        files[path] = tundraux::backend::TuxContent{"", metadata};
+    }
+
+    void write(const std::string& path, const std::string& content, const tundraux::backend::TuxMetadata& metadata) override {
+        calls.push_back("write:" + path + ":" + content);
+        files[path] = tundraux::backend::TuxContent{content, metadata};
+    }
+
+    void deleteFile(const std::string& path) override {
+        calls.push_back("delete:" + path);
+        files.erase(path);
+    }
+
+    void renameFile(const std::string& from, const std::string& to, bool overwrite) override {
+        calls.push_back("rename:" + from + ":" + to + ":" + (overwrite ? "1" : "0"));
+        auto content = files.at(from);
+        files.erase(from);
+        files[to] = content;
+    }
+
+    void copyFile(
+        const std::string& from,
+        const std::string& to,
+        const tundraux::backend::TuxMetadata& metadata,
+        bool overwrite
+    ) override {
+        calls.push_back("copy:" + from + ":" + to + ":" + (overwrite ? "1" : "0"));
+        auto content = files.at(from);
+        content.metadata = metadata;
+        files[to] = content;
+    }
+
+    void moveFile(const std::string& from, const std::string& to, bool overwrite) override {
+        calls.push_back("move:" + from + ":" + to + ":" + (overwrite ? "1" : "0"));
+        auto content = files.at(from);
+        files.erase(from);
+        files[to] = content;
+    }
+
+    std::vector<tundraux::backend::FileEntry> search(const std::string& root, const std::string& query) const override {
+        const_cast<InMemoryTuxStore*>(this)->calls.push_back("search:" + root + ":" + query);
+        std::vector<tundraux::backend::FileEntry> entries;
+        for (const auto& file : files) {
+            if (file.first.find(query) != std::string::npos || file.second.content.find(query) != std::string::npos) {
+                entries.push_back({
+                    file.first,
+                    file.first,
+                    tundraux::backend::FileEntryType::File,
+                    file.second.content.size()
+                });
+            }
+        }
+        return entries;
     }
 };
 
@@ -98,6 +213,14 @@ bool expectInvalidJson(const std::string& input, const std::string& message) {
     const auto parsed = tundraux::backend::parseJson(input);
     return expect(!parsed.ok, message)
         && expect(parsed.error.code == tundraux::backend::ErrorCode::InvalidRequest, message + " error code");
+}
+
+bool expectNoErrorResponse(const std::string& response, const std::string& expectedId, const std::string& label) {
+    const auto parsed = tundraux::backend::parseJson(response);
+    if (!expect(parsed.ok, label + " response should parse: " + response)) return false;
+    const auto& object = parsed.value.asObject();
+    return expect(object.at("id").asString() == expectedId, label + " response id mismatch") &&
+        expect(object.find("error") == object.end(), label + " should not return error: " + response);
 }
 
 bool runCommaLocaleNumberTest() {
@@ -290,6 +413,166 @@ bool runDispatcherTest() {
     return true;
 }
 
+bool runDispatcherFileMutationTest() {
+    using tundraux::backend::FileService;
+    using tundraux::backend::JsonRpcDispatcher;
+    using tundraux::backend::parseJson;
+    using tundraux::backend::SessionService;
+    using tundraux::backend::TuxService;
+    using tundraux::backend::UserService;
+
+    InMemoryUserStore store;
+    SessionService sessions(store);
+    UserService users(store, sessions);
+    InMemoryFileStore fileStore;
+    FileService files(fileStore, sessions);
+    InMemoryTuxStore tuxStore;
+    TuxService tux(tuxStore, sessions);
+    JsonRpcDispatcher dispatcher(sessions, users, files, tux);
+
+    const std::string guestResponse = dispatcher.handleLine(R"({"id":"1","method":"session.startGuestSession","params":{}})");
+    const auto guest = parseJson(guestResponse);
+    if (!expect(guest.ok, "file mutation guest response should parse: " + guestResponse)) return false;
+    const std::string sessionId = guest.value.asObject().at("result").asObject().at("sessionId").asString();
+
+    const std::string loginResponse = dispatcher.handleLine(
+        R"({"id":"2","method":"session.login","params":{"sessionId":")" + sessionId +
+        R"(","username":"alice","password":"Secret1"}})"
+    );
+    if (!expectNoErrorResponse(loginResponse, "2", "file mutation login")) return false;
+
+    const std::vector<std::pair<std::string, std::string>> requests{
+        {"3", R"({"id":"3","method":"file.createDirectory","params":{"sessionId":")" + sessionId + R"(","path":"docs"}})"},
+        {"4", R"({"id":"4","method":"file.writeFile","params":{"sessionId":")" + sessionId + R"(","path":"docs/note.txt","content":"updated"}})"},
+        {"5", R"({"id":"5","method":"file.deleteFile","params":{"sessionId":")" + sessionId + R"(","path":"docs/old.txt"}})"},
+        {"6", R"({"id":"6","method":"file.renameFile","params":{"sessionId":")" + sessionId + R"(","from":"docs/a.txt","to":"docs/b.txt","overwrite":false}})"},
+        {"7", R"({"id":"7","method":"file.copyFile","params":{"sessionId":")" + sessionId + R"(","from":"docs/b.txt","to":"docs/c.txt","overwrite":true}})"},
+        {"8", R"({"id":"8","method":"file.moveFile","params":{"sessionId":")" + sessionId + R"(","from":"docs/c.txt","to":"archive/c.txt","overwrite":false}})"},
+        {"9", R"({"id":"9","method":"file.removeDirectory","params":{"sessionId":")" + sessionId + R"(","path":"archive","recursive":true}})"}
+    };
+    for (const auto& request : requests) {
+        if (!expectNoErrorResponse(dispatcher.handleLine(request.second), request.first, "file mutation " + request.first)) {
+            return false;
+        }
+    }
+
+    const std::string searchResponse = dispatcher.handleLine(
+        R"({"id":"10","method":"file.search","params":{"sessionId":")" + sessionId +
+        R"(","root":"docs","query":"match"}})"
+    );
+    if (!expectNoErrorResponse(searchResponse, "10", "file search")) return false;
+    const auto search = parseJson(searchResponse);
+    const auto& entries = search.value.asObject().at("result").asObject().at("entries").asArray();
+    if (!expect(entries.size() == 1, "file search entry count mismatch")) return false;
+    const auto& entry = entries[0].asObject();
+    if (!expect(entry.at("name").asString() == "match.txt", "file search entry name mismatch")) return false;
+    if (!expect(entry.at("path").asString() == "docs/match.txt", "file search entry path mismatch")) return false;
+
+    const std::vector<std::string> expectedCalls{
+        "mkdir:docs",
+        "write:docs/note.txt:updated",
+        "delete:docs/old.txt",
+        "rename:docs/a.txt:docs/b.txt:0",
+        "copy:docs/b.txt:docs/c.txt:1",
+        "move:docs/c.txt:archive/c.txt:0",
+        "rmdir:archive:1",
+        "search:docs:match"
+    };
+    return expect(fileStore.calls == expectedCalls, "file mutation call sequence mismatch");
+}
+
+bool runDispatcherTuxMethodsTest() {
+    using tundraux::backend::FileService;
+    using tundraux::backend::JsonRpcDispatcher;
+    using tundraux::backend::parseJson;
+    using tundraux::backend::SessionService;
+    using tundraux::backend::TuxService;
+    using tundraux::backend::UserService;
+
+    InMemoryUserStore store;
+    SessionService sessions(store);
+    UserService users(store, sessions);
+    InMemoryFileStore fileStore;
+    FileService files(fileStore, sessions);
+    InMemoryTuxStore tuxStore;
+    TuxService tux(tuxStore, sessions);
+    JsonRpcDispatcher dispatcher(sessions, users, files, tux);
+
+    const std::string guestResponse = dispatcher.handleLine(R"({"id":"1","method":"session.startGuestSession","params":{}})");
+    const auto guest = parseJson(guestResponse);
+    if (!expect(guest.ok, "tux guest response should parse: " + guestResponse)) return false;
+    const std::string sessionId = guest.value.asObject().at("result").asObject().at("sessionId").asString();
+
+    const std::string loginResponse = dispatcher.handleLine(
+        R"({"id":"2","method":"session.login","params":{"sessionId":")" + sessionId +
+        R"(","username":"alice","password":"Secret1"}})"
+    );
+    if (!expectNoErrorResponse(loginResponse, "2", "tux login")) return false;
+
+    const std::vector<std::pair<std::string, std::string>> mutationRequests{
+        {"3", R"({"id":"3","method":"tux.create","params":{"sessionId":")" + sessionId + R"(","path":"docs/secret","overwrite":false}})"},
+        {"4", R"({"id":"4","method":"tux.write","params":{"sessionId":")" + sessionId + R"(","path":"docs/secret","content":"hello"}})"}
+    };
+    for (const auto& request : mutationRequests) {
+        if (!expectNoErrorResponse(dispatcher.handleLine(request.second), request.first, "tux mutation " + request.first)) {
+            return false;
+        }
+    }
+
+    const std::string readResponse = dispatcher.handleLine(
+        R"({"id":"5","method":"tux.read","params":{"sessionId":")" + sessionId + R"(","path":"docs/secret"}})"
+    );
+    if (!expectNoErrorResponse(readResponse, "5", "tux read")) return false;
+    const auto read = parseJson(readResponse);
+    const auto& readResult = read.value.asObject().at("result").asObject();
+    if (!expect(readResult.at("content").asString() == "hello", "tux read content mismatch")) return false;
+    if (!expect(readResult.at("creator").asString() == "alice", "tux read creator mismatch")) return false;
+    if (!expect(readResult.at("lastEditor").asString() == "alice", "tux read last editor mismatch")) return false;
+
+    const std::string listResponse = dispatcher.handleLine(
+        R"({"id":"6","method":"tux.list","params":{"sessionId":")" + sessionId + R"(","path":"docs"}})"
+    );
+    if (!expectNoErrorResponse(listResponse, "6", "tux list")) return false;
+    const auto list = parseJson(listResponse);
+    if (!expect(!list.value.asObject().at("result").asObject().at("entries").asArray().empty(), "tux list entries should not be empty")) {
+        return false;
+    }
+
+    const std::string searchResponse = dispatcher.handleLine(
+        R"({"id":"7","method":"tux.search","params":{"sessionId":")" + sessionId + R"(","root":"docs","query":"hello"}})"
+    );
+    if (!expectNoErrorResponse(searchResponse, "7", "tux search")) return false;
+    const auto search = parseJson(searchResponse);
+    const auto& searchEntries = search.value.asObject().at("result").asObject().at("entries").asArray();
+    if (!expect(searchEntries.size() == 1, "tux search entry count mismatch")) return false;
+    if (!expect(searchEntries[0].asObject().at("path").asString() == "docs/secret", "tux search entry path mismatch")) return false;
+
+    const std::vector<std::pair<std::string, std::string>> remainingRequests{
+        {"8", R"({"id":"8","method":"tux.rename","params":{"sessionId":")" + sessionId + R"(","from":"docs/secret","to":"docs/renamed","overwrite":false}})"},
+        {"9", R"({"id":"9","method":"tux.copy","params":{"sessionId":")" + sessionId + R"(","from":"docs/renamed","to":"docs/copy","overwrite":true}})"},
+        {"10", R"({"id":"10","method":"tux.move","params":{"sessionId":")" + sessionId + R"(","from":"docs/copy","to":"docs/moved","overwrite":false}})"},
+        {"11", R"({"id":"11","method":"tux.delete","params":{"sessionId":")" + sessionId + R"(","path":"docs/moved"}})"}
+    };
+    for (const auto& request : remainingRequests) {
+        if (!expectNoErrorResponse(dispatcher.handleLine(request.second), request.first, "tux remaining " + request.first)) {
+            return false;
+        }
+    }
+
+    const std::vector<std::string> expectedCalls{
+        "create:docs/secret:0",
+        "write:docs/secret:hello",
+        "read:docs/secret",
+        "list:docs",
+        "search:docs:hello",
+        "rename:docs/secret:docs/renamed:0",
+        "copy:docs/renamed:docs/copy:1",
+        "move:docs/copy:docs/moved:0",
+        "delete:docs/moved"
+    };
+    return expect(tuxStore.calls == expectedCalls, "tux call sequence mismatch");
+}
+
 bool runDispatcherWithoutFileServiceTest() {
     using tundraux::backend::JsonRpcDispatcher;
     using tundraux::backend::parseJson;
@@ -384,6 +667,8 @@ int main() {
     if (!expect(wrongTypeThrew, "wrong-type accessor should throw")) return 1;
 
     if (!expect(runDispatcherTest(), "json rpc dispatcher behavior failed")) return 1;
+    if (!expect(runDispatcherFileMutationTest(), "json rpc file mutation behavior failed")) return 1;
+    if (!expect(runDispatcherTuxMethodsTest(), "json rpc tux behavior failed")) return 1;
     if (!expect(runDispatcherWithoutFileServiceTest(), "json rpc dispatcher without file service behavior failed")) return 1;
 
     return 0;

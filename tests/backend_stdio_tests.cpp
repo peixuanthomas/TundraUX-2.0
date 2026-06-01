@@ -778,6 +778,24 @@ bool expectJsonOnlyLine(const std::string& line, const std::string& label) {
     return true;
 }
 
+bool expectSuccessfulRpcResponse(const std::string& response, const std::string& expectedId, const std::string& label) {
+    const auto parsed = tundraux::backend::parseJson(response);
+    if (!parsed.ok) {
+        std::cerr << label << " response did not parse: " << response << "\n";
+        return false;
+    }
+    const auto& object = parsed.value.asObject();
+    if (object.at("id").asString() != expectedId) {
+        std::cerr << label << " response id mismatch: " << response << "\n";
+        return false;
+    }
+    if (object.find("error") != object.end()) {
+        std::cerr << label << " returned error: " << response << "\n";
+        return false;
+    }
+    return true;
+}
+
 bool sendRequestAndReadResponse(
     InteractiveProcess& child,
     const std::string& request,
@@ -801,6 +819,148 @@ bool sendRequestAndReadResponse(
     if (!expectJsonOnlyLine(response, label)) {
         std::cerr << label << " captured stdout:\n" << child.stdoutText
                   << "\nstderr:\n" << child.stderrText << "\n";
+        return false;
+    }
+    return true;
+}
+
+bool runFirstBatchApiProcessTest(const std::filesystem::path& backendExePath) {
+    const auto base = uniqueTempPath("process_first_batch_api");
+    const std::filesystem::path userDataPath = base.string() + "_user_data.dat";
+    const std::filesystem::path filesRoot = base.string() + "_files";
+    std::filesystem::remove(userDataPath);
+    std::filesystem::remove_all(filesRoot);
+
+    InteractiveProcess child;
+    const auto cleanupFiles = [&]() {
+        std::filesystem::remove(userDataPath);
+        std::filesystem::remove(userDataPath.string() + ".tmp");
+        std::filesystem::remove_all(filesRoot);
+    };
+    const auto fail = [&]() {
+        cleanupInteractiveProcess(child);
+        cleanupFiles();
+        return false;
+    };
+
+    if (!writeUserDataFile(userDataPath)) {
+        std::cerr << "first batch api process failed to write user data\n";
+        return fail();
+    }
+    std::filesystem::create_directories(filesRoot);
+
+    if (!startInteractiveProcess(
+            backendExePath,
+            {"--user-data", userDataPath.string(), "--files-root", filesRoot.string()},
+            child)) {
+        std::cerr << "first batch api process failed to start: " << child.diagnostics << "\n";
+        return fail();
+    }
+
+    std::string response;
+    if (!sendRequestAndReadResponse(
+            child,
+            R"({"id":"1","method":"session.startGuestSession","params":{}})",
+            "first batch guest session",
+            response)) {
+        return fail();
+    }
+    if (!expectSuccessfulRpcResponse(response, "1", "first batch guest session")) return fail();
+    const auto guest = tundraux::backend::parseJson(response);
+    const std::string sessionId = guest.value.asObject().at("result").asObject().at("sessionId").asString();
+    if (sessionId.empty()) {
+        std::cerr << "first batch api process returned empty session id\n";
+        return fail();
+    }
+
+    const std::vector<std::pair<std::string, std::string>> writeRequests{
+        {"2", R"({"id":"2","method":"session.login","params":{"sessionId":")" + sessionId + R"(","username":"alice","password":"Secret1"}})"},
+        {"3", R"({"id":"3","method":"file.createDirectory","params":{"sessionId":")" + sessionId + R"(","path":"docs"}})"},
+        {"4", R"({"id":"4","method":"tux.create","params":{"sessionId":")" + sessionId + R"(","path":"docs/secret","overwrite":false}})"},
+        {"5", R"({"id":"5","method":"tux.write","params":{"sessionId":")" + sessionId + R"(","path":"docs/secret","content":"hello from stdio"}})"}
+    };
+    for (const auto& request : writeRequests) {
+        if (!sendRequestAndReadResponse(child, request.second, "first batch request " + request.first, response)) {
+            return fail();
+        }
+        if (!expectSuccessfulRpcResponse(response, request.first, "first batch request " + request.first)) {
+            return fail();
+        }
+    }
+
+    if (!sendRequestAndReadResponse(
+            child,
+            R"({"id":"6","method":"tux.read","params":{"sessionId":")" + sessionId + R"(","path":"docs/secret"}})",
+            "first batch tux read",
+            response)) {
+        return fail();
+    }
+    if (!expectSuccessfulRpcResponse(response, "6", "first batch tux read")) return fail();
+    const auto read = tundraux::backend::parseJson(response);
+    const auto& readResult = read.value.asObject().at("result").asObject();
+    if (readResult.at("content").asString() != "hello from stdio" ||
+        readResult.at("creator").asString() != "alice" ||
+        readResult.at("lastEditor").asString() != "alice") {
+        std::cerr << "first batch tux read result mismatch: " << response << "\n";
+        return fail();
+    }
+
+    if (!sendRequestAndReadResponse(
+            child,
+            R"({"id":"7","method":"tux.search","params":{"sessionId":")" + sessionId + R"(","root":"docs","query":"secret"}})",
+            "first batch tux search",
+            response)) {
+        return fail();
+    }
+    if (!expectSuccessfulRpcResponse(response, "7", "first batch tux search")) return fail();
+    const auto search = tundraux::backend::parseJson(response);
+    const auto& entries = search.value.asObject().at("result").asObject().at("entries").asArray();
+    bool foundSecret = false;
+    for (const auto& entryValue : entries) {
+        const auto& entry = entryValue.asObject();
+        if (entry.at("name").asString() == "secret" &&
+            entry.at("path").asString() == "docs/secret" &&
+            entry.at("type").asString() == "file") {
+            foundSecret = true;
+        }
+    }
+    if (!foundSecret) {
+        std::cerr << "first batch tux search missing docs/secret entry: " << response << "\n";
+        return fail();
+    }
+
+    if (!sendRequestAndReadResponse(
+            child,
+            R"({"id":"8","method":"tux.delete","params":{"sessionId":")" + sessionId + R"(","path":"docs/secret"}})",
+            "first batch tux delete",
+            response)) {
+        return fail();
+    }
+    if (!expectSuccessfulRpcResponse(response, "8", "first batch tux delete")) return fail();
+
+    DWORD exitCode = 1;
+    std::string remainingStdout;
+    std::string stderrText;
+    if (!stopInteractiveProcess(child, exitCode, remainingStdout, stderrText)) {
+        std::cerr << "first batch api process failed to stop: " << child.diagnostics
+                  << "\nstdout:\n" << child.stdoutText
+                  << "\nstderr:\n" << child.stderrText << "\n";
+        cleanupFiles();
+        return false;
+    }
+
+    cleanupFiles();
+
+    if (exitCode != 0) {
+        std::cerr << "first batch api process exit code mismatch: " << exitCode << "\n";
+        return false;
+    }
+    if (!remainingStdout.empty()) {
+        std::cerr << "first batch api process wrote unexpected trailing stdout: " << remainingStdout << "\n";
+        return false;
+    }
+    if (!stderrText.empty()) {
+        std::cerr << "first batch api process wrote stderr: " << stderrText << "\n";
         return false;
     }
     return true;
@@ -1245,6 +1405,7 @@ bool runProcessTests(const std::filesystem::path& backendExePath) {
         runInvalidCliProcessTest(backendExePath, {"--bad"}, "unknown_arg") &&
         runInvalidCliProcessTest(backendExePath, {"--user-data"}, "missing_user_data_value") &&
         runInvalidCliProcessTest(backendExePath, {"--files-root"}, "missing_files_root_value") &&
+        runFirstBatchApiProcessTest(backendExePath) &&
         runFileApiProcessTest(backendExePath) &&
         runMissingFilesRootProcessTest(backendExePath) &&
         runMalformedStorageProcessTest(backendExePath);

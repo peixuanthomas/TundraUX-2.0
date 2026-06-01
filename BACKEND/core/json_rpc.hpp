@@ -3,6 +3,7 @@
 #include "file_service.hpp"
 #include "json.hpp"
 #include "session_service.hpp"
+#include "tux_service.hpp"
 #include "user_service.hpp"
 
 #include <string>
@@ -11,6 +12,7 @@ namespace tundraux::backend {
 
 class JsonRpcDispatcher {
 public:
+    JsonRpcDispatcher(SessionService& sessions, UserService& users, FileService& files, TuxService& tux);
     JsonRpcDispatcher(SessionService& sessions, UserService& users, FileService& files);
     JsonRpcDispatcher(SessionService& sessions, UserService& users);
 
@@ -20,6 +22,7 @@ private:
     SessionService& sessions_;
     UserService& users_;
     FileService* files_ = nullptr;
+    TuxService* tux_ = nullptr;
 
     JsonValue dispatch(const std::string& method, const JsonValue::Object& params);
     JsonValue errorResponse(const JsonValue& id, ErrorCode code, const std::string& message) const;

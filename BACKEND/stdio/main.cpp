@@ -1,8 +1,10 @@
 #include "data_manager_user_store.hpp"
 #include "file_service.hpp"
 #include "filesystem_file_store.hpp"
+#include "filesystem_tux_store.hpp"
 #include "json_rpc.hpp"
 #include "session_service.hpp"
+#include "tux_service.hpp"
 #include "user_service.hpp"
 
 #include <iostream>
@@ -54,7 +56,9 @@ int main(int argc, char* argv[]) {
     tundraux::backend::SessionService sessions(usersStore);
     tundraux::backend::UserService users(usersStore, sessions);
     tundraux::backend::FileService files(filesStore, sessions);
-    tundraux::backend::JsonRpcDispatcher dispatcher(sessions, users, files);
+    tundraux::backend::FilesystemTuxStore tuxStore(filesRoot);
+    tundraux::backend::TuxService tux(tuxStore, sessions);
+    tundraux::backend::JsonRpcDispatcher dispatcher(sessions, users, files, tux);
 
     std::string line;
     while (std::getline(std::cin, line)) {

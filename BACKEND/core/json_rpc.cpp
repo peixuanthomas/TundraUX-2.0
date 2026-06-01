@@ -3,6 +3,7 @@
 #include <exception>
 #include <string>
 #include <utility>
+#include <vector>
 
 namespace tundraux::backend {
 namespace {
@@ -60,6 +61,17 @@ std::string requiredStringParam(const JsonValue::Object& params, const std::stri
     return found->second.asString();
 }
 
+bool optionalBoolParam(const JsonValue::Object& params, const std::string& name, bool defaultValue = false) {
+    const auto found = params.find(name);
+    if (found == params.end()) {
+        return defaultValue;
+    }
+    if (found->second.type() != JsonValue::Type::Boolean) {
+        throw RpcError(ErrorCode::InvalidParams, "Missing or invalid parameter: " + name + ".");
+    }
+    return found->second.asBoolean();
+}
+
 const JsonValue::Object& requiredObjectParam(const JsonValue::Object& params, const std::string& name) {
     const auto found = params.find(name);
     if (found == params.end() || found->second.type() != JsonValue::Type::Object) {
@@ -72,7 +84,18 @@ void throwIfFailed(const BackendError& error) {
     throw RpcError(error.code, error.message);
 }
 
+JsonValue entriesToJson(const std::vector<FileEntry>& value) {
+    JsonValue::Array entries;
+    for (const auto& entry : value) {
+        entries.push_back(fileEntryToJson(entry));
+    }
+    return JsonValue::object({{"entries", JsonValue::array(std::move(entries))}});
+}
+
 } // namespace
+
+JsonRpcDispatcher::JsonRpcDispatcher(SessionService& sessions, UserService& users, FileService& files, TuxService& tux)
+    : sessions_(sessions), users_(users), files_(&files), tux_(&tux) {}
 
 JsonRpcDispatcher::JsonRpcDispatcher(SessionService& sessions, UserService& users, FileService& files)
     : sessions_(sessions), users_(users), files_(&files) {}
@@ -188,11 +211,7 @@ JsonValue JsonRpcDispatcher::dispatch(const std::string& method, const JsonValue
             throwIfFailed(result.error);
         }
 
-        JsonValue::Array entries;
-        for (const auto& entry : result.value) {
-            entries.push_back(fileEntryToJson(entry));
-        }
-        return JsonValue::object({{"entries", JsonValue::array(std::move(entries))}});
+        return entriesToJson(result.value);
     }
 
     if (files_ != nullptr && method == "file.readFile") {
@@ -214,6 +233,187 @@ JsonValue JsonRpcDispatcher::dispatch(const std::string& method, const JsonValue
             throwIfFailed(result.error);
         }
         return JsonValue::object({{"ok", JsonValue::boolean(true)}});
+    }
+
+    if (files_ != nullptr && method == "file.createDirectory") {
+        const std::string sessionId = requiredStringParam(params, "sessionId");
+        const std::string path = requiredStringParam(params, "path");
+        const auto result = files_->createDirectory(sessionId, path);
+        if (!result.ok) {
+            throwIfFailed(result.error);
+        }
+        return JsonValue::object({{"ok", JsonValue::boolean(true)}});
+    }
+
+    if (files_ != nullptr && method == "file.deleteFile") {
+        const std::string sessionId = requiredStringParam(params, "sessionId");
+        const std::string path = requiredStringParam(params, "path");
+        const auto result = files_->deleteFile(sessionId, path);
+        if (!result.ok) {
+            throwIfFailed(result.error);
+        }
+        return JsonValue::object({{"ok", JsonValue::boolean(true)}});
+    }
+
+    if (files_ != nullptr && method == "file.renameFile") {
+        const std::string sessionId = requiredStringParam(params, "sessionId");
+        const std::string from = requiredStringParam(params, "from");
+        const std::string to = requiredStringParam(params, "to");
+        const bool overwrite = optionalBoolParam(params, "overwrite");
+        const auto result = files_->renameFile(sessionId, from, to, overwrite);
+        if (!result.ok) {
+            throwIfFailed(result.error);
+        }
+        return JsonValue::object({{"ok", JsonValue::boolean(true)}});
+    }
+
+    if (files_ != nullptr && method == "file.copyFile") {
+        const std::string sessionId = requiredStringParam(params, "sessionId");
+        const std::string from = requiredStringParam(params, "from");
+        const std::string to = requiredStringParam(params, "to");
+        const bool overwrite = optionalBoolParam(params, "overwrite");
+        const auto result = files_->copyFile(sessionId, from, to, overwrite);
+        if (!result.ok) {
+            throwIfFailed(result.error);
+        }
+        return JsonValue::object({{"ok", JsonValue::boolean(true)}});
+    }
+
+    if (files_ != nullptr && method == "file.moveFile") {
+        const std::string sessionId = requiredStringParam(params, "sessionId");
+        const std::string from = requiredStringParam(params, "from");
+        const std::string to = requiredStringParam(params, "to");
+        const bool overwrite = optionalBoolParam(params, "overwrite");
+        const auto result = files_->moveFile(sessionId, from, to, overwrite);
+        if (!result.ok) {
+            throwIfFailed(result.error);
+        }
+        return JsonValue::object({{"ok", JsonValue::boolean(true)}});
+    }
+
+    if (files_ != nullptr && method == "file.removeDirectory") {
+        const std::string sessionId = requiredStringParam(params, "sessionId");
+        const std::string path = requiredStringParam(params, "path");
+        const bool recursive = optionalBoolParam(params, "recursive");
+        const auto result = files_->removeDirectory(sessionId, path, recursive);
+        if (!result.ok) {
+            throwIfFailed(result.error);
+        }
+        return JsonValue::object({{"ok", JsonValue::boolean(true)}});
+    }
+
+    if (files_ != nullptr && method == "file.search") {
+        const std::string sessionId = requiredStringParam(params, "sessionId");
+        const std::string root = requiredStringParam(params, "root");
+        const std::string query = requiredStringParam(params, "query");
+        const auto result = files_->search(sessionId, root, query);
+        if (!result.ok) {
+            throwIfFailed(result.error);
+        }
+        return entriesToJson(result.value);
+    }
+
+    if (tux_ != nullptr && method == "tux.list") {
+        const std::string sessionId = requiredStringParam(params, "sessionId");
+        const std::string path = requiredStringParam(params, "path");
+        const auto result = tux_->list(sessionId, path);
+        if (!result.ok) {
+            throwIfFailed(result.error);
+        }
+        return entriesToJson(result.value);
+    }
+
+    if (tux_ != nullptr && method == "tux.create") {
+        const std::string sessionId = requiredStringParam(params, "sessionId");
+        const std::string path = requiredStringParam(params, "path");
+        const bool overwrite = optionalBoolParam(params, "overwrite");
+        const auto result = tux_->create(sessionId, path, overwrite);
+        if (!result.ok) {
+            throwIfFailed(result.error);
+        }
+        return JsonValue::object({{"ok", JsonValue::boolean(true)}});
+    }
+
+    if (tux_ != nullptr && method == "tux.write") {
+        const std::string sessionId = requiredStringParam(params, "sessionId");
+        const std::string path = requiredStringParam(params, "path");
+        const std::string content = requiredStringParam(params, "content");
+        const auto result = tux_->write(sessionId, path, content);
+        if (!result.ok) {
+            throwIfFailed(result.error);
+        }
+        return JsonValue::object({{"ok", JsonValue::boolean(true)}});
+    }
+
+    if (tux_ != nullptr && method == "tux.read") {
+        const std::string sessionId = requiredStringParam(params, "sessionId");
+        const std::string path = requiredStringParam(params, "path");
+        const auto result = tux_->read(sessionId, path);
+        if (!result.ok) {
+            throwIfFailed(result.error);
+        }
+        return JsonValue::object({
+            {"content", JsonValue::string(result.value.content)},
+            {"creator", JsonValue::string(result.value.metadata.creator)},
+            {"lastEditor", JsonValue::string(result.value.metadata.lastEditor)}
+        });
+    }
+
+    if (tux_ != nullptr && method == "tux.delete") {
+        const std::string sessionId = requiredStringParam(params, "sessionId");
+        const std::string path = requiredStringParam(params, "path");
+        const auto result = tux_->deleteFile(sessionId, path);
+        if (!result.ok) {
+            throwIfFailed(result.error);
+        }
+        return JsonValue::object({{"ok", JsonValue::boolean(true)}});
+    }
+
+    if (tux_ != nullptr && method == "tux.rename") {
+        const std::string sessionId = requiredStringParam(params, "sessionId");
+        const std::string from = requiredStringParam(params, "from");
+        const std::string to = requiredStringParam(params, "to");
+        const bool overwrite = optionalBoolParam(params, "overwrite");
+        const auto result = tux_->renameFile(sessionId, from, to, overwrite);
+        if (!result.ok) {
+            throwIfFailed(result.error);
+        }
+        return JsonValue::object({{"ok", JsonValue::boolean(true)}});
+    }
+
+    if (tux_ != nullptr && method == "tux.copy") {
+        const std::string sessionId = requiredStringParam(params, "sessionId");
+        const std::string from = requiredStringParam(params, "from");
+        const std::string to = requiredStringParam(params, "to");
+        const bool overwrite = optionalBoolParam(params, "overwrite");
+        const auto result = tux_->copyFile(sessionId, from, to, overwrite);
+        if (!result.ok) {
+            throwIfFailed(result.error);
+        }
+        return JsonValue::object({{"ok", JsonValue::boolean(true)}});
+    }
+
+    if (tux_ != nullptr && method == "tux.move") {
+        const std::string sessionId = requiredStringParam(params, "sessionId");
+        const std::string from = requiredStringParam(params, "from");
+        const std::string to = requiredStringParam(params, "to");
+        const bool overwrite = optionalBoolParam(params, "overwrite");
+        const auto result = tux_->moveFile(sessionId, from, to, overwrite);
+        if (!result.ok) {
+            throwIfFailed(result.error);
+        }
+        return JsonValue::object({{"ok", JsonValue::boolean(true)}});
+    }
+
+    if (tux_ != nullptr && method == "tux.search") {
+        const std::string sessionId = requiredStringParam(params, "sessionId");
+        const std::string root = requiredStringParam(params, "root");
+        const std::string query = requiredStringParam(params, "query");
+        const auto result = tux_->search(sessionId, root, query);
+        if (!result.ok) {
+            throwIfFailed(result.error);
+        }
+        return entriesToJson(result.value);
     }
 
     throw RpcError(ErrorCode::UnknownMethod, "Unknown method.");
