@@ -457,6 +457,26 @@ bool filesystem_file_store_move_does_not_fallback_on_regular_rename_failure() {
 #endif
 }
 
+bool filesystem_file_store_recursive_remove_rejects_protected_descendant() {
+    TempDirectory temp(uniqueTempPath());
+    std::filesystem::create_directories(temp.path() / "docs");
+    std::ofstream(temp.path() / "docs" / "secret.TUX") << "protected";
+    tundraux::backend::FilesystemFileStore store(temp.path().string());
+
+    bool protectedRejected = false;
+    try {
+        store.removeDirectory("docs", true);
+    } catch (const tundraux::backend::BackendException& error) {
+        protectedRejected = error.code() == tundraux::backend::ErrorCode::PermissionDenied;
+    }
+
+    return expect(protectedRejected, "recursive rmdir should reject protected descendants") &&
+           expect(std::filesystem::exists(temp.path() / "docs"), "rejected recursive rmdir should keep directory") &&
+           expect(
+               std::filesystem::exists(temp.path() / "docs" / "secret.TUX"),
+               "rejected recursive rmdir should keep protected descendant");
+}
+
 bool filesystem_file_store_searches_by_name() {
     TempDirectory temp(uniqueTempPath());
     tundraux::backend::FilesystemFileStore store(temp.path().string());
@@ -484,6 +504,7 @@ int main() {
     if (!filesystem_file_store_mutates_regular_files()) return 1;
     if (!filesystem_file_store_rejects_regular_file_conflicts()) return 1;
     if (!filesystem_file_store_move_does_not_fallback_on_regular_rename_failure()) return 1;
+    if (!filesystem_file_store_recursive_remove_rejects_protected_descendant()) return 1;
     if (!filesystem_file_store_searches_by_name()) return 1;
 
     const auto guest = sessions.startGuestSession();

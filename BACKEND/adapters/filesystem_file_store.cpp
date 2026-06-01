@@ -132,6 +132,15 @@ bool isProtectedRelativePath(const std::filesystem::path& relative) {
     return false;
 }
 
+bool isTempRelativePath(const std::filesystem::path& relative) {
+    for (const auto& part : relative) {
+        if (part.filename().string() == "temp") {
+            return true;
+        }
+    }
+    return false;
+}
+
 bool isCrossDeviceRenameError(const std::error_code& error) {
     if (error == std::make_error_code(std::errc::cross_device_link)) {
         return true;
@@ -599,6 +608,27 @@ void FilesystemFileStore::removeDirectory(const std::string& path, bool recursiv
         }
 
         if (recursive) {
+            const auto options = std::filesystem::directory_options::skip_permission_denied;
+            std::filesystem::recursive_directory_iterator iterator(resolved, options, error);
+            if (error) {
+                throw storageError();
+            }
+            const std::filesystem::recursive_directory_iterator end;
+            for (; iterator != end; iterator.increment(error)) {
+                if (error) {
+                    throw storageError();
+                }
+                const auto descendant = iterator->path();
+                if (isReparseOrSymlink(descendant)) {
+                    throw permissionDenied();
+                }
+
+                const auto relative = descendant.lexically_relative(root_);
+                if (isProtectedRelativePath(relative) || isTempRelativePath(relative)) {
+                    throw permissionDenied();
+                }
+            }
+
             std::filesystem::remove_all(resolved, error);
             if (error) {
                 throw storageError();
