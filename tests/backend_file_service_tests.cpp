@@ -17,6 +17,13 @@
 #include <utility>
 #include <vector>
 
+#ifdef _WIN32
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#include <windows.h>
+#endif
+
 namespace {
 
 class InMemoryUserStore final : public tundraux::backend::UserStore {
@@ -412,6 +419,44 @@ bool filesystem_file_store_rejects_regular_file_conflicts() {
            expect(nonEmptyRejected, "non-recursive rmdir should reject non-empty directory");
 }
 
+bool filesystem_file_store_move_does_not_fallback_on_regular_rename_failure() {
+#ifdef _WIN32
+    TempDirectory temp(uniqueTempPath());
+    tundraux::backend::FilesystemFileStore store(temp.path().string());
+    store.writeFile("locked.txt", "alpha");
+
+    const auto source = temp.path() / "locked.txt";
+    const auto destination = temp.path() / "moved-locked.txt";
+    const HANDLE lock = CreateFileW(
+        source.wstring().c_str(),
+        GENERIC_READ,
+        FILE_SHARE_READ,
+        nullptr,
+        OPEN_EXISTING,
+        FILE_ATTRIBUTE_NORMAL,
+        nullptr
+    );
+    if (lock == INVALID_HANDLE_VALUE) {
+        std::cerr << "Skipping locked source move assertion: unable to lock test file.\n";
+        return true;
+    }
+
+    bool storageRejected = false;
+    try {
+        store.moveFile("locked.txt", "moved-locked.txt", false);
+    } catch (const tundraux::backend::BackendException& error) {
+        storageRejected = error.code() == tundraux::backend::ErrorCode::StorageError;
+    }
+    CloseHandle(lock);
+
+    return expect(storageRejected, "locked source move should fail with StorageError") &&
+           expect(std::filesystem::exists(source), "failed non-cross-device move should keep source") &&
+           expect(!std::filesystem::exists(destination), "failed non-cross-device move should not create destination");
+#else
+    return true;
+#endif
+}
+
 bool filesystem_file_store_searches_by_name() {
     TempDirectory temp(uniqueTempPath());
     tundraux::backend::FilesystemFileStore store(temp.path().string());
@@ -438,6 +483,7 @@ int main() {
     if (!regular_file_operations_map_unknown_exceptions_to_storage_error()) return 1;
     if (!filesystem_file_store_mutates_regular_files()) return 1;
     if (!filesystem_file_store_rejects_regular_file_conflicts()) return 1;
+    if (!filesystem_file_store_move_does_not_fallback_on_regular_rename_failure()) return 1;
     if (!filesystem_file_store_searches_by_name()) return 1;
 
     const auto guest = sessions.startGuestSession();

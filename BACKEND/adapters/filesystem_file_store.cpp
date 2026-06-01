@@ -132,6 +132,20 @@ bool isProtectedRelativePath(const std::filesystem::path& relative) {
     return false;
 }
 
+bool isCrossDeviceRenameError(const std::error_code& error) {
+    if (error == std::make_error_code(std::errc::cross_device_link)) {
+        return true;
+    }
+
+#ifdef _WIN32
+    if (error.category() == std::system_category() && error.value() == ERROR_NOT_SAME_DEVICE) {
+        return true;
+    }
+#endif
+
+    return false;
+}
+
 } // namespace
 
 FilesystemFileStore::FilesystemFileStore(std::string root)
@@ -505,6 +519,9 @@ void FilesystemFileStore::moveFile(const std::string& from, const std::string& t
         std::filesystem::rename(source, destination, error);
         if (!error) {
             return;
+        }
+        if (!isCrossDeviceRenameError(error)) {
+            throw storageError();
         }
 
         const auto options = overwrite
