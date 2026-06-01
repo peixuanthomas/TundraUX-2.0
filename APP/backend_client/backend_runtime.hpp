@@ -13,7 +13,7 @@ struct BackendRuntimeOptions {
     bool legacyDirect = false;
     std::string backendStdioPath;
     std::string userDataPath = "user_data.dat";
-    std::string filesRoot = "Files";
+    std::string filesRoot;
     std::string startupUserType = "guest";
     std::string startupUserName;
 };
@@ -30,6 +30,7 @@ public:
     BackendClient* client();
     const BackendClient* client() const;
     const std::string& sessionId() const;
+    const std::string& filesRoot() const;
     void setSessionId(std::string sessionId);
     bool legacyDirect() const;
     void shutdown();
@@ -38,6 +39,7 @@ private:
     std::unique_ptr<BackendProcessTransport> transport_;
     std::unique_ptr<BackendClient> client_;
     std::string sessionId_;
+    std::string filesRoot_;
     bool legacyDirect_ = false;
 };
 

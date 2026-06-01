@@ -22,7 +22,7 @@ std::string pathToString(const std::filesystem::path& path) {
     return path.u8string();
 }
 
-std::filesystem::path currentExecutableDirectoryBackendPath() {
+std::filesystem::path currentExecutableDirectoryPath() {
     std::vector<wchar_t> buffer(MAX_PATH);
     while (true) {
         const DWORD length = GetModuleFileNameW(nullptr, buffer.data(), static_cast<DWORD>(buffer.size()));
@@ -30,11 +30,15 @@ std::filesystem::path currentExecutableDirectoryBackendPath() {
             return {};
         }
         if (length < buffer.size()) {
-            return std::filesystem::path(std::wstring(buffer.data(), length)).parent_path() /
-                "tundraux_backend_stdio.exe";
+            return std::filesystem::path(std::wstring(buffer.data(), length)).parent_path();
         }
         buffer.resize(buffer.size() * 2);
     }
+}
+
+std::filesystem::path currentExecutableDirectoryBackendPath() {
+    const std::filesystem::path executableDirectory = currentExecutableDirectoryPath();
+    return executableDirectory.empty() ? std::filesystem::path{} : executableDirectory / "tundraux_backend_stdio.exe";
 }
 
 std::string resolveBackendStdioPath(const std::string& configuredPath, std::string& error) {
@@ -58,6 +62,25 @@ std::string resolveBackendStdioPath(const std::string& configuredPath, std::stri
     return "";
 }
 
+std::string resolveFilesRootPath(const std::string& configuredPath, std::string& error) {
+    const std::filesystem::path executableDirectory = currentExecutableDirectoryPath();
+    if (executableDirectory.empty()) {
+        error = "Failed to resolve frontend executable path for files root.";
+        return "";
+    }
+
+    if (configuredPath.empty()) {
+        return pathToString(executableDirectory.lexically_normal());
+    }
+
+    const std::filesystem::path filesRoot = configuredPath;
+    if (filesRoot.is_absolute()) {
+        return pathToString(filesRoot.lexically_normal());
+    }
+
+    return pathToString((executableDirectory / filesRoot).lexically_normal());
+}
+
 } // namespace
 
 BackendRuntime::BackendRuntime() = default;
@@ -71,7 +94,14 @@ bool BackendRuntime::initialize(const BackendRuntimeOptions& options, std::strin
     error.clear();
     legacyDirect_ = options.legacyDirect;
 
+    const std::string filesRoot = resolveFilesRootPath(options.filesRoot, error);
+    if (filesRoot.empty()) {
+        legacyDirect_ = false;
+        return false;
+    }
+
     if (legacyDirect_) {
+        filesRoot_ = filesRoot;
         return true;
     }
 
@@ -82,7 +112,7 @@ bool BackendRuntime::initialize(const BackendRuntimeOptions& options, std::strin
     }
 
     auto transport = std::make_unique<BackendProcessTransport>();
-    if (!transport->start(backendPath, options.userDataPath, options.filesRoot)) {
+    if (!transport->start(backendPath, options.userDataPath, filesRoot)) {
         error = "Failed to start backend stdio process: " + backendPath;
         legacyDirect_ = false;
         return false;
@@ -102,6 +132,7 @@ bool BackendRuntime::initialize(const BackendRuntimeOptions& options, std::strin
     }
 
     sessionId_ = session.value.sessionId;
+    filesRoot_ = filesRoot;
     transport_ = std::move(transport);
     client_ = std::move(backendClient);
     return true;
@@ -119,6 +150,10 @@ const std::string& BackendRuntime::sessionId() const {
     return sessionId_;
 }
 
+const std::string& BackendRuntime::filesRoot() const {
+    return filesRoot_;
+}
+
 void BackendRuntime::setSessionId(std::string sessionId) {
     sessionId_ = std::move(sessionId);
 }
@@ -134,6 +169,7 @@ void BackendRuntime::shutdown() {
         transport_.reset();
     }
     sessionId_.clear();
+    filesRoot_.clear();
     legacyDirect_ = false;
 }
 

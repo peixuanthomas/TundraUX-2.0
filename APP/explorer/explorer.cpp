@@ -26,18 +26,21 @@ void open(
 
     std::unique_ptr<BackendClientExplorerBackend> backend;
     ExplorerState state;
+    if (backendRuntime != nullptr && !backendRuntime->filesRoot().empty()) {
+        state.rootPath = normalizedPath(fs::u8path(backendRuntime->filesRoot()));
+    } else {
+        state.rootPath = normalizedPath(fs::current_path());
+    }
+
     if (backendRuntime != nullptr &&
         !backendRuntime->legacyDirect() &&
         backendRuntime->client() != nullptr &&
         !backendRuntime->sessionId().empty()) {
-        state.rootPath = normalizedPath(fs::current_path() / "Files");
         backend = std::make_unique<BackendClientExplorerBackend>(
             *backendRuntime->client(),
             backendRuntime->sessionId()
         );
         state.backend = backend.get();
-    } else {
-        state.rootPath = normalizedPath(fs::current_path());
     }
     state.currentPath = state.rootPath;
     state.username = username;

@@ -71,6 +71,8 @@ bool expectInvalidResponse(const tundraux::frontend::ClientResult<T>& result, co
         expect(result.message == "Invalid backend response.", label + " error message mismatch");
 }
 
+std::filesystem::path currentExecutableDirectory(const std::string& selfPath);
+
 bool runStartGuestSessionTest() {
     FakeTransport transport;
     transport.nextResponse = R"({"id":"1","result":{"sessionId":"guest-1","user":{"name":"","type":"guest"}}})";
@@ -423,7 +425,7 @@ bool runLogoutTest() {
         expectRequestMethod(transport, "session.logout", "logout");
 }
 
-bool runRuntimeLegacyDirectTest() {
+bool runRuntimeLegacyDirectTest(const std::string& selfPath) {
     tundraux::frontend::BackendRuntime runtime;
     tundraux::frontend::BackendRuntimeOptions options;
     options.legacyDirect = true;
@@ -435,6 +437,7 @@ bool runRuntimeLegacyDirectTest() {
         expect(error.empty(), "legacy-direct runtime should not set error") &&
         expect(runtime.legacyDirect(), "legacy-direct runtime flag mismatch") &&
         expect(runtime.client() == nullptr, "legacy-direct runtime should not create client") &&
+        expect(std::filesystem::path(runtime.filesRoot()) == currentExecutableDirectory(selfPath), "legacy-direct runtime files root mismatch") &&
         expect(runtime.sessionId().empty(), "legacy-direct runtime should not set session id");
 }
 
@@ -453,6 +456,7 @@ bool runRuntimeMissingBackendPathTest() {
         expect(!error.empty(), "missing backend runtime should set error") &&
         expect(!runtime.legacyDirect(), "missing backend runtime should not be legacy-direct") &&
         expect(runtime.client() == nullptr, "missing backend runtime should not create client") &&
+        expect(runtime.filesRoot().empty(), "missing backend runtime should not keep files root") &&
         expect(runtime.sessionId().empty(), "missing backend runtime should not set session id");
 }
 
@@ -471,7 +475,29 @@ bool runProcessResponseLineTooLongTest(const std::string& selfPath) {
         expect(response.size() <= maxExpectedResponseBytes, "too-long process response should stay bounded");
 }
 
-int runFakeBackendMode(const std::string& mode) {
+std::filesystem::path currentExecutableDirectory(const std::string& selfPath) {
+    std::error_code error;
+    const auto executablePath = std::filesystem::weakly_canonical(std::filesystem::path(selfPath), error);
+    if (!error) {
+        return executablePath.parent_path();
+    }
+    return std::filesystem::absolute(std::filesystem::path(selfPath)).parent_path();
+}
+
+bool runRuntimeDefaultFilesRootIsExecutableDirectoryTest(const std::string& selfPath) {
+    tundraux::frontend::BackendRuntime runtime;
+    tundraux::frontend::BackendRuntimeOptions options;
+    options.backendStdioPath = selfPath;
+    options.userDataPath = "expect-executable-directory-root";
+    std::string error;
+
+    const bool initialized = runtime.initialize(options, error);
+    runtime.shutdown();
+
+    return expect(initialized, "runtime should pass executable directory as files root to backend");
+}
+
+int runFakeBackendMode(int argc, char* argv[], const std::string& mode) {
     std::string request;
     if (!std::getline(std::cin, request)) {
         return 1;
@@ -493,6 +519,27 @@ int runFakeBackendMode(const std::string& mode) {
         return 0;
     }
 
+    if (mode == "expect-executable-directory-root") {
+        std::string filesRoot;
+        for (int i = 1; i + 1 < argc; ++i) {
+            if (std::string(argv[i]) == "--files-root") {
+                filesRoot = argv[i + 1];
+                break;
+            }
+        }
+
+        const std::string expected = currentExecutableDirectory(argv[0]).u8string();
+        if (std::filesystem::path(filesRoot) != std::filesystem::path(expected)) {
+            std::cout << R"({"id":"1","error":{"code":"InvalidFilesRoot","message":"files root mismatch"}})" << "\n";
+            std::cout.flush();
+            return 0;
+        }
+
+        std::cout << R"({"id":"1","result":{"sessionId":"test-session","user":{"name":"","type":"guest"}}})" << "\n";
+        std::cout.flush();
+        return 0;
+    }
+
     return 1;
 }
 
@@ -501,7 +548,7 @@ int runFakeBackendMode(const std::string& mode) {
 int main(int argc, char* argv[]) {
     for (int i = 1; i + 1 < argc; ++i) {
         if (std::string(argv[i]) == "--user-data") {
-            return runFakeBackendMode(argv[i + 1]);
+            return runFakeBackendMode(argc, argv, argv[i + 1]);
         }
     }
 
@@ -525,8 +572,9 @@ int main(int argc, char* argv[]) {
     if (!runListDirectoryNegativeSizeTest()) return 1;
     if (!runLoginTest()) return 1;
     if (!runLogoutTest()) return 1;
-    if (!runRuntimeLegacyDirectTest()) return 1;
+    if (!runRuntimeLegacyDirectTest(argv[0])) return 1;
     if (!runRuntimeMissingBackendPathTest()) return 1;
     if (!runProcessResponseLineTooLongTest(argv[0])) return 1;
+    if (!runRuntimeDefaultFilesRootIsExecutableDirectoryTest(argv[0])) return 1;
     return 0;
 }
