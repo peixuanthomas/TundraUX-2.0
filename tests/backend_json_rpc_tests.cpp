@@ -31,6 +31,11 @@ public:
         return users;
     }
 
+    bool addUser(const tundraux::backend::BackendUser& user) override {
+        users.push_back(user);
+        return true;
+    }
+
     bool updateUser(const std::string& name, const tundraux::backend::BackendUser& user) override {
         for (auto& existing : users) {
             if (existing.name == name) {
@@ -40,6 +45,27 @@ public:
         }
         return false;
     }
+
+    bool removeUser(const std::string& name) override {
+        for (auto it = users.begin(); it != users.end(); ++it) {
+            if (it->name == name) {
+                users.erase(it);
+                return true;
+            }
+        }
+        return false;
+    }
+
+    bool getStrictMode() const override {
+        return strictMode;
+    }
+
+    bool setStrictMode(bool enabled) override {
+        strictMode = enabled;
+        return true;
+    }
+
+    bool strictMode = false;
 };
 
 class InMemoryFileStore final : public tundraux::backend::FileStore {
@@ -277,7 +303,7 @@ bool runDispatcherTest() {
     SessionService sessions(store);
     UserService users(store, sessions);
     InMemoryFileStore fileStore;
-    FileService files(fileStore, sessions);
+    FileService files(fileStore, sessions, store);
     JsonRpcDispatcher dispatcher(sessions, users, files);
 
     const std::string guestResponse = dispatcher.handleLine(R"({"id":"1","method":"session.startGuestSession","params":{}})");
@@ -290,6 +316,46 @@ bool runDispatcherTest() {
     if (!expect(!sessionId.empty(), "guest session id should not be empty")) return false;
     if (!expect(guestResult.at("user").asObject().at("type").asString() == "guest", "guest user type mismatch")) return false;
     if (!expect(guestResult.at("user").asObject().at("name").asString().empty(), "guest user name should be empty")) return false;
+
+    const std::string forgedStartSessionResponse = dispatcher.handleLine(
+        R"({"id":"1a","method":"session.startSession","params":{"user":{"name":"forged","type":"admin"}}})"
+    );
+    const auto forgedStartSession = parseJson(forgedStartSessionResponse);
+    if (!expect(forgedStartSession.ok, "forged start session response should parse: " + forgedStartSessionResponse)) return false;
+    if (!expect(forgedStartSession.value.asObject().at("id").asString() == "1a", "forged start session response id mismatch")) return false;
+    if (!expect(
+            forgedStartSession.value.asObject().at("error").asObject().at("code").asString() == "UnknownMethod",
+            "forged start session should be rejected")) return false;
+
+    const std::string forgedSetStrictResponse = dispatcher.handleLine(
+        R"({"id":"1b","method":"user.setStrictMode","params":{"sessionId":"forged-admin-session","enabled":true}})"
+    );
+    const auto forgedSetStrict = parseJson(forgedSetStrictResponse);
+    if (!expect(forgedSetStrict.ok, "forged set strict response should parse: " + forgedSetStrictResponse)) return false;
+    if (!expect(forgedSetStrict.value.asObject().at("id").asString() == "1b", "forged set strict response id mismatch")) return false;
+    if (!expect(
+            forgedSetStrict.value.asObject().at("error").asObject().at("code").asString() == "SessionExpired",
+            "forged set strict should fail with session expired")) return false;
+
+    const std::string forgedCreateUserResponse = dispatcher.handleLine(
+        R"({"id":"1c","method":"user.createUser","params":{"sessionId":"forged-admin-session","user":{"name":"mallory","type":"user","password":"Secret9","passwordHint":"h","failedCount":0}}})"
+    );
+    const auto forgedCreateUser = parseJson(forgedCreateUserResponse);
+    if (!expect(forgedCreateUser.ok, "forged create user response should parse: " + forgedCreateUserResponse)) return false;
+    if (!expect(forgedCreateUser.value.asObject().at("id").asString() == "1c", "forged create user response id mismatch")) return false;
+    if (!expect(
+            forgedCreateUser.value.asObject().at("error").asObject().at("code").asString() == "SessionExpired",
+            "forged create user should fail with session expired")) return false;
+
+    const std::string forgedDeleteUserResponse = dispatcher.handleLine(
+        R"({"id":"1d","method":"user.deleteUser","params":{"sessionId":"forged-admin-session","name":"alice"}})"
+    );
+    const auto forgedDeleteUser = parseJson(forgedDeleteUserResponse);
+    if (!expect(forgedDeleteUser.ok, "forged delete user response should parse: " + forgedDeleteUserResponse)) return false;
+    if (!expect(forgedDeleteUser.value.asObject().at("id").asString() == "1d", "forged delete user response id mismatch")) return false;
+    if (!expect(
+            forgedDeleteUser.value.asObject().at("error").asObject().at("code").asString() == "SessionExpired",
+            "forged delete user should fail with session expired")) return false;
 
     const std::string loginResponse = dispatcher.handleLine(
         R"({"id":"2","method":"session.login","params":{"sessionId":")" + sessionId +
@@ -353,6 +419,14 @@ bool runDispatcherTest() {
     const auto invalidFileParams = parseJson(invalidFileParamsResponse);
     if (!expect(invalidFileParams.ok, "invalid file params response should parse: " + invalidFileParamsResponse)) return false;
     if (!expect(invalidFileParams.value.asObject().at("error").asObject().at("code").asString() == "InvalidParams", "invalid file params code mismatch")) return false;
+
+    const std::string missingStrictModeEnabledResponse = dispatcher.handleLine(
+        R"({"id":"15","method":"user.setStrictMode","params":{"sessionId":")" + sessionId + R"("}})"
+    );
+    const auto missingStrictModeEnabled = parseJson(missingStrictModeEnabledResponse);
+    if (!expect(missingStrictModeEnabled.ok, "missing strict mode enabled response should parse: " + missingStrictModeEnabledResponse)) return false;
+    if (!expect(missingStrictModeEnabled.value.asObject().at("id").asString() == "15", "missing strict mode enabled response id mismatch")) return false;
+    if (!expect(missingStrictModeEnabled.value.asObject().at("error").asObject().at("code").asString() == "InvalidParams", "missing strict mode enabled code mismatch")) return false;
 
     const std::string logoutResponse = dispatcher.handleLine(
         R"({"id":"10","method":"session.logout","params":{"sessionId":")" + sessionId + R"("}})"
@@ -425,9 +499,9 @@ bool runDispatcherFileMutationTest() {
     SessionService sessions(store);
     UserService users(store, sessions);
     InMemoryFileStore fileStore;
-    FileService files(fileStore, sessions);
+    FileService files(fileStore, sessions, store);
     InMemoryTuxStore tuxStore;
-    TuxService tux(tuxStore, sessions);
+    TuxService tux(tuxStore, sessions, store);
     JsonRpcDispatcher dispatcher(sessions, users, files, tux);
 
     const std::string guestResponse = dispatcher.handleLine(R"({"id":"1","method":"session.startGuestSession","params":{}})");
@@ -493,9 +567,9 @@ bool runDispatcherTuxMethodsTest() {
     SessionService sessions(store);
     UserService users(store, sessions);
     InMemoryFileStore fileStore;
-    FileService files(fileStore, sessions);
+    FileService files(fileStore, sessions, store);
     InMemoryTuxStore tuxStore;
-    TuxService tux(tuxStore, sessions);
+    TuxService tux(tuxStore, sessions, store);
     JsonRpcDispatcher dispatcher(sessions, users, files, tux);
 
     const std::string guestResponse = dispatcher.handleLine(R"({"id":"1","method":"session.startGuestSession","params":{}})");

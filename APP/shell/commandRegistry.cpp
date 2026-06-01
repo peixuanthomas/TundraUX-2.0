@@ -75,7 +75,9 @@ std::vector<RegisteredCommand> buildNewCommandRegistry(
             "manageuser",
             "Open user management interface",
             {"manageusers"},
-            [&currentUser](const std::string& input) { handleManageUsersCommand(input, currentUser); },
+            [&currentUser, backendRuntime](const std::string& input) {
+                handleManageUsersCommand(input, currentUser, backendRuntime);
+            },
             "admin,debug",
             false
         },
@@ -84,7 +86,9 @@ std::vector<RegisteredCommand> buildNewCommandRegistry(
             "modify",
             "Modify current user information",
             {},
-            [&currentUser](const std::string& input) { handleModifyCommand(input, currentUser); },
+            [&currentUser, backendRuntime](const std::string& input) {
+                handleModifyCommand(input, currentUser, backendRuntime);
+            },
             "",
             false
         },
@@ -93,7 +97,9 @@ std::vector<RegisteredCommand> buildNewCommandRegistry(
             "importdata",
             "Import user data from old versions",
             {},
-            handleImportDataCommand,
+            [backendRuntime](const std::string& input) {
+                handleImportDataCommand(input, backendRuntime);
+            },
             "admin,debug",
             false
         },
@@ -140,7 +146,9 @@ std::vector<RegisteredCommand> buildNewCommandRegistry(
             "strict <status|on|off>",
             "View or change strict audit mode",
             {},
-            [&currentUser](const std::string& input) { handleStrictCommand(input, currentUser); },
+            [&currentUser, backendRuntime](const std::string& input) {
+                handleStrictCommand(input, currentUser, backendRuntime);
+            },
             "admin,debug",
             false,
             true
@@ -150,7 +158,9 @@ std::vector<RegisteredCommand> buildNewCommandRegistry(
             "export log <tlog-file>",
             "Export an encrypted audit log to plaintext",
             {},
-            [&currentUser](const std::string& input) { handleExportCommand(input, currentUser); },
+            [&currentUser, backendRuntime](const std::string& input) {
+                handleExportCommand(input, currentUser, backendRuntime);
+            },
             "admin,debug",
             false,
             true

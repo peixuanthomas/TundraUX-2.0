@@ -23,6 +23,11 @@ public:
         return users;
     }
 
+    bool addUser(const tundraux::backend::BackendUser& user) override {
+        users.push_back(user);
+        return true;
+    }
+
     bool updateUser(const std::string& name, const tundraux::backend::BackendUser& user) override {
         if (failUpdates) {
             return false;
@@ -35,6 +40,27 @@ public:
         }
         return false;
     }
+
+    bool removeUser(const std::string& name) override {
+        for (auto it = users.begin(); it != users.end(); ++it) {
+            if (it->name == name) {
+                users.erase(it);
+                return true;
+            }
+        }
+        return false;
+    }
+
+    bool getStrictMode() const override {
+        return strictMode;
+    }
+
+    bool setStrictMode(bool enabled) override {
+        strictMode = enabled;
+        return true;
+    }
+
+    bool strictMode = false;
 };
 
 bool expect(bool condition, const std::string& message) {
@@ -42,6 +68,141 @@ bool expect(bool condition, const std::string& message) {
         std::cerr << message << "\n";
         return false;
     }
+    return true;
+}
+
+bool management_session_is_revalidated_against_store() {
+    using namespace tundraux::backend;
+
+    {
+        InMemoryUserStore store;
+        SessionService sessions(store);
+        UserService users(store, sessions);
+        const auto guest = sessions.startGuestSession();
+        const auto login = sessions.login(guest.sessionId, "alice", "Secret1");
+        if (!expect(login.ok, "revalidate type-change login should pass")) return false;
+
+        for (auto& user : store.users) {
+            if (user.name == "alice") {
+                user.type = "user";
+            }
+        }
+
+        const auto strict = users.setStrictMode(guest.sessionId, true);
+        if (!expect(!strict.ok, "downgraded admin setStrictMode should fail")) return false;
+        if (!expect(strict.error.code == ErrorCode::PermissionDenied, "downgraded admin setStrictMode code mismatch")) return false;
+        const auto created = users.createUser(guest.sessionId, BackendUser{"user", "eve", "Secret4", "h", 0});
+        if (!expect(!created.ok, "downgraded admin createUser should fail")) return false;
+        if (!expect(created.error.code == ErrorCode::PermissionDenied, "downgraded admin createUser code mismatch")) return false;
+        const auto deleted = users.deleteUser(guest.sessionId, "bob");
+        if (!expect(!deleted.ok, "downgraded admin deleteUser should fail")) return false;
+        if (!expect(deleted.error.code == ErrorCode::PermissionDenied, "downgraded admin deleteUser code mismatch")) return false;
+    }
+
+    {
+        InMemoryUserStore store;
+        SessionService sessions(store);
+        UserService users(store, sessions);
+        const auto guest = sessions.startGuestSession();
+        const auto login = sessions.login(guest.sessionId, "alice", "Secret1");
+        if (!expect(login.ok, "revalidate disabled login should pass")) return false;
+
+        for (auto& user : store.users) {
+            if (user.name == "alice") {
+                user.failedCount = 8;
+            }
+        }
+
+        const auto strict = users.setStrictMode(guest.sessionId, true);
+        if (!expect(!strict.ok, "disabled admin setStrictMode should fail")) return false;
+        if (!expect(strict.error.code == ErrorCode::PermissionDenied, "disabled admin setStrictMode code mismatch")) return false;
+        const auto created = users.createUser(guest.sessionId, BackendUser{"user", "eve", "Secret4", "h", 0});
+        if (!expect(!created.ok, "disabled admin createUser should fail")) return false;
+        if (!expect(created.error.code == ErrorCode::PermissionDenied, "disabled admin createUser code mismatch")) return false;
+        const auto deleted = users.deleteUser(guest.sessionId, "bob");
+        if (!expect(!deleted.ok, "disabled admin deleteUser should fail")) return false;
+        if (!expect(deleted.error.code == ErrorCode::PermissionDenied, "disabled admin deleteUser code mismatch")) return false;
+    }
+
+    {
+        InMemoryUserStore store;
+        SessionService sessions(store);
+        UserService users(store, sessions);
+        const auto guest = sessions.startGuestSession();
+        const auto login = sessions.login(guest.sessionId, "alice", "Secret1");
+        if (!expect(login.ok, "revalidate deleted login should pass")) return false;
+
+        if (!expect(store.removeUser("alice"), "revalidate deleted should remove alice")) return false;
+
+        const auto strict = users.setStrictMode(guest.sessionId, true);
+        if (!expect(!strict.ok, "deleted admin setStrictMode should fail")) return false;
+        if (!expect(strict.error.code == ErrorCode::NotFound, "deleted admin setStrictMode code mismatch")) return false;
+        const auto created = users.createUser(guest.sessionId, BackendUser{"user", "eve", "Secret4", "h", 0});
+        if (!expect(!created.ok, "deleted admin createUser should fail")) return false;
+        if (!expect(created.error.code == ErrorCode::NotFound, "deleted admin createUser code mismatch")) return false;
+        const auto deleted = users.deleteUser(guest.sessionId, "bob");
+        if (!expect(!deleted.ok, "deleted admin deleteUser should fail")) return false;
+        if (!expect(deleted.error.code == ErrorCode::NotFound, "deleted admin deleteUser code mismatch")) return false;
+    }
+
+    return true;
+}
+
+bool password_hint_validation_uses_effective_password() {
+    using namespace tundraux::backend;
+
+    InMemoryUserStore store;
+    SessionService sessions(store);
+    UserService users(store, sessions);
+    const auto adminGuest = sessions.startGuestSession();
+    const auto adminLogin = sessions.login(adminGuest.sessionId, "alice", "Secret1");
+    if (!expect(adminLogin.ok, "hint validation admin login should pass")) return false;
+
+    const auto updated = users.updateUser(
+        adminGuest.sessionId,
+        "bob",
+        BackendUser{"user", "bob", "", "Secret2", 0},
+        false
+    );
+    if (!expect(!updated.ok, "updateUser should reject hint matching existing password")) return false;
+    if (!expect(updated.error.code == ErrorCode::InvalidParams, "updateUser hint validation code mismatch")) return false;
+
+    const auto bobGuest = sessions.startGuestSession();
+    const auto bobLogin = sessions.login(bobGuest.sessionId, "bob", "Secret2");
+    if (!expect(bobLogin.ok, "hint validation bob login should pass")) return false;
+
+    const auto ownUpdated = users.updateOwnAccount(
+        bobGuest.sessionId,
+        false,
+        "",
+        true,
+        "Secret2"
+    );
+    if (!expect(!ownUpdated.ok, "updateOwnAccount should reject hint matching existing password")) return false;
+    if (!expect(ownUpdated.error.code == ErrorCode::InvalidParams, "updateOwnAccount hint validation code mismatch")) return false;
+
+    return true;
+}
+
+bool current_profile_rejects_disabled_session_user() {
+    using namespace tundraux::backend;
+
+    InMemoryUserStore store;
+    SessionService sessions(store);
+    UserService users(store, sessions);
+    const auto guest = sessions.startGuestSession();
+    const auto login = sessions.login(guest.sessionId, "alice", "Secret1");
+    if (!expect(login.ok, "disabled currentProfile login should pass")) return false;
+
+    for (auto& user : store.users) {
+        if (user.name == "alice") {
+            user.failedCount = 8;
+        }
+    }
+
+    const auto profile = users.currentProfile(guest.sessionId);
+    if (!expect(!profile.ok, "disabled currentProfile should fail")) return false;
+    if (!expect(profile.error.code == ErrorCode::PermissionDenied, "disabled currentProfile code mismatch")) return false;
     return true;
 }
 
@@ -169,6 +330,9 @@ int main() {
     if (!expect(store.users[0].password == "Secret1", "alice password should remain in store")) return 1;
     if (!expect(store.users[1].password == "Secret2", "bob password should remain in store")) return 1;
     if (!expect(store.users[2].password == "Debug1", "debug password should remain in store")) return 1;
+    if (!expect(management_session_is_revalidated_against_store(), "management session revalidation failed")) return 1;
+    if (!expect(password_hint_validation_uses_effective_password(), "effective password hint validation failed")) return 1;
+    if (!expect(current_profile_rejects_disabled_session_user(), "disabled currentProfile validation failed")) return 1;
 
     return 0;
 }

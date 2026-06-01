@@ -1,8 +1,8 @@
 # TundraUX 2.0
 
-TundraUX 2.0 是一个仅支持 Windows 的 C++ 控制台应用，包含交互式 Shell、用户账户管理，以及基于 `.TUX` 格式的加密文件管理器。
+TundraUX 2.0 是一个 C++ 控制台应用，包含交互式 Shell、用户账户管理，以及基于 `.TUX` 格式的加密文件管理器。
 
-项目使用 CMake 和 C++17 构建，并依赖 Windows 控制台 API 来实现清屏、彩色输出、隐藏密码输入、命令历史和内置文本编辑器等功能。
+项目使用 CMake 和 C++17 构建。完整前端依赖 Windows 控制台 API 来实现清屏、彩色输出、隐藏密码输入、命令历史和内置文本编辑器等功能。本地后端独立构建，并尽量保持跨平台。
 
 ## 功能特性
 
@@ -18,11 +18,11 @@ TundraUX 2.0 是一个仅支持 Windows 的 C++ 控制台应用，包含交互�
 
 ## 环境要求
 
-- Windows
+- 完整前端需要 Windows
 - CMake 3.15 或更高版本
 - 支持 C++17 的编译器，例如 MSVC 或 MinGW-w64
 
-由于当前代码使用 Windows 专用控制台 API，项目会在非 Windows 系统上停止 CMake 配置。
+在非 Windows 系统上，可以使用 `TUNDRAUX_BUILD_FRONTEND=OFF` 配置后端-only 构建；这也是非 Windows 默认值。
 
 ## 构建
 
@@ -33,15 +33,22 @@ cmake --build build
 
 主前端可执行文件名为 `TundraUX2`。
 
-### 后端第二阶段与第三阶段第一批
+后端-only 构建：
 
-项目也会构建 `tundraux_backend_stdio`，这是前后端进程拆分的本地后端进程边界。它通过 stdin/stdout 提供按行传输的 JSON-RPC，目前支持创建会话、登录、登出、查询当前用户、列出用户，以及普通文件操作（`file.listDirectory`、`file.readFile`、`file.writeFile`）。
+```powershell
+cmake -B build-backend -DTUNDRAUX_BUILD_FRONTEND=OFF
+cmake --build build-backend
+```
 
-`TundraUX2` 现在默认启动本地 stdio 后端。主 Shell 的账号命令（`login`、`logout`、`whoami`、`listuser`）和普通文本编辑器路径（`edit <filename>`）在默认模式下会通过后端执行。调试时可使用 `--legacy-direct` 运行旧的前端直连逻辑。
+### 后端拆分状态
+
+项目也会构建 `tundraux_backend_stdio`，这是前后端进程拆分的本地后端进程边界。它通过 stdin/stdout 提供按行传输的 JSON-RPC，目前支持会话、登录/登出、当前资料查询、用户列表与账户修改、strict mode 状态、普通文件操作和 TUX 文件操作。
+
+`TundraUX2` 现在默认启动本地 stdio 后端。默认后端模式下，`login`、`logout`、`whoami`、`listuser`、`modify`、`strict`、`edit <filename>`、`/<cmd>` 的系统命令授权、Explorer 第一批文件操作和 TUX File Manager 第一批文件命令都会通过 `tundraux_backend_stdio` 执行。调试时可使用 `--legacy-direct` 运行旧的前端直连逻辑。
 
 第三阶段第一批文件迁移已将 Explorer 和主要 TUX File Manager 文件流程移到本地后端。Explorer 的刷新、创建文件夹、删除、复制/移动粘贴和搜索会使用后端 API。TUX File Manager 的 list/create/view/edit/delete/rename/copy/move/find/mkdir/rmdir 会使用后端 API。
 
-TUX 导入/导出/元数据命令、完整 audit API 迁移、HTTP 传输、远程访问和共享 daemon 模式仍是后续工作。
+在拆分尚未完成前，后端模式会主动禁用会绕过后端授权的本地直通路径：`manageuser`、`importdata`、`export log`、Explorer 直接打开文件，以及 TUX 导入/导出/元数据命令。用户管理 TUI 迁移、完整 audit API 迁移、HTTP 传输、远程访问和共享 daemon 模式仍是后续工作。
 
 ## 验证
 
@@ -89,10 +96,10 @@ cmake --build build
 | `logout` | 登出当前用户 |
 | `modify` | 修改当前用户的密码或密码提示 |
 | `listuser` | 列出已注册用户 |
-| `manageuser` | 打开用户管理界面，仅 admin/debug 可用 |
+| `manageuser` | 打开用户管理界面，仅 admin/debug 可用；后端模式下暂时禁用，等待迁移 |
 | `TUXfile` | 打开 TUX File Manager，仅 user/admin/debug 可用 |
 | `edit [filename]` | 打开 `Files` 目录下普通文件的文本编辑器 |
-| `importdata` | 导入旧版本用户数据，仅 admin/debug 可用 |
+| `importdata` | 导入旧版本用户数据，仅 admin/debug 可用；后端模式下禁用 |
 | `time` | 显示本地时间和 Unix 时间戳 |
 | `license` | 显示许可证文本 |
 | `info` | 显示构建信息 |
@@ -102,7 +109,7 @@ cmake --build build
 
 调试命令不会出现在普通帮助中，包括编辑器后端检查、强制登录、显示颜色测试和诊断工具等。
 
-默认后端模式下，`login`、`logout`、`whoami`、`listuser`、`edit <filename>`、Explorer 第一批文件操作和 TUX File Manager 第一批文件命令会通过 `tundraux_backend_stdio` 执行。`listuser` 在后端模式下仅 admin/debug 可用。可使用 `--legacy-direct` 切换回旧的前端直连模式。
+默认后端模式下，`login`、`logout`、`whoami`、`listuser`、`modify`、`strict`、`edit <filename>`、Explorer 第一批文件操作和 TUX File Manager 第一批文件命令会通过 `tundraux_backend_stdio` 执行。`listuser` 在后端模式下仅 admin/debug 可用。可使用 `--legacy-direct` 切换回旧的前端直连模式。
 
 ## 用户角色
 
@@ -113,7 +120,7 @@ cmake --build build
 | `admin` | 可以管理用户，并使用 TUX 的导入、导出和元数据命令 |
 | `debug` | 拥有开发调试用的无限制访问权限 |
 
-每个用户都会记录登录失败次数。失败次数超过 7 次后，账户会被禁用，需要 admin 或 debug 用户在用户管理界面中重置 `count`。
+每个用户都会记录登录失败次数。失败次数超过 7 次后，账户会被禁用，需要 admin 或 debug 用户在用户管理界面中重置 `count`。后端模式下，用户管理 TUI 会暂时禁用，直到它完成后端迁移。
 
 通过 `modify` 修改密码时，密码需要满足：
 
@@ -194,7 +201,7 @@ edit docs/notes
 
 ## 编辑器
 
-编辑器可以从主 Shell 打开普通文件，也可以从 TUX File Manager 打开 `.TUX` 文件。
+编辑器可以从主 Shell 打开普通文件，也可以从 TUX File Manager 打开 `.TUX` 文件。后端模式下，Explorer 直接打开文件会暂时禁用，直到 Explorer 编辑器 I/O 迁移到后端 RPC。
 
 | 按键 | 操作 |
 | --- | --- |

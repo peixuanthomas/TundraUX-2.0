@@ -10,7 +10,9 @@
 #include <filesystem>
 #include <iterator>
 #include <utility>
+#ifdef _WIN32
 #include <windows.h>
+#endif
 
 //Old modules just for reading old files.
 //ATTENTION: These modules should not be used in new code.
@@ -72,6 +74,61 @@ bool readStoredString(
         value = std::move(buffer);
     }
     return true;
+}
+
+bool replaceFileAtomically(const std::string& from, const std::string& to, std::string& errorMessage) {
+#ifdef _WIN32
+    if (!MoveFileExA(
+            from.c_str(),
+            to.c_str(),
+            MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH)) {
+        errorMessage = "Windows error: " + std::to_string(GetLastError());
+        return false;
+    }
+    return true;
+#else
+    std::error_code error;
+    std::filesystem::rename(from, to, error);
+    if (!error) {
+        return true;
+    }
+
+    const std::string originalRenameError = error.message();
+    std::filesystem::path backupPath = std::filesystem::path(to);
+    backupPath += ".tundraux_backup";
+
+    error.clear();
+    std::filesystem::remove(backupPath, error);
+    if (error) {
+        errorMessage = originalRenameError;
+        return false;
+    }
+
+    error.clear();
+    std::filesystem::rename(to, backupPath, error);
+    if (error) {
+        errorMessage = originalRenameError;
+        return false;
+    }
+
+    error.clear();
+    std::filesystem::rename(from, to, error);
+    if (error) {
+        const std::string replaceError = error.message();
+        std::error_code restoreError;
+        std::filesystem::rename(backupPath, to, restoreError);
+        if (restoreError) {
+            errorMessage = replaceError + " (restore failed: " + restoreError.message() + ")";
+        } else {
+            errorMessage = replaceError;
+        }
+        return false;
+    }
+
+    std::error_code cleanupError;
+    std::filesystem::remove(backupPath, cleanupError);
+    return true;
+#endif
 }
 }
 
@@ -471,12 +528,9 @@ bool DataManager::SaveUsersToFile() {
     
     outFile.close();
 
-    if (!MoveFileExA(
-            tempFilename.c_str(),
-            filename_.c_str(),
-            MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH)) {
-        colorcout("red", "Error: Failed to replace user data file. Windows error: " +
-            std::to_string(GetLastError()) + "\n");
+    std::string replaceError;
+    if (!replaceFileAtomically(tempFilename, filename_, replaceError)) {
+        colorcout("red", "Error: Failed to replace user data file. " + replaceError + "\n");
         std::remove(tempFilename.c_str());
         return false;
     }

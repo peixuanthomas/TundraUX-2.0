@@ -1,6 +1,8 @@
 #include "account_settings.hpp"
 
 #include "audit_log.hpp"
+#include "backend_client.hpp"
+#include "backend_runtime.hpp"
 
 #include <algorithm>
 #include <cctype>
@@ -46,12 +48,50 @@ struct AccountSettingsState {
     std::string newPassword;
     std::string confirmPassword;
     std::string passwordHint;
+    std::string sourceLabel = "user_data.dat";
     std::size_t field = 0;
     bool showPassword = false;
     bool showHelp = false;
     bool saved = false;
     std::string message = "Edit settings. Enter saves changes.";
 };
+
+bool usesBackendMode(tundraux::frontend::BackendRuntime* backendRuntime) {
+    return backendRuntime != nullptr && !backendRuntime->legacyDirect();
+}
+
+std::string backendErrorMessage(
+    const std::string& fallback,
+    const std::string& errorCode,
+    const std::string& backendMessage
+) {
+    if (!backendMessage.empty()) {
+        return backendMessage;
+    }
+    if (errorCode == "TransportError") {
+        return "Backend unavailable.";
+    }
+    if (errorCode == "SessionExpired") {
+        return "Backend session expired.";
+    }
+    if (errorCode == "PermissionDenied") {
+        return "Access Denied.";
+    }
+    if (errorCode == "InvalidResponse") {
+        return "Invalid backend response.";
+    }
+    return fallback;
+}
+
+USER shellUserFromBackendProfile(const tundraux::frontend::FrontendUser& user) {
+    return {
+        user.type,
+        user.name,
+        "",
+        user.passwordHint,
+        user.failedCount
+    };
+}
 
 std::string trimCopy(std::string value) {
     const auto first = value.find_first_not_of(" \t\r\n");
@@ -314,7 +354,7 @@ void renderSettings(const AccountSettingsState& state) {
               << tui::colorText(" - ", tui::kHintStyle)
               << tui::colorText(state.original.name, tui::kPathStyle)
               << "\n";
-    std::cout << tui::colorText("user_data.dat", tui::kPathStyle) << "\n";
+    std::cout << tui::colorText(state.sourceLabel, tui::kPathStyle) << "\n";
     std::cout << tui::colorText(tui::splitBorder(formWidth, detailsWidth), tui::kBorderStyle) << "\n";
     std::cout << tui::colorText("|", tui::kBorderStyle)
               << headerCell("Settings Form", formWidth)
@@ -374,7 +414,11 @@ std::string& activeField(AccountSettingsState& state) {
     }
 }
 
-bool saveSettings(AccountSettingsState& state, USER& currentUser) {
+bool saveSettings(
+    AccountSettingsState& state,
+    USER& currentUser,
+    tundraux::frontend::BackendRuntime* backendRuntime
+) {
     tundraux::audit::setCurrentUser(USER{currentUser.type, currentUser.name, "", "", 0});
     const std::string validationError = validateSettings(state);
     if (!validationError.empty()) {
@@ -387,34 +431,102 @@ bool saveSettings(AccountSettingsState& state, USER& currentUser) {
     }
 
     USER updated = state.original;
-    if (passwordWillChange(state)) {
-        updated.password = state.newPassword;
-    }
-    updated.password_hint = trimCopy(state.passwordHint);
+    bool degradedProfileRefresh = false;
+    std::string degradedProfileReason;
+    const std::string trimmedHint = trimCopy(state.passwordHint);
+    if (usesBackendMode(backendRuntime)) {
+        if (backendRuntime == nullptr || backendRuntime->sessionId().empty() || backendRuntime->client() == nullptr) {
+            state.message = "No backend session is active.";
+            tundraux::audit::logEvent(
+                "manage",
+                "account settings update failure user=" + currentUser.name + " reason=backend unavailable"
+            );
+            return false;
+        }
 
-    DataManager dataManager("user_data.dat");
-    if (!dataManager.UpdateUser(state.original.name, updated)) {
-        state.message = "Failed to update user info.";
-        tundraux::audit::logEvent(
-            "manage",
-            "account settings update failure user=" + currentUser.name + " reason=update user_data.dat failed"
+        auto* client = backendRuntime->client();
+        const bool passwordProvided = passwordWillChange(state);
+        const bool passwordHintProvided = hintWillChange(state);
+        const auto updateResult = client->updateOwnAccount(
+            backendRuntime->sessionId(),
+            passwordProvided,
+            state.newPassword,
+            passwordHintProvided,
+            trimmedHint
         );
-        return false;
+        if (!updateResult.ok || !updateResult.value) {
+            state.message = backendErrorMessage(
+                "Failed to update account settings.",
+                updateResult.errorCode,
+                updateResult.message
+            );
+            tundraux::audit::logEvent(
+                "manage",
+                "account settings update failure user=" + currentUser.name + " reason=" + state.message
+            );
+            return false;
+        }
+
+        const auto profileResult = client->currentProfile(backendRuntime->sessionId());
+        if (!profileResult.ok) {
+            degradedProfileRefresh = true;
+            degradedProfileReason = backendErrorMessage(
+                "Failed to refresh account profile.",
+                profileResult.errorCode,
+                profileResult.message
+            );
+            updated.password.clear();
+            if (passwordHintProvided) {
+                updated.password_hint = trimmedHint;
+            }
+        } else {
+            updated = shellUserFromBackendProfile(profileResult.value);
+        }
+    } else {
+        if (passwordWillChange(state)) {
+            updated.password = state.newPassword;
+        }
+        updated.password_hint = trimmedHint;
+
+        DataManager dataManager("user_data.dat");
+        if (!dataManager.UpdateUser(state.original.name, updated)) {
+            state.message = "Failed to update user info.";
+            tundraux::audit::logEvent(
+                "manage",
+                "account settings update failure user=" + currentUser.name + " reason=update user_data.dat failed"
+            );
+            return false;
+        }
     }
 
     currentUser = updated;
+    currentUser.password.clear();
     state.original = updated;
     state.newPassword.clear();
     state.confirmPassword.clear();
     state.passwordHint = updated.password_hint;
     state.saved = true;
-    state.message = "Settings saved. Press Enter or Esc to return.";
+    state.message = degradedProfileRefresh
+        ? "Settings saved, but profile refresh failed. Press Enter or Esc to return."
+        : "Settings saved. Press Enter or Esc to return.";
     tundraux::audit::setCurrentUser(USER{updated.type, updated.name, "", "", 0});
-    tundraux::audit::logEvent("manage", "account settings update success user=" + updated.name);
+    if (degradedProfileRefresh) {
+        tundraux::audit::logEvent(
+            "manage",
+            "account settings update success/degraded user=" + updated.name + " reason=" + degradedProfileReason
+        );
+    } else {
+        tundraux::audit::logEvent("manage", "account settings update success user=" + updated.name);
+    }
     return true;
 }
 
-bool handleSettingsKey(AccountSettingsState& state, USER& currentUser, const KeyPress& key) {
+bool handleSettingsKey(
+    AccountSettingsState& state,
+    USER& currentUser,
+    tundraux::frontend::BackendRuntime* backendRuntime,
+    const KeyPress& key
+) {
     if (state.showHelp) {
         if (key.key == Key::Escape || key.key == Key::Enter ||
             key.key == Key::F1 ||
@@ -429,7 +541,6 @@ bool handleSettingsKey(AccountSettingsState& state, USER& currentUser, const Key
             (key.key == Key::Character && (key.character == 'q' || key.character == 'Q'))) {
             return false;
         }
-        state.message = "Settings saved. Press Enter or Esc to return.";
         return true;
     }
 
@@ -463,7 +574,7 @@ bool handleSettingsKey(AccountSettingsState& state, USER& currentUser, const Key
             activeField(state).clear();
             break;
         case Key::Enter:
-            saveSettings(state, currentUser);
+            saveSettings(state, currentUser, backendRuntime);
             break;
         case Key::Character:
             activeField(state).push_back(key.character);
@@ -493,36 +604,83 @@ const USER* findCurrentUser(const DataManager& dataManager, const USER& currentU
 
 } // namespace
 
-void open_account_settings(USER& currentUser) {
-    if (currentUser.name.empty()) {
-        colorcout("yellow", "No user is currently logged in.\n");
-        return;
-    }
+void open_account_settings(
+    USER& currentUser,
+    tundraux::frontend::BackendRuntime* backendRuntime
+) {
+    const bool backendMode = usesBackendMode(backendRuntime);
+
     if (currentUser.type == "debug") {
         colorcout("yellow", "Cannot open account settings as debug user.\n");
         return;
     }
-
-    std::ifstream check("user_data.dat");
-    if (!check.good()) {
-        colorcout("red", "Error: user_data.dat not found.\n");
-        return;
+    if (backendMode) {
+        if (currentUser.type == "guest") {
+            colorcout("yellow", "Cannot open account settings as guest user.\n");
+            return;
+        }
+    } else {
+        if (currentUser.type == "guest") {
+            colorcout("yellow", "Cannot open account settings as guest user.\n");
+            return;
+        }
+        if (currentUser.name.empty()) {
+            colorcout("yellow", "No user is currently logged in.\n");
+            return;
+        }
     }
-    check.close();
 
-    DataManager dataManager("user_data.dat");
-    const USER* storedUser = findCurrentUser(dataManager, currentUser);
-    if (storedUser == nullptr) {
-        colorcout("red", "Current user is not stored in user_data.dat.\n");
-        return;
+    AccountSettingsState state;
+    if (backendMode) {
+        if (backendRuntime == nullptr || backendRuntime->client() == nullptr) {
+            colorcout("red", "Backend unavailable.\n");
+            return;
+        }
+        if (backendRuntime->sessionId().empty()) {
+            colorcout("yellow", "No backend session is active.\n");
+            return;
+        }
+
+        const auto profileResult = backendRuntime->client()->currentProfile(backendRuntime->sessionId());
+        if (!profileResult.ok) {
+            colorcout(
+                "red",
+                backendErrorMessage(
+                    "Unable to load account profile.",
+                    profileResult.errorCode,
+                    profileResult.message
+                ) + "\n"
+            );
+            return;
+        }
+
+        state.original = shellUserFromBackendProfile(profileResult.value);
+        state.passwordHint = state.original.password_hint;
+        state.sourceLabel = "backend current profile";
+        currentUser = state.original;
+        currentUser.password.clear();
+    } else {
+        std::ifstream check("user_data.dat");
+        if (!check.good()) {
+            colorcout("red", "Error: user_data.dat not found.\n");
+            return;
+        }
+        check.close();
+
+        DataManager dataManager("user_data.dat");
+        const USER* storedUser = findCurrentUser(dataManager, currentUser);
+        if (storedUser == nullptr) {
+            colorcout("red", "Current user is not stored in user_data.dat.\n");
+            return;
+        }
+
+        state.original = *storedUser;
+        state.passwordHint = storedUser->password_hint;
+        state.sourceLabel = "user_data.dat";
     }
 
     set_title("Account Settings");
     ConsoleScreenGuard screenGuard;
-
-    AccountSettingsState state;
-    state.original = *storedUser;
-    state.passwordHint = storedUser->password_hint;
 
     bool running = true;
     while (running) {
@@ -532,6 +690,6 @@ void open_account_settings(USER& currentUser) {
             renderSettings(state);
         }
 
-        running = handleSettingsKey(state, currentUser, readKey());
+        running = handleSettingsKey(state, currentUser, backendRuntime, readKey());
     }
 }

@@ -2,4 +2,11 @@
 
 #include "udata.hpp"
 
-void open_account_settings(USER& currentUser);
+namespace tundraux::frontend {
+class BackendRuntime;
+}
+
+void open_account_settings(
+    USER& currentUser,
+    tundraux::frontend::BackendRuntime* backendRuntime = nullptr
+);

@@ -14,9 +14,16 @@ void handleLoginCommand(
     tundraux::frontend::BackendRuntime* backendRuntime = nullptr
 );
 void handleExitCommand(const std::string& input);
-void handleImportDataCommand(const std::string& input);
+void handleImportDataCommand(
+    const std::string& input,
+    tundraux::frontend::BackendRuntime* backendRuntime = nullptr
+);
 void handleTimeCommand(const std::string& input);
-void handleModifyCommand(const std::string& input, USER& currentUser);
+void handleModifyCommand(
+    const std::string& input,
+    USER& currentUser,
+    tundraux::frontend::BackendRuntime* backendRuntime = nullptr
+);
 void renderShellHeader();
 void handleClearScreenCommand(const std::string& input);
 void handleLogoutCommand(
@@ -34,7 +41,11 @@ void handleTuxFileCommand(
     tundraux::frontend::BackendRuntime* backendRuntime = nullptr
 );
 void handleInfoCommand(const std::string& input);
-void handleManageUsersCommand(const std::string& input, USER& currentUser);
+void handleManageUsersCommand(
+    const std::string& input,
+    USER& currentUser,
+    tundraux::frontend::BackendRuntime* backendRuntime = nullptr
+);
 void handleEditCommand(
     const std::string& input,
     USER& currentUser,
@@ -49,5 +60,13 @@ void handleWhoamiCommand(
     USER& currentUser,
     tundraux::frontend::BackendRuntime* backendRuntime = nullptr
 );
-void handleStrictCommand(const std::string& input, USER& currentUser);
-void handleExportCommand(const std::string& input, USER& currentUser);
+void handleStrictCommand(
+    const std::string& input,
+    USER& currentUser,
+    tundraux::frontend::BackendRuntime* backendRuntime = nullptr
+);
+void handleExportCommand(
+    const std::string& input,
+    USER& currentUser,
+    tundraux::frontend::BackendRuntime* backendRuntime = nullptr
+);

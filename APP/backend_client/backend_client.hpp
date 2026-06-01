@@ -8,6 +8,8 @@ namespace tundraux::frontend {
 struct FrontendUser {
     std::string name;
     std::string type;
+    std::string passwordHint;
+    int failedCount = 0;
 };
 
 struct FrontendSession {
@@ -47,7 +49,6 @@ public:
     explicit BackendClient(BackendLineTransport& transport);
 
     ClientResult<FrontendSession> startGuestSession();
-    ClientResult<FrontendSession> startSession(const FrontendUser& user);
     ClientResult<FrontendSession> login(
         const std::string& sessionId,
         const std::string& username,
@@ -56,6 +57,31 @@ public:
     ClientResult<bool> logout(const std::string& sessionId);
     ClientResult<FrontendUser> whoami(const std::string& sessionId);
     ClientResult<std::vector<FrontendUser>> listUsers(const std::string& sessionId);
+    ClientResult<FrontendUser> currentProfile(const std::string& sessionId);
+    ClientResult<bool> createUser(
+        const std::string& sessionId,
+        const FrontendUser& user,
+        const std::string& password
+    );
+    ClientResult<bool> updateUser(
+        const std::string& sessionId,
+        const std::string& originalName,
+        const FrontendUser& user,
+        bool passwordProvided,
+        const std::string& password
+    );
+    ClientResult<bool> deleteUser(const std::string& sessionId, const std::string& name);
+    ClientResult<bool> resetFailedCount(const std::string& sessionId, const std::string& name);
+    ClientResult<bool> disableUser(const std::string& sessionId, const std::string& name);
+    ClientResult<bool> updateOwnAccount(
+        const std::string& sessionId,
+        bool passwordProvided,
+        const std::string& password,
+        bool passwordHintProvided,
+        const std::string& passwordHint
+    );
+    ClientResult<bool> getStrictMode(const std::string& sessionId);
+    ClientResult<bool> setStrictMode(const std::string& sessionId, bool enabled);
     ClientResult<std::vector<FrontendFileEntry>> listDirectory(
         const std::string& sessionId,
         const std::string& path

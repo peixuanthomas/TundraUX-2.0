@@ -2,6 +2,7 @@
 
 #include "file_store.hpp"
 #include "session_service.hpp"
+#include "user_store.hpp"
 
 #include <string>
 #include <vector>
@@ -10,7 +11,7 @@ namespace tundraux::backend {
 
 class FileService {
 public:
-    FileService(FileStore& files, const SessionService& sessions);
+    FileService(FileStore& files, const SessionService& sessions, const UserStore& users);
 
     ServiceResult<std::vector<FileEntry>> listDirectory(
         const std::string& sessionId,
@@ -55,6 +56,7 @@ public:
 private:
     FileStore& files_;
     const SessionService& sessions_;
+    const UserStore& users_;
 
     ServiceResult<BackendUser> requireFileAccess(const std::string& sessionId) const;
 };

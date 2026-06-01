@@ -87,29 +87,6 @@ bool runStartGuestSessionTest() {
         expectRequestMethod(transport, "session.startGuestSession", "start guest");
 }
 
-bool runStartSessionTest() {
-    FakeTransport transport;
-    transport.nextResponse = R"({"id":"1","result":{"sessionId":"debug-1","user":{"name":"debug","type":"debug"}}})";
-    tundraux::frontend::BackendClient client(transport);
-
-    const auto result = client.startSession(tundraux::frontend::FrontendUser{"debug", "debug"});
-
-    tundraux::backend::JsonValue parsed;
-    const auto* request = parseRequestObject(transport, "start session", parsed);
-    if (request == nullptr) {
-        return false;
-    }
-    const auto& params = request->at("params").asObject();
-    const auto& user = params.at("user").asObject();
-    return expect(result.ok, "start session should succeed") &&
-        expect(result.value.sessionId == "debug-1", "start session id mismatch") &&
-        expect(result.value.user.name == "debug", "start session user name mismatch") &&
-        expect(result.value.user.type == "debug", "start session user type mismatch") &&
-        expect(request->at("method").asString() == "session.startSession", "start session method mismatch") &&
-        expect(user.at("name").asString() == "debug", "start session name param mismatch") &&
-        expect(user.at("type").asString() == "debug", "start session type param mismatch");
-}
-
 bool runListUsersErrorTest() {
     FakeTransport transport;
     transport.nextResponse = R"({"id":"1","error":{"code":"PermissionDenied","message":"Admin access required."}})";
@@ -425,6 +402,71 @@ bool runLogoutTest() {
         expectRequestMethod(transport, "session.logout", "logout");
 }
 
+bool runCurrentProfileTest() {
+    FakeTransport transport;
+    transport.nextResponse = R"({"id":"1","result":{"user":{"name":"alice","type":"admin","passwordHint":"alpha","failedCount":3}}})";
+    tundraux::frontend::BackendClient client(transport);
+
+    const auto result = client.currentProfile("session-1");
+    tundraux::backend::JsonValue parsed;
+    const auto* request = parseRequestObject(transport, "current profile", parsed);
+    if (request == nullptr) {
+        return false;
+    }
+    const auto& params = request->at("params").asObject();
+
+    return expect(result.ok, "current profile should succeed") &&
+        expect(result.value.name == "alice", "current profile name mismatch") &&
+        expect(result.value.type == "admin", "current profile type mismatch") &&
+        expect(result.value.passwordHint == "alpha", "current profile hint mismatch") &&
+        expect(result.value.failedCount == 3, "current profile failed count mismatch") &&
+        expect(request->at("method").asString() == "user.currentProfile", "current profile method mismatch") &&
+        expect(params.at("sessionId").asString() == "session-1", "current profile sessionId param mismatch");
+}
+
+bool runUpdateOwnAccountTest() {
+    FakeTransport transport;
+    transport.nextResponse = R"({"id":"1","result":{"ok":true}})";
+    tundraux::frontend::BackendClient client(transport);
+
+    const auto result = client.updateOwnAccount("session-1", true, "Secret2", true, "new hint");
+
+    tundraux::backend::JsonValue parsed;
+    const auto* request = parseRequestObject(transport, "update own account", parsed);
+    if (request == nullptr) {
+        return false;
+    }
+    const auto& params = request->at("params").asObject();
+    return expect(result.ok, "update own account should succeed") &&
+        expect(result.value, "update own account result mismatch") &&
+        expect(request->at("method").asString() == "user.updateOwnAccount", "update own account method mismatch") &&
+        expect(params.at("sessionId").asString() == "session-1", "update own account sessionId param mismatch") &&
+        expect(params.at("passwordProvided").asBoolean(), "update own account passwordProvided mismatch") &&
+        expect(params.at("passwordHintProvided").asBoolean(), "update own account passwordHintProvided mismatch") &&
+        expect(params.at("password").asString() == "Secret2", "update own account password mismatch") &&
+        expect(params.at("passwordHint").asString() == "new hint", "update own account hint mismatch");
+}
+
+bool runUpdateOwnAccountWithoutOptionalFieldsTest() {
+    FakeTransport transport;
+    transport.nextResponse = R"({"id":"1","result":{"ok":true}})";
+    tundraux::frontend::BackendClient client(transport);
+
+    const auto result = client.updateOwnAccount("session-1", false, "ignored", false, "ignored");
+
+    tundraux::backend::JsonValue parsed;
+    const auto* request = parseRequestObject(transport, "update own account optional fields", parsed);
+    if (request == nullptr) {
+        return false;
+    }
+    const auto& params = request->at("params").asObject();
+    return expect(result.ok, "update own account optional fields should succeed") &&
+        expect(result.value, "update own account optional fields result mismatch") &&
+        expect(params.at("sessionId").asString() == "session-1", "update own account optional fields sessionId param mismatch") &&
+        expect(params.find("password") == params.end(), "update own account should omit password field") &&
+        expect(params.find("passwordHint") == params.end(), "update own account should omit passwordHint field");
+}
+
 bool runRuntimeLegacyDirectTest(const std::string& selfPath) {
     tundraux::frontend::BackendRuntime runtime;
     tundraux::frontend::BackendRuntimeOptions options;
@@ -553,7 +595,6 @@ int main(int argc, char* argv[]) {
     }
 
     if (!runStartGuestSessionTest()) return 1;
-    if (!runStartSessionTest()) return 1;
     if (!runListUsersErrorTest()) return 1;
     if (!runReadFileSuccessTest()) return 1;
     if (!runWhoamiMalformedResponseTest()) return 1;
@@ -572,6 +613,9 @@ int main(int argc, char* argv[]) {
     if (!runListDirectoryNegativeSizeTest()) return 1;
     if (!runLoginTest()) return 1;
     if (!runLogoutTest()) return 1;
+    if (!runCurrentProfileTest()) return 1;
+    if (!runUpdateOwnAccountTest()) return 1;
+    if (!runUpdateOwnAccountWithoutOptionalFieldsTest()) return 1;
     if (!runRuntimeLegacyDirectTest(argv[0])) return 1;
     if (!runRuntimeMissingBackendPathTest()) return 1;
     if (!runProcessResponseLineTooLongTest(argv[0])) return 1;

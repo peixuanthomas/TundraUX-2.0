@@ -34,6 +34,11 @@ public:
         return users_;
     }
 
+    bool addUser(const tundraux::backend::BackendUser& user) override {
+        users_.push_back(user);
+        return true;
+    }
+
     bool updateUser(const std::string& name, const tundraux::backend::BackendUser& user) override {
         for (auto& existing : users_) {
             if (existing.name == name) {
@@ -44,8 +49,28 @@ public:
         return false;
     }
 
+    bool removeUser(const std::string& name) override {
+        for (auto it = users_.begin(); it != users_.end(); ++it) {
+            if (it->name == name) {
+                users_.erase(it);
+                return true;
+            }
+        }
+        return false;
+    }
+
+    bool getStrictMode() const override {
+        return strictMode_;
+    }
+
+    bool setStrictMode(bool enabled) override {
+        strictMode_ = enabled;
+        return true;
+    }
+
 private:
     std::vector<tundraux::backend::BackendUser> users_;
+    bool strictMode_ = false;
 };
 
 class TempDirectory final {
@@ -161,7 +186,7 @@ bool tux_creator_can_create_read_write_and_delete() {
     InMemoryUserStore users({{"user", "alice", "Password1", "hint", 0}});
     tundraux::backend::SessionService sessions(users);
     tundraux::backend::FilesystemTuxStore store(temp.path().string());
-    tundraux::backend::TuxService service(store, sessions);
+    tundraux::backend::TuxService service(store, sessions, users);
 
     const auto alice = login(sessions, "alice", "Password1");
     if (!expect(alice.ok, "alice login should pass")) return false;
@@ -192,7 +217,7 @@ bool tux_non_creator_is_denied() {
     });
     tundraux::backend::SessionService sessions(users);
     tundraux::backend::FilesystemTuxStore store(temp.path().string());
-    tundraux::backend::TuxService service(store, sessions);
+    tundraux::backend::TuxService service(store, sessions, users);
 
     const auto alice = login(sessions, "alice", "Password1");
     const auto bob = login(sessions, "bob", "Password1");
@@ -215,7 +240,7 @@ bool tux_admin_can_read_other_users_file() {
     });
     tundraux::backend::SessionService sessions(users);
     tundraux::backend::FilesystemTuxStore store(temp.path().string());
-    tundraux::backend::TuxService service(store, sessions);
+    tundraux::backend::TuxService service(store, sessions, users);
 
     const auto alice = login(sessions, "alice", "Password1");
     const auto root = login(sessions, "root", "Password1");
@@ -235,7 +260,7 @@ bool tux_guest_is_denied_for_list_and_create() {
     InMemoryUserStore users({{"user", "alice", "Password1", "hint", 0}});
     tundraux::backend::SessionService sessions(users);
     tundraux::backend::FilesystemTuxStore store(temp.path().string());
-    tundraux::backend::TuxService service(store, sessions);
+    tundraux::backend::TuxService service(store, sessions, users);
     const auto guest = sessions.startGuestSession();
 
     const auto listed = service.list(guest.sessionId, "");
@@ -243,6 +268,32 @@ bool tux_guest_is_denied_for_list_and_create() {
 
     return expectResultCode(listed, tundraux::backend::ErrorCode::PermissionDenied, "guest list") &&
         expectCode(created, tundraux::backend::ErrorCode::PermissionDenied, "guest create");
+}
+
+bool tux_access_is_revoked_when_user_is_disabled_or_deleted() {
+    TempDirectory temp(uniqueTempPath());
+    InMemoryUserStore users({{"user", "alice", "Password1", "hint", 0}});
+    tundraux::backend::SessionService sessions(users);
+    tundraux::backend::FilesystemTuxStore store(temp.path().string());
+    tundraux::backend::TuxService service(store, sessions, users);
+
+    const auto alice = login(sessions, "alice", "Password1");
+    if (!expect(alice.ok, "alice login should pass before revoke checks")) return false;
+
+    if (!users.updateUser("alice", {"user", "alice", "Password1", "hint", 8})) {
+        return expect(false, "disable alice in store should succeed");
+    }
+    const auto disabledList = service.list(alice.value.sessionId, "");
+    if (!expectResultCode(disabledList, tundraux::backend::ErrorCode::PermissionDenied, "disabled user list")) {
+        return false;
+    }
+
+    if (!users.removeUser("alice")) {
+        return expect(false, "remove alice in store should succeed");
+    }
+    const auto deletedRead = service.read(alice.value.sessionId, "docs/note");
+
+    return expectResultCode(deletedRead, tundraux::backend::ErrorCode::NotFound, "deleted user read");
 }
 
 bool corrupt_tux_file_returns_storage_error() {
@@ -257,7 +308,7 @@ bool corrupt_tux_file_returns_storage_error() {
     InMemoryUserStore users({{"admin", "root", "Password1", "hint", 0}});
     tundraux::backend::SessionService sessions(users);
     tundraux::backend::FilesystemTuxStore store(temp.path().string());
-    tundraux::backend::TuxService service(store, sessions);
+    tundraux::backend::TuxService service(store, sessions, users);
     const auto root = login(sessions, "root", "Password1");
     if (!expect(root.ok, "root login should pass")) return false;
 
@@ -271,7 +322,7 @@ bool invalid_traversal_path_is_rejected() {
     InMemoryUserStore users({{"user", "alice", "Password1", "hint", 0}});
     tundraux::backend::SessionService sessions(users);
     tundraux::backend::FilesystemTuxStore store(temp.path().string());
-    tundraux::backend::TuxService service(store, sessions);
+    tundraux::backend::TuxService service(store, sessions, users);
     const auto alice = login(sessions, "alice", "Password1");
     if (!expect(alice.ok, "alice login should pass")) return false;
 
@@ -290,7 +341,7 @@ bool tux_regular_user_list_and_search_hide_other_users_files() {
     });
     tundraux::backend::SessionService sessions(users);
     tundraux::backend::FilesystemTuxStore store(temp.path().string());
-    tundraux::backend::TuxService service(store, sessions);
+    tundraux::backend::TuxService service(store, sessions, users);
 
     const auto alice = login(sessions, "alice", "Password1");
     const auto bob = login(sessions, "bob", "Password1");
@@ -318,7 +369,7 @@ bool tux_regular_user_cannot_overwrite_other_users_destination() {
     });
     tundraux::backend::SessionService sessions(users);
     tundraux::backend::FilesystemTuxStore store(temp.path().string());
-    tundraux::backend::TuxService service(store, sessions);
+    tundraux::backend::TuxService service(store, sessions, users);
 
     const auto alice = login(sessions, "alice", "Password1");
     const auto bob = login(sessions, "bob", "Password1");
@@ -375,7 +426,7 @@ bool tux_unauthorized_read_and_copy_deny_before_content_parse() {
     });
     tundraux::backend::SessionService sessions(users);
     tundraux::backend::FilesystemTuxStore store(temp.path().string());
-    tundraux::backend::TuxService service(store, sessions);
+    tundraux::backend::TuxService service(store, sessions, users);
 
     const auto alice = login(sessions, "alice", "Password1");
     const auto bob = login(sessions, "bob", "Password1");
@@ -398,7 +449,7 @@ bool tux_temp_paths_are_rejected() {
     InMemoryUserStore users({{"user", "alice", "Password1", "hint", 0}});
     tundraux::backend::SessionService sessions(users);
     tundraux::backend::FilesystemTuxStore store(temp.path().string());
-    tundraux::backend::TuxService service(store, sessions);
+    tundraux::backend::TuxService service(store, sessions, users);
     const auto alice = login(sessions, "alice", "Password1");
     if (!expect(alice.ok, "alice login should pass")) return false;
     if (!expect(service.create(alice.value.sessionId, "source", false).ok, "source create should pass")) return false;
@@ -447,7 +498,7 @@ bool tux_rename_copy_move_success_paths_work() {
     InMemoryUserStore users({{"user", "alice", "Password1", "hint", 0}});
     tundraux::backend::SessionService sessions(users);
     tundraux::backend::FilesystemTuxStore store(temp.path().string());
-    tundraux::backend::TuxService service(store, sessions);
+    tundraux::backend::TuxService service(store, sessions, users);
     const auto alice = login(sessions, "alice", "Password1");
     if (!expect(alice.ok, "alice login should pass")) return false;
     if (!expect(service.create(alice.value.sessionId, "ops/source", false).ok, "source create should pass")) return false;
@@ -476,7 +527,7 @@ bool tux_debug_user_can_access_other_users_file() {
     });
     tundraux::backend::SessionService sessions(users);
     tundraux::backend::FilesystemTuxStore store(temp.path().string());
-    tundraux::backend::TuxService service(store, sessions);
+    tundraux::backend::TuxService service(store, sessions, users);
 
     const auto alice = login(sessions, "alice", "Password1");
     const auto debug = login(sessions, "debugger", "Password1");
@@ -584,6 +635,7 @@ int main() {
     if (!tux_non_creator_is_denied()) return 1;
     if (!tux_admin_can_read_other_users_file()) return 1;
     if (!tux_guest_is_denied_for_list_and_create()) return 1;
+    if (!tux_access_is_revoked_when_user_is_disabled_or_deleted()) return 1;
     if (!corrupt_tux_file_returns_storage_error()) return 1;
     if (!invalid_traversal_path_is_rejected()) return 1;
     if (!tux_regular_user_list_and_search_hide_other_users_files()) return 1;

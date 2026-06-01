@@ -55,9 +55,9 @@ int main(int argc, char* argv[]) {
     tundraux::backend::FilesystemFileStore filesStore(filesRoot);
     tundraux::backend::SessionService sessions(usersStore);
     tundraux::backend::UserService users(usersStore, sessions);
-    tundraux::backend::FileService files(filesStore, sessions);
+    tundraux::backend::FileService files(filesStore, sessions, usersStore);
     tundraux::backend::FilesystemTuxStore tuxStore(filesRoot);
-    tundraux::backend::TuxService tux(tuxStore, sessions);
+    tundraux::backend::TuxService tux(tuxStore, sessions, usersStore);
     tundraux::backend::JsonRpcDispatcher dispatcher(sessions, users, files, tux);
 
     std::string line;

@@ -36,6 +36,11 @@ public:
         return users;
     }
 
+    bool addUser(const tundraux::backend::BackendUser& user) override {
+        users.push_back(user);
+        return true;
+    }
+
     bool updateUser(const std::string& name, const tundraux::backend::BackendUser& user) override {
         for (auto& existing : users) {
             if (existing.name == name) {
@@ -45,6 +50,27 @@ public:
         }
         return false;
     }
+
+    bool removeUser(const std::string& name) override {
+        for (auto it = users.begin(); it != users.end(); ++it) {
+            if (it->name == name) {
+                users.erase(it);
+                return true;
+            }
+        }
+        return false;
+    }
+
+    bool getStrictMode() const override {
+        return strictMode;
+    }
+
+    bool setStrictMode(bool enabled) override {
+        strictMode = enabled;
+        return true;
+    }
+
+    bool strictMode = false;
 };
 
 class InMemoryFileStore final : public tundraux::backend::FileStore {
@@ -294,7 +320,7 @@ bool regular_file_mutations_require_user_session() {
     RecordingFileStore store;
     InMemoryUserStore users;
     tundraux::backend::SessionService sessions(users);
-    tundraux::backend::FileService service(store, sessions);
+    tundraux::backend::FileService service(store, sessions, users);
     const auto guest = sessions.startGuestSession();
 
     const auto deleted = service.deleteFile(guest.sessionId, "a.txt");
@@ -326,7 +352,7 @@ bool regular_file_mutations_delegate_for_logged_in_user() {
     RecordingFileStore store;
     InMemoryUserStore users;
     tundraux::backend::SessionService sessions(users);
-    tundraux::backend::FileService service(store, sessions);
+    tundraux::backend::FileService service(store, sessions, users);
     const auto guest = sessions.startGuestSession();
     const auto loggedIn = sessions.login(guest.sessionId, "alice", "Secret1");
     if (!expect(loggedIn.ok, "alice login should pass before file mutations")) return false;
@@ -360,7 +386,7 @@ bool regular_file_operations_map_unknown_exceptions_to_storage_error() {
     store.throwUnknownOnSearch = true;
     InMemoryUserStore users;
     tundraux::backend::SessionService sessions(users);
-    tundraux::backend::FileService service(store, sessions);
+    tundraux::backend::FileService service(store, sessions, users);
     const auto guest = sessions.startGuestSession();
     const auto loggedIn = sessions.login(guest.sessionId, "alice", "Secret1");
     if (!expect(loggedIn.ok, "alice login should pass before file error mapping")) return false;
@@ -376,6 +402,41 @@ bool regular_file_operations_map_unknown_exceptions_to_storage_error() {
         expect(
             searched.error.code == tundraux::backend::ErrorCode::StorageError,
             "unknown search exception code mismatch");
+}
+
+bool file_access_is_revoked_when_user_is_disabled_or_deleted() {
+    RecordingFileStore store;
+    InMemoryUserStore users;
+    tundraux::backend::SessionService sessions(users);
+    tundraux::backend::FileService service(store, sessions, users);
+    const auto guest = sessions.startGuestSession();
+    const auto loggedIn = sessions.login(guest.sessionId, "alice", "Secret1");
+    if (!expect(loggedIn.ok, "alice login should pass before revoke checks")) return false;
+
+    bool userUpdated = false;
+    for (auto& user : users.users) {
+        if (user.name == "alice") {
+            user.failedCount = 8;
+            userUpdated = true;
+            break;
+        }
+    }
+    if (!expect(userUpdated, "alice should exist in in-memory store")) return false;
+
+    const auto disabledRead = service.readFile(loggedIn.value.sessionId, "note.txt");
+    if (!expect(!disabledRead.ok, "disabled user read should fail")) return false;
+    if (!expect(
+            disabledRead.error.code == tundraux::backend::ErrorCode::PermissionDenied,
+            "disabled user read code mismatch")) return false;
+
+    if (!users.removeUser("alice")) {
+        return expect(false, "alice remove should succeed in in-memory store");
+    }
+    const auto deletedList = service.listDirectory(loggedIn.value.sessionId, "");
+
+    return expect(!deletedList.ok, "deleted user list should fail") &&
+        expect(deletedList.error.code == tundraux::backend::ErrorCode::NotFound, "deleted user list code mismatch") &&
+        expect(store.calls.empty(), "revoked user calls should not reach store");
 }
 
 bool filesystem_file_store_mutates_regular_files() {
@@ -610,11 +671,12 @@ int main() {
     InMemoryUserStore users;
     SessionService sessions(users);
     InMemoryFileStore files;
-    FileService service(files, sessions);
+    FileService service(files, sessions, users);
 
     if (!regular_file_mutations_require_user_session()) return 1;
     if (!regular_file_mutations_delegate_for_logged_in_user()) return 1;
     if (!regular_file_operations_map_unknown_exceptions_to_storage_error()) return 1;
+    if (!file_access_is_revoked_when_user_is_disabled_or_deleted()) return 1;
     if (!filesystem_file_store_mutates_regular_files()) return 1;
     if (!filesystem_file_store_rejects_regular_file_conflicts()) return 1;
     if (!filesystem_file_store_rejects_temp_targets()) return 1;
