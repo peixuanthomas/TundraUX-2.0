@@ -12,9 +12,24 @@ namespace tundraux::backend {
 
 class JsonRpcDispatcher {
 public:
-    JsonRpcDispatcher(SessionService& sessions, UserService& users, FileService& files, TuxService& tux);
-    JsonRpcDispatcher(SessionService& sessions, UserService& users, FileService& files);
-    JsonRpcDispatcher(SessionService& sessions, UserService& users);
+    JsonRpcDispatcher(
+        SessionService& sessions,
+        UserService& users,
+        FileService& files,
+        TuxService& tux,
+        std::string debugSessionToken = ""
+    );
+    JsonRpcDispatcher(
+        SessionService& sessions,
+        UserService& users,
+        FileService& files,
+        std::string debugSessionToken = ""
+    );
+    JsonRpcDispatcher(
+        SessionService& sessions,
+        UserService& users,
+        std::string debugSessionToken = ""
+    );
 
     std::string handleLine(const std::string& line);
 
@@ -23,6 +38,7 @@ private:
     UserService& users_;
     FileService* files_ = nullptr;
     TuxService* tux_ = nullptr;
+    std::string debugSessionToken_;
 
     JsonValue dispatch(const std::string& method, const JsonValue::Object& params);
     JsonValue errorResponse(const JsonValue& id, ErrorCode code, const std::string& message) const;

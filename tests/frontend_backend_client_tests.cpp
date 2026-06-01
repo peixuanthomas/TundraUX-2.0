@@ -539,6 +539,23 @@ bool runRuntimeDefaultFilesRootIsExecutableDirectoryTest(const std::string& self
     return expect(initialized, "runtime should pass executable directory as files root to backend");
 }
 
+bool runRuntimeDebugStartupUsesDebugSessionTest(const std::string& selfPath) {
+    tundraux::frontend::BackendRuntime runtime;
+    tundraux::frontend::BackendRuntimeOptions options;
+    options.backendStdioPath = selfPath;
+    options.userDataPath = "expect-debug-startup-session";
+    options.startupUserType = "debug";
+    options.startupUserName = "debug";
+    std::string error;
+
+    const bool initialized = runtime.initialize(options, error);
+    const auto sessionId = runtime.sessionId();
+    runtime.shutdown();
+
+    return expect(initialized, "debug startup runtime should initialize") &&
+        expect(sessionId == "debug-session", "debug startup runtime session id mismatch");
+}
+
 int runFakeBackendMode(int argc, char* argv[], const std::string& mode) {
     std::string request;
     if (!std::getline(std::cin, request)) {
@@ -582,6 +599,50 @@ int runFakeBackendMode(int argc, char* argv[], const std::string& mode) {
         return 0;
     }
 
+    if (mode == "expect-debug-startup-session") {
+        std::string debugToken;
+        for (int i = 1; i + 1 < argc; ++i) {
+            if (std::string(argv[i]) == "--debug-session-token") {
+                debugToken = argv[i + 1];
+                break;
+            }
+        }
+        const auto parsed = tundraux::backend::parseJson(request);
+        bool valid = parsed.ok &&
+            parsed.value.type() == tundraux::backend::JsonValue::Type::Object;
+        std::string method;
+        std::string token;
+        if (valid) {
+            const auto& object = parsed.value.asObject();
+            const auto methodIt = object.find("method");
+            const auto paramsIt = object.find("params");
+            valid = methodIt != object.end() &&
+                methodIt->second.type() == tundraux::backend::JsonValue::Type::String &&
+                paramsIt != object.end() &&
+                paramsIt->second.type() == tundraux::backend::JsonValue::Type::Object;
+            if (valid) {
+                method = methodIt->second.asString();
+                const auto& params = paramsIt->second.asObject();
+                const auto tokenIt = params.find("token");
+                valid = tokenIt != params.end() &&
+                    tokenIt->second.type() == tundraux::backend::JsonValue::Type::String;
+                if (valid) {
+                    token = tokenIt->second.asString();
+                }
+            }
+        }
+
+        if (debugToken.empty() || method != "session.startDebugSession" || token != debugToken) {
+            std::cout << R"({"id":"1","error":{"code":"PermissionDenied","message":"debug startup mismatch"}})" << "\n";
+            std::cout.flush();
+            return 0;
+        }
+
+        std::cout << R"({"id":"1","result":{"sessionId":"debug-session","user":{"name":"debug","type":"debug"}}})" << "\n";
+        std::cout.flush();
+        return 0;
+    }
+
     return 1;
 }
 
@@ -620,5 +681,6 @@ int main(int argc, char* argv[]) {
     if (!runRuntimeMissingBackendPathTest()) return 1;
     if (!runProcessResponseLineTooLongTest(argv[0])) return 1;
     if (!runRuntimeDefaultFilesRootIsExecutableDirectoryTest(argv[0])) return 1;
+    if (!runRuntimeDebugStartupUsesDebugSessionTest(argv[0])) return 1;
     return 0;
 }

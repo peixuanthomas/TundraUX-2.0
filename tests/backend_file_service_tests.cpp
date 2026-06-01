@@ -380,6 +380,42 @@ bool regular_file_mutations_delegate_for_logged_in_user() {
         expect(store.calls == expectedCalls, "logged-in delegated calls mismatch");
 }
 
+bool synthetic_debug_session_delegates_file_operations_without_stored_user() {
+    RecordingFileStore store;
+    InMemoryUserStore users;
+    tundraux::backend::SessionService sessions(users);
+    tundraux::backend::FileService service(store, sessions, users);
+    const auto debug = sessions.startSession(tundraux::backend::BackendUser{"debug", "debug", "", "", 0});
+
+    const bool ok =
+        service.listDirectory(debug.sessionId, "").ok &&
+        service.readFile(debug.sessionId, "note.txt").ok &&
+        service.writeFile(debug.sessionId, "draft.txt", "updated").ok &&
+        service.deleteFile(debug.sessionId, "old.txt").ok &&
+        service.renameFile(debug.sessionId, "old.txt", "new.txt", false).ok &&
+        service.copyFile(debug.sessionId, "new.txt", "copy.txt", true).ok &&
+        service.moveFile(debug.sessionId, "copy.txt", "archive/copy.txt", false).ok &&
+        service.createDirectory(debug.sessionId, "archive").ok &&
+        service.removeDirectory(debug.sessionId, "archive", false).ok &&
+        service.search(debug.sessionId, "", "copy").ok;
+
+    const std::vector<std::string> expectedCalls{
+        "list:",
+        "read:note.txt",
+        "write:draft.txt:updated",
+        "delete:old.txt",
+        "rename:old.txt:new.txt:0",
+        "copy:new.txt:copy.txt:1",
+        "move:copy.txt:archive/copy.txt:0",
+        "mkdir:archive",
+        "rmdir:archive:0",
+        "search::copy"
+    };
+
+    return expect(ok, "synthetic debug file operations should succeed") &&
+        expect(store.calls == expectedCalls, "synthetic debug delegated calls mismatch");
+}
+
 bool regular_file_operations_map_unknown_exceptions_to_storage_error() {
     RecordingFileStore store;
     store.throwUnknownOnDelete = true;
@@ -675,6 +711,7 @@ int main() {
 
     if (!regular_file_mutations_require_user_session()) return 1;
     if (!regular_file_mutations_delegate_for_logged_in_user()) return 1;
+    if (!synthetic_debug_session_delegates_file_operations_without_stored_user()) return 1;
     if (!regular_file_operations_map_unknown_exceptions_to_storage_error()) return 1;
     if (!file_access_is_revoked_when_user_is_disabled_or_deleted()) return 1;
     if (!filesystem_file_store_mutates_regular_files()) return 1;

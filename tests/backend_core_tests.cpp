@@ -3,6 +3,7 @@
 #include "user_service.hpp"
 #include "user_store.hpp"
 
+#include <algorithm>
 #include <iostream>
 #include <string>
 #include <vector>
@@ -206,6 +207,38 @@ bool current_profile_rejects_disabled_session_user() {
     return true;
 }
 
+bool synthetic_debug_session_has_manager_access_without_stored_user() {
+    using namespace tundraux::backend;
+
+    InMemoryUserStore store;
+    store.users.erase(
+        std::remove_if(
+            store.users.begin(),
+            store.users.end(),
+            [](const BackendUser& user) { return user.type == "debug"; }
+        ),
+        store.users.end()
+    );
+    SessionService sessions(store);
+    UserService users(store, sessions);
+    const auto debug = sessions.startSession(BackendUser{"debug", "debug", "", "", 0});
+
+    const auto profile = users.currentProfile(debug.sessionId);
+    if (!expect(profile.ok, "synthetic debug currentProfile should pass")) return false;
+    if (!expect(profile.value.type == "debug", "synthetic debug currentProfile type mismatch")) return false;
+    if (!expect(profile.value.name == "debug", "synthetic debug currentProfile name mismatch")) return false;
+
+    const auto listed = users.listUsers(debug.sessionId);
+    if (!expect(listed.ok, "synthetic debug listUsers should pass")) return false;
+    if (!expect(listed.value.size() == store.users.size(), "synthetic debug listUsers count mismatch")) return false;
+
+    const auto strictSet = users.setStrictMode(debug.sessionId, true);
+    const auto strictGet = users.getStrictMode(debug.sessionId);
+    return expect(strictSet.ok, "synthetic debug setStrictMode should pass") &&
+        expect(strictGet.ok, "synthetic debug getStrictMode should pass") &&
+        expect(strictGet.value, "synthetic debug strict mode value mismatch");
+}
+
 } // namespace
 
 int main() {
@@ -333,6 +366,7 @@ int main() {
     if (!expect(management_session_is_revalidated_against_store(), "management session revalidation failed")) return 1;
     if (!expect(password_hint_validation_uses_effective_password(), "effective password hint validation failed")) return 1;
     if (!expect(current_profile_rejects_disabled_session_user(), "disabled currentProfile validation failed")) return 1;
+    if (!expect(synthetic_debug_session_has_manager_access_without_stored_user(), "synthetic debug manager access failed")) return 1;
 
     return 0;
 }

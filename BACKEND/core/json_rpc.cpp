@@ -145,14 +145,35 @@ JsonValue entriesToJson(const std::vector<FileEntry>& value) {
 
 } // namespace
 
-JsonRpcDispatcher::JsonRpcDispatcher(SessionService& sessions, UserService& users, FileService& files, TuxService& tux)
-    : sessions_(sessions), users_(users), files_(&files), tux_(&tux) {}
+JsonRpcDispatcher::JsonRpcDispatcher(
+    SessionService& sessions,
+    UserService& users,
+    FileService& files,
+    TuxService& tux,
+    std::string debugSessionToken
+) : sessions_(sessions),
+    users_(users),
+    files_(&files),
+    tux_(&tux),
+    debugSessionToken_(std::move(debugSessionToken)) {}
 
-JsonRpcDispatcher::JsonRpcDispatcher(SessionService& sessions, UserService& users, FileService& files)
-    : sessions_(sessions), users_(users), files_(&files) {}
+JsonRpcDispatcher::JsonRpcDispatcher(
+    SessionService& sessions,
+    UserService& users,
+    FileService& files,
+    std::string debugSessionToken
+) : sessions_(sessions),
+    users_(users),
+    files_(&files),
+    debugSessionToken_(std::move(debugSessionToken)) {}
 
-JsonRpcDispatcher::JsonRpcDispatcher(SessionService& sessions, UserService& users)
-    : sessions_(sessions), users_(users) {}
+JsonRpcDispatcher::JsonRpcDispatcher(
+    SessionService& sessions,
+    UserService& users,
+    std::string debugSessionToken
+) : sessions_(sessions),
+    users_(users),
+    debugSessionToken_(std::move(debugSessionToken)) {}
 
 std::string JsonRpcDispatcher::handleLine(const std::string& line) {
     JsonValue id = JsonValue::null();
@@ -201,6 +222,14 @@ std::string JsonRpcDispatcher::handleLine(const std::string& line) {
 JsonValue JsonRpcDispatcher::dispatch(const std::string& method, const JsonValue::Object& params) {
     if (method == "session.startGuestSession") {
         return sessionToJson(sessions_.startGuestSession());
+    }
+
+    if (method == "session.startDebugSession") {
+        const std::string token = requiredStringParam(params, "token");
+        if (debugSessionToken_.empty() || token != debugSessionToken_) {
+            throw RpcError(ErrorCode::PermissionDenied, "Access Denied.");
+        }
+        return sessionToJson(sessions_.startSession(BackendUser{"debug", "debug", "", "", 0}));
     }
 
     if (method == "session.login") {

@@ -542,6 +542,28 @@ bool tux_debug_user_can_access_other_users_file() {
         expect(read.value.content == "debug-visible", "debug read content mismatch");
 }
 
+bool tux_synthetic_debug_user_can_access_other_users_file_without_stored_user() {
+    TempDirectory temp(uniqueTempPath());
+    InMemoryUserStore users({{"user", "alice", "Password1", "hint", 0}});
+    tundraux::backend::SessionService sessions(users);
+    tundraux::backend::FilesystemTuxStore store(temp.path().string());
+    tundraux::backend::TuxService service(store, sessions, users);
+
+    const auto alice = login(sessions, "alice", "Password1");
+    const auto debug = sessions.startSession(tundraux::backend::BackendUser{"debug", "debug", "", "", 0});
+    if (!expect(alice.ok, "alice login should pass")) return false;
+    if (!expect(service.create(alice.value.sessionId, "shared/synthetic_debug_doc", false).ok, "alice create should pass")) return false;
+    if (!expect(service.write(alice.value.sessionId, "shared/synthetic_debug_doc", "debug-visible").ok, "alice write should pass")) return false;
+
+    const auto read = service.read(debug.sessionId, "shared/synthetic_debug_doc");
+    const auto searched = service.search(debug.sessionId, "shared", "synthetic_debug_doc");
+
+    return expect(read.ok, "synthetic debug read should pass") &&
+        expect(read.value.content == "debug-visible", "synthetic debug read content mismatch") &&
+        expect(searched.ok, "synthetic debug search should pass") &&
+        expect(searched.value.size() == 1, "synthetic debug search count mismatch");
+}
+
 bool tux_root_list_and_search_hide_mixed_case_temp() {
     TempDirectory temp(uniqueTempPath());
     std::filesystem::create_directories(temp.path() / "Temp");
@@ -645,6 +667,7 @@ int main() {
     if (!tux_temp_paths_are_rejected()) return 1;
     if (!tux_rename_copy_move_success_paths_work()) return 1;
     if (!tux_debug_user_can_access_other_users_file()) return 1;
+    if (!tux_synthetic_debug_user_can_access_other_users_file_without_stored_user()) return 1;
     if (!tux_root_list_and_search_hide_mixed_case_temp()) return 1;
     if (!tux_reserved_device_components_are_rejected()) return 1;
     if (!tux_failed_overwrite_move_preserves_destination()) return 1;

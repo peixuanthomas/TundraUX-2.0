@@ -313,7 +313,8 @@ BackendProcessTransport::~BackendProcessTransport() {
 bool BackendProcessTransport::start(
     const std::string& executablePath,
     const std::string& userDataPath,
-    const std::string& filesRoot
+    const std::string& filesRoot,
+    const std::string& debugSessionToken
 ) {
     std::lock_guard<std::mutex> lock(mutex_);
     stopLocked();
@@ -378,10 +379,13 @@ bool BackendProcessTransport::start(
     ) != FALSE;
 
     PROCESS_INFORMATION processInfo{};
-    const std::wstring commandLine =
+    std::wstring commandLine =
         quoteWindowsArg(executablePathW) +
         L" --user-data " + quoteWindowsArg(widenString(userDataPath)) +
         L" --files-root " + quoteWindowsArg(widenString(filesRoot));
+    if (!debugSessionToken.empty()) {
+        commandLine += L" --debug-session-token " + quoteWindowsArg(widenString(debugSessionToken));
+    }
     std::vector<wchar_t> mutableCommandLine(commandLine.begin(), commandLine.end());
     mutableCommandLine.push_back(L'\0');
 

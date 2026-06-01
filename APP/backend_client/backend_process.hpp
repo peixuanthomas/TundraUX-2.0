@@ -26,7 +26,8 @@ public:
     bool start(
         const std::string& executablePath,
         const std::string& userDataPath,
-        const std::string& filesRoot
+        const std::string& filesRoot,
+        const std::string& debugSessionToken = ""
     );
     bool requestLine(const std::string& line, std::string& response) override;
     void stop();

@@ -300,6 +300,16 @@ ClientResult<FrontendSession> BackendClient::startGuestSession() {
     );
 }
 
+ClientResult<FrontendSession> BackendClient::startDebugSession(const std::string& token) {
+    return sendRequest<FrontendSession>(
+        transport_,
+        nextRequestId(),
+        "session.startDebugSession",
+        JsonValue::Object{{"token", JsonValue::string(token)}},
+        [](const JsonValue& result) { return parseSession(result); }
+    );
+}
+
 ClientResult<FrontendSession> BackendClient::login(
     const std::string& sessionId,
     const std::string& username,

@@ -14,13 +14,19 @@
 namespace {
 
 void printUsage() {
-    std::cerr << "Usage: tundraux_backend_stdio [--user-data PATH] [--files-root PATH]\n";
+    std::cerr << "Usage: tundraux_backend_stdio [--user-data PATH] [--files-root PATH] [--debug-session-token TOKEN]\n";
 }
 
-bool parseArgs(int argc, char* argv[], std::string& userDataPath, std::string& filesRoot) {
+bool parseArgs(
+    int argc,
+    char* argv[],
+    std::string& userDataPath,
+    std::string& filesRoot,
+    std::string& debugSessionToken
+) {
     for (int i = 1; i < argc; ++i) {
         const std::string arg = argv[i];
-        if (arg != "--user-data" && arg != "--files-root") {
+        if (arg != "--user-data" && arg != "--files-root" && arg != "--debug-session-token") {
             printUsage();
             return false;
         }
@@ -35,8 +41,10 @@ bool parseArgs(int argc, char* argv[], std::string& userDataPath, std::string& f
         }
         if (arg == "--user-data") {
             userDataPath = std::move(value);
-        } else {
+        } else if (arg == "--files-root") {
             filesRoot = std::move(value);
+        } else {
+            debugSessionToken = std::move(value);
         }
     }
     return true;
@@ -47,7 +55,8 @@ bool parseArgs(int argc, char* argv[], std::string& userDataPath, std::string& f
 int main(int argc, char* argv[]) {
     std::string userDataPath = "user_data.dat";
     std::string filesRoot = "Files";
-    if (!parseArgs(argc, argv, userDataPath, filesRoot)) {
+    std::string debugSessionToken;
+    if (!parseArgs(argc, argv, userDataPath, filesRoot, debugSessionToken)) {
         return 1;
     }
 
@@ -58,7 +67,7 @@ int main(int argc, char* argv[]) {
     tundraux::backend::FileService files(filesStore, sessions, usersStore);
     tundraux::backend::FilesystemTuxStore tuxStore(filesRoot);
     tundraux::backend::TuxService tux(tuxStore, sessions, usersStore);
-    tundraux::backend::JsonRpcDispatcher dispatcher(sessions, users, files, tux);
+    tundraux::backend::JsonRpcDispatcher dispatcher(sessions, users, files, tux, debugSessionToken);
 
     std::string line;
     while (std::getline(std::cin, line)) {

@@ -49,6 +49,7 @@ public:
     explicit BackendClient(BackendLineTransport& transport);
 
     ClientResult<FrontendSession> startGuestSession();
+    ClientResult<FrontendSession> startDebugSession(const std::string& token);
     ClientResult<FrontendSession> login(
         const std::string& sessionId,
         const std::string& username,
