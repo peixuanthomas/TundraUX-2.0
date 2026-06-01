@@ -652,7 +652,8 @@ void FilesystemFileStore::removeDirectory(const std::string& path, bool recursiv
         }
 
         if (recursive) {
-            const auto removeTree = [&](const auto& self, const std::filesystem::path& directory) -> void {
+            std::vector<std::filesystem::path> deletionOrder;
+            const auto collectTree = [&](const auto& self, const std::filesystem::path& directory) -> void {
                 rejectUnsafeExistingPathComponents(directory);
                 rejectProtectedPath(directory);
                 if (isReparseOrSymlink(directory)) {
@@ -675,10 +676,7 @@ void FilesystemFileStore::removeDirectory(const std::string& path, bool recursiv
                     if (std::filesystem::is_directory(status)) {
                         self(self, child);
                     } else {
-                        std::filesystem::remove(child, walkError);
-                        if (walkError) {
-                            throw storageError();
-                        }
+                        deletionOrder.push_back(child);
                     }
                 }
 
@@ -687,12 +685,24 @@ void FilesystemFileStore::removeDirectory(const std::string& path, bool recursiv
                 if (isReparseOrSymlink(directory)) {
                     throw permissionDenied();
                 }
-                std::filesystem::remove(directory, walkError);
-                if (walkError) {
+                deletionOrder.push_back(directory);
+            };
+            collectTree(collectTree, resolved);
+
+            for (const auto& target : deletionOrder) {
+                rejectUnsafeExistingPathComponents(target);
+                rejectProtectedPath(target);
+                if (isReparseOrSymlink(target)) {
+                    throw permissionDenied();
+                }
+            }
+
+            for (const auto& target : deletionOrder) {
+                std::filesystem::remove(target, error);
+                if (error) {
                     throw storageError();
                 }
-            };
-            removeTree(removeTree, resolved);
+            }
         } else if (!std::filesystem::remove(resolved, error) || error) {
             throw storageError();
         }
@@ -768,6 +778,14 @@ std::vector<FileEntry> FilesystemFileStore::search(const std::string& root, cons
                 results.push_back(entryFromPath(entryPath));
             }
         }
+        std::sort(results.begin(), results.end(), [](const FileEntry& left, const FileEntry& right) {
+            const auto leftPath = lowerAscii(left.path);
+            const auto rightPath = lowerAscii(right.path);
+            if (leftPath != rightPath) {
+                return leftPath < rightPath;
+            }
+            return left.path < right.path;
+        });
         return results;
     } catch (const BackendException&) {
         throw;

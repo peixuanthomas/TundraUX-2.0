@@ -538,7 +538,9 @@ bool filesystem_file_store_failed_overwrite_move_keeps_destination() {
 bool filesystem_file_store_recursive_remove_rejects_protected_descendant() {
     TempDirectory temp(uniqueTempPath());
     std::filesystem::create_directories(temp.path() / "docs");
-    std::ofstream(temp.path() / "docs" / "secret.TUX") << "protected";
+    std::filesystem::create_directories(temp.path() / "docs" / "zz-protected");
+    std::ofstream(temp.path() / "docs" / "aa-safe.txt") << "safe";
+    std::ofstream(temp.path() / "docs" / "zz-protected" / "secret.TUX") << "protected";
     tundraux::backend::FilesystemFileStore store(temp.path().string());
 
     bool protectedRejected = false;
@@ -551,8 +553,11 @@ bool filesystem_file_store_recursive_remove_rejects_protected_descendant() {
     return expect(protectedRejected, "recursive rmdir should reject protected descendants") &&
            expect(std::filesystem::exists(temp.path() / "docs"), "rejected recursive rmdir should keep directory") &&
            expect(
-               std::filesystem::exists(temp.path() / "docs" / "secret.TUX"),
-               "rejected recursive rmdir should keep protected descendant");
+               std::filesystem::exists(temp.path() / "docs" / "zz-protected" / "secret.TUX"),
+               "rejected recursive rmdir should keep protected descendant") &&
+           expect(
+               store.readFile("docs/aa-safe.txt").content == "safe",
+               "rejected recursive rmdir should keep safe sibling content");
 }
 
 bool filesystem_file_store_searches_by_name() {
