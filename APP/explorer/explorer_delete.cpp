@@ -1,6 +1,7 @@
 #include "explorer_delete.hpp"
 
 #include "audit_log.hpp"
+#include "explorer_backend.hpp"
 #include "explorer_directory.hpp"
 #include "explorer_navigation.hpp"
 #include "explorer_permissions.hpp"
@@ -59,6 +60,44 @@ void confirmDelete(ExplorerState& state) {
             "explorer",
             "delete denied path=" + pathToDisplayString(target) + " reason=outside root"
         );
+        return;
+    }
+
+    if (state.backend != nullptr) {
+        FileEntry entry;
+        entry.name = target.filename().u8string();
+        entry.path = target;
+        entry.isDirectory = false;
+        for (const auto& candidate : state.entries) {
+            if (isSamePath(candidate.path, target)) {
+                entry = candidate;
+                break;
+            }
+        }
+
+        const auto result = state.backend->deletePath(explorerRelativePath(state.rootPath, target), entry.isDirectory);
+        if (!result.ok || !result.value) {
+            state.message = redMessage(result.message);
+            setAuditUser(state);
+            tundraux::audit::logEvent(
+                "explorer",
+                "delete failure path=" + pathToDisplayString(target) + " reason=" + result.message
+            );
+            return;
+        }
+
+        if (state.clipboard.mode != ClipboardMode::None &&
+            (isSamePath(state.clipboard.path, target) ||
+             (entry.isDirectory && isPathInsideRoot(state.clipboard.path, target)))) {
+            state.clipboard = {};
+        }
+
+        const std::string deletedName = state.pendingDeleteName;
+        state.pendingDelete = false;
+        refresh(state);
+        state.message = "Deleted " + deletedName;
+        setAuditUser(state);
+        tundraux::audit::logEvent("explorer", "delete success path=" + pathToDisplayString(target));
         return;
     }
 

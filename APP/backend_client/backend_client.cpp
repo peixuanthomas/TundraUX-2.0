@@ -110,8 +110,72 @@ FrontendFileEntry parseFileEntry(const JsonValue& value) {
     };
 }
 
+std::vector<FrontendFileEntry> parseEntriesResult(const JsonValue& result) {
+    if (result.type() != JsonValue::Type::Object) {
+        throw std::logic_error("expected entries result object");
+    }
+    const auto& entries = requiredObjectField(result.asObject(), "entries");
+    if (entries.type() != JsonValue::Type::Array) {
+        throw std::logic_error("expected entries array");
+    }
+    std::vector<FrontendFileEntry> parsedEntries;
+    for (const auto& entry : entries.asArray()) {
+        parsedEntries.push_back(parseFileEntry(entry));
+    }
+    return parsedEntries;
+}
+
+bool parseOkResult(const JsonValue& result) {
+    if (result.type() != JsonValue::Type::Object) {
+        throw std::logic_error("expected ok result object");
+    }
+    return requiredBooleanField(result.asObject(), "ok");
+}
+
+FrontendTuxContent parseTuxContent(const JsonValue& result) {
+    if (result.type() != JsonValue::Type::Object) {
+        throw std::logic_error("expected tux content object");
+    }
+    const auto& object = result.asObject();
+    return FrontendTuxContent{
+        requiredStringField(object, "content"),
+        requiredStringField(object, "creator"),
+        requiredStringField(object, "lastEditor")
+    };
+}
+
 JsonValue::Object paramsWithSession(const std::string& sessionId) {
     return JsonValue::Object{{"sessionId", JsonValue::string(sessionId)}};
+}
+
+JsonValue::Object paramsWithPath(const std::string& sessionId, const std::string& path) {
+    JsonValue::Object params = paramsWithSession(sessionId);
+    params.emplace("path", JsonValue::string(path));
+    return params;
+}
+
+JsonValue::Object paramsWithFromTo(
+    const std::string& sessionId,
+    const std::string& from,
+    const std::string& to,
+    bool overwrite
+) {
+    JsonValue::Object params = paramsWithSession(sessionId);
+    params.emplace("from", JsonValue::string(from));
+    params.emplace("to", JsonValue::string(to));
+    params.emplace("overwrite", JsonValue::boolean(overwrite));
+    return params;
+}
+
+JsonValue::Object paramsWithRootQuery(
+    const std::string& sessionId,
+    const std::string& root,
+    const std::string& query
+) {
+    JsonValue::Object params = paramsWithSession(sessionId);
+    params.emplace("root", JsonValue::string(root));
+    params.emplace("query", JsonValue::string(query));
+    return params;
 }
 
 JsonValue makeRequest(const std::string& id, const std::string& method, JsonValue::Object params) {
@@ -295,20 +359,7 @@ ClientResult<std::vector<FrontendFileEntry>> BackendClient::listDirectory(
         nextRequestId(),
         "file.listDirectory",
         std::move(params),
-        [](const JsonValue& result) {
-            if (result.type() != JsonValue::Type::Object) {
-                throw std::logic_error("expected list directory result object");
-            }
-            const auto& entries = requiredObjectField(result.asObject(), "entries");
-            if (entries.type() != JsonValue::Type::Array) {
-                throw std::logic_error("expected entries array");
-            }
-            std::vector<FrontendFileEntry> parsedEntries;
-            for (const auto& entry : entries.asArray()) {
-                parsedEntries.push_back(parseFileEntry(entry));
-            }
-            return parsedEntries;
-        }
+        [](const JsonValue& result) { return parseEntriesResult(result); }
     );
 }
 
@@ -342,12 +393,222 @@ ClientResult<bool> BackendClient::writeFile(
         nextRequestId(),
         "file.writeFile",
         std::move(params),
-        [](const JsonValue& result) {
-            if (result.type() != JsonValue::Type::Object) {
-                throw std::logic_error("expected write file result object");
-            }
-            return requiredBooleanField(result.asObject(), "ok");
-        }
+        [](const JsonValue& result) { return parseOkResult(result); }
+    );
+}
+
+ClientResult<bool> BackendClient::deleteFile(const std::string& sessionId, const std::string& path) {
+    return sendRequest<bool>(
+        transport_,
+        nextRequestId(),
+        "file.deleteFile",
+        paramsWithPath(sessionId, path),
+        [](const JsonValue& result) { return parseOkResult(result); }
+    );
+}
+
+ClientResult<bool> BackendClient::renameFile(
+    const std::string& sessionId,
+    const std::string& from,
+    const std::string& to,
+    bool overwrite
+) {
+    return sendRequest<bool>(
+        transport_,
+        nextRequestId(),
+        "file.renameFile",
+        paramsWithFromTo(sessionId, from, to, overwrite),
+        [](const JsonValue& result) { return parseOkResult(result); }
+    );
+}
+
+ClientResult<bool> BackendClient::copyFile(
+    const std::string& sessionId,
+    const std::string& from,
+    const std::string& to,
+    bool overwrite
+) {
+    return sendRequest<bool>(
+        transport_,
+        nextRequestId(),
+        "file.copyFile",
+        paramsWithFromTo(sessionId, from, to, overwrite),
+        [](const JsonValue& result) { return parseOkResult(result); }
+    );
+}
+
+ClientResult<bool> BackendClient::moveFile(
+    const std::string& sessionId,
+    const std::string& from,
+    const std::string& to,
+    bool overwrite
+) {
+    return sendRequest<bool>(
+        transport_,
+        nextRequestId(),
+        "file.moveFile",
+        paramsWithFromTo(sessionId, from, to, overwrite),
+        [](const JsonValue& result) { return parseOkResult(result); }
+    );
+}
+
+ClientResult<bool> BackendClient::createDirectory(const std::string& sessionId, const std::string& path) {
+    return sendRequest<bool>(
+        transport_,
+        nextRequestId(),
+        "file.createDirectory",
+        paramsWithPath(sessionId, path),
+        [](const JsonValue& result) { return parseOkResult(result); }
+    );
+}
+
+ClientResult<bool> BackendClient::removeDirectory(
+    const std::string& sessionId,
+    const std::string& path,
+    bool recursive
+) {
+    JsonValue::Object params = paramsWithPath(sessionId, path);
+    params.emplace("recursive", JsonValue::boolean(recursive));
+    return sendRequest<bool>(
+        transport_,
+        nextRequestId(),
+        "file.removeDirectory",
+        std::move(params),
+        [](const JsonValue& result) { return parseOkResult(result); }
+    );
+}
+
+ClientResult<std::vector<FrontendFileEntry>> BackendClient::searchFiles(
+    const std::string& sessionId,
+    const std::string& root,
+    const std::string& query
+) {
+    return sendRequest<std::vector<FrontendFileEntry>>(
+        transport_,
+        nextRequestId(),
+        "file.search",
+        paramsWithRootQuery(sessionId, root, query),
+        [](const JsonValue& result) { return parseEntriesResult(result); }
+    );
+}
+
+ClientResult<std::vector<FrontendFileEntry>> BackendClient::listTux(
+    const std::string& sessionId,
+    const std::string& path
+) {
+    return sendRequest<std::vector<FrontendFileEntry>>(
+        transport_,
+        nextRequestId(),
+        "tux.list",
+        paramsWithPath(sessionId, path),
+        [](const JsonValue& result) { return parseEntriesResult(result); }
+    );
+}
+
+ClientResult<bool> BackendClient::createTux(const std::string& sessionId, const std::string& path, bool overwrite) {
+    JsonValue::Object params = paramsWithPath(sessionId, path);
+    params.emplace("overwrite", JsonValue::boolean(overwrite));
+    return sendRequest<bool>(
+        transport_,
+        nextRequestId(),
+        "tux.create",
+        std::move(params),
+        [](const JsonValue& result) { return parseOkResult(result); }
+    );
+}
+
+ClientResult<FrontendTuxContent> BackendClient::readTux(const std::string& sessionId, const std::string& path) {
+    return sendRequest<FrontendTuxContent>(
+        transport_,
+        nextRequestId(),
+        "tux.read",
+        paramsWithPath(sessionId, path),
+        [](const JsonValue& result) { return parseTuxContent(result); }
+    );
+}
+
+ClientResult<bool> BackendClient::writeTux(
+    const std::string& sessionId,
+    const std::string& path,
+    const std::string& content
+) {
+    JsonValue::Object params = paramsWithPath(sessionId, path);
+    params.emplace("content", JsonValue::string(content));
+    return sendRequest<bool>(
+        transport_,
+        nextRequestId(),
+        "tux.write",
+        std::move(params),
+        [](const JsonValue& result) { return parseOkResult(result); }
+    );
+}
+
+ClientResult<bool> BackendClient::deleteTux(const std::string& sessionId, const std::string& path) {
+    return sendRequest<bool>(
+        transport_,
+        nextRequestId(),
+        "tux.delete",
+        paramsWithPath(sessionId, path),
+        [](const JsonValue& result) { return parseOkResult(result); }
+    );
+}
+
+ClientResult<bool> BackendClient::renameTux(
+    const std::string& sessionId,
+    const std::string& from,
+    const std::string& to,
+    bool overwrite
+) {
+    return sendRequest<bool>(
+        transport_,
+        nextRequestId(),
+        "tux.rename",
+        paramsWithFromTo(sessionId, from, to, overwrite),
+        [](const JsonValue& result) { return parseOkResult(result); }
+    );
+}
+
+ClientResult<bool> BackendClient::copyTux(
+    const std::string& sessionId,
+    const std::string& from,
+    const std::string& to,
+    bool overwrite
+) {
+    return sendRequest<bool>(
+        transport_,
+        nextRequestId(),
+        "tux.copy",
+        paramsWithFromTo(sessionId, from, to, overwrite),
+        [](const JsonValue& result) { return parseOkResult(result); }
+    );
+}
+
+ClientResult<bool> BackendClient::moveTux(
+    const std::string& sessionId,
+    const std::string& from,
+    const std::string& to,
+    bool overwrite
+) {
+    return sendRequest<bool>(
+        transport_,
+        nextRequestId(),
+        "tux.move",
+        paramsWithFromTo(sessionId, from, to, overwrite),
+        [](const JsonValue& result) { return parseOkResult(result); }
+    );
+}
+
+ClientResult<std::vector<FrontendFileEntry>> BackendClient::searchTux(
+    const std::string& sessionId,
+    const std::string& root,
+    const std::string& query
+) {
+    return sendRequest<std::vector<FrontendFileEntry>>(
+        transport_,
+        nextRequestId(),
+        "tux.search",
+        paramsWithRootQuery(sessionId, root, query),
+        [](const JsonValue& result) { return parseEntriesResult(result); }
     );
 }
 

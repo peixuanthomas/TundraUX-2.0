@@ -1,8 +1,10 @@
 #include "explorer_clipboard.hpp"
+#include "explorer_backend.hpp"
 
 #include <filesystem>
 #include <iostream>
 #include <string>
+#include <vector>
 
 bool can_modify_tux_file(const std::string&, const std::string&, const std::string&) {
     return true;
@@ -21,6 +23,52 @@ int run_editor(const std::string&, const std::string&) {
 }
 
 namespace {
+
+class FakeExplorerBackend final : public tundraux::explorer::ExplorerBackend {
+public:
+    std::vector<std::string> calls;
+
+    tundraux::explorer::ExplorerBackendResult<std::vector<tundraux::explorer::FileEntry>> listDirectory(
+        const std::string&
+    ) override {
+        return {true, {}, "", ""};
+    }
+
+    tundraux::explorer::ExplorerBackendResult<bool> createDirectory(const std::string& path) override {
+        calls.push_back("mkdir:" + path);
+        return {true, true, "", ""};
+    }
+
+    tundraux::explorer::ExplorerBackendResult<bool> deletePath(const std::string& path, bool recursive) override {
+        calls.push_back("delete:" + path + ":" + (recursive ? "1" : "0"));
+        return {true, true, "", ""};
+    }
+
+    tundraux::explorer::ExplorerBackendResult<bool> copyPath(
+        const std::string& from,
+        const std::string& to,
+        bool overwrite
+    ) override {
+        calls.push_back("copy:" + from + ":" + to + ":" + (overwrite ? "1" : "0"));
+        return {true, true, "", ""};
+    }
+
+    tundraux::explorer::ExplorerBackendResult<bool> movePath(
+        const std::string& from,
+        const std::string& to,
+        bool overwrite
+    ) override {
+        calls.push_back("move:" + from + ":" + to + ":" + (overwrite ? "1" : "0"));
+        return {true, true, "", ""};
+    }
+
+    tundraux::explorer::ExplorerBackendResult<std::vector<tundraux::explorer::FileEntry>> search(
+        const std::string&,
+        const std::string&
+    ) override {
+        return {true, {}, "", ""};
+    }
+};
 
 bool writerCalled = false;
 bool writerShouldSucceed = true;
@@ -54,6 +102,25 @@ void resetWriter() {
     writerShouldSucceed = true;
     writerText.clear();
     writerFailure = "clipboard busy";
+}
+
+bool explorerPasteUsesBackendCopy() {
+    namespace fs = std::filesystem;
+
+    FakeExplorerBackend backend;
+    tundraux::explorer::ExplorerState state;
+    state.backend = &backend;
+    state.rootPath = fs::u8path("C:/root");
+    state.currentPath = state.rootPath;
+    state.clipboard.mode = tundraux::explorer::ClipboardMode::Copy;
+    state.clipboard.path = state.rootPath / "source.txt";
+    state.clipboard.name = "source.txt";
+    state.clipboard.isDirectory = false;
+
+    tundraux::explorer::pasteClipboard(state);
+
+    return !backend.calls.empty() &&
+        backend.calls.front() == "copy:source.txt:source.txt:0";
 }
 
 } // namespace
@@ -102,6 +169,11 @@ int main() {
     }
     if (state.message.find("Could not copy file name: clipboard busy") == std::string::npos) {
         std::cerr << "unexpected writer failure message: " << state.message << "\n";
+        return 1;
+    }
+
+    if (!explorerPasteUsesBackendCopy()) {
+        std::cerr << "pasteClipboard did not route copy through backend\n";
         return 1;
     }
 

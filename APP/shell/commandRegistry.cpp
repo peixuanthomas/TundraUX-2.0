@@ -102,7 +102,9 @@ std::vector<RegisteredCommand> buildNewCommandRegistry(
             "TUXfile",
             "Open TUX File Manager (Terminal style)",
             {"tuxfile"},
-            [&currentUser](const std::string& input) { handleTuxFileCommand(input, currentUser); },
+            [&currentUser, backendRuntime](const std::string& input) {
+                handleTuxFileCommand(input, currentUser, backendRuntime);
+            },
             "user,admin,debug",
             false
         },
@@ -170,7 +172,9 @@ std::vector<RegisteredCommand> buildNewCommandRegistry(
             "explorer",
             "Open the file explorer",
             {},
-            [&currentUser](const std::string &input) { handleExplorerCommand(input, currentUser); },
+            [&currentUser, backendRuntime](const std::string &input) {
+                handleExplorerCommand(input, currentUser, backendRuntime);
+            },
             "admin,user,debug",
             false
         },

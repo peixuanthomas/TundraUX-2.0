@@ -109,6 +109,7 @@ set(TUNDRAUX_APP_SOURCES
     APP/editor/editor_portable.cpp
     APP/editor/editor_win.cpp
     APP/explorer/explorer_clipboard.cpp
+    APP/explorer/explorer_backend.cpp
     APP/explorer/explorer.cpp
     APP/explorer/explorer_delete.cpp
     APP/explorer/explorer_detail_actions.cpp
@@ -123,6 +124,7 @@ set(TUNDRAUX_APP_SOURCES
     APP/explorer/explorer_search.cpp
     APP/explorer/explorer_text.cpp
     APP/file_manager/TUXfile.cpp
+    APP/file_manager/tux_backend.cpp
     APP/shell/command.cpp
     APP/shell/commandHandlers.cpp
     APP/shell/commandReg.cpp
@@ -240,6 +242,8 @@ add_test(NAME build_info_tests COMMAND build_info_tests)
 
 add_executable(explorer_permissions_tests
     tests/explorer_permissions_tests.cpp
+    APP/backend_client/backend_client.cpp
+    APP/explorer/explorer_backend.cpp
     APP/explorer/explorer_directory.cpp
     APP/explorer/explorer_permissions.cpp
     APP/explorer/explorer_text.cpp
@@ -247,13 +251,16 @@ add_executable(explorer_permissions_tests
 
 target_include_directories(explorer_permissions_tests
     PRIVATE
+        ${PROJECT_SOURCE_DIR}/APP/backend_client
         ${PROJECT_SOURCE_DIR}/APP/explorer
         ${PROJECT_SOURCE_DIR}/APP/file_manager
+        ${PROJECT_SOURCE_DIR}/BACKEND/core
 )
 
 target_link_libraries(explorer_permissions_tests
     PRIVATE
         TundraTUI::TundraTUI
+        tundraux_backend_core
 )
 
 target_compile_features(explorer_permissions_tests
@@ -265,6 +272,8 @@ add_test(NAME explorer_permissions_tests COMMAND explorer_permissions_tests)
 
 add_executable(explorer_clipboard_tests
     tests/explorer_clipboard_tests.cpp
+    APP/backend_client/backend_client.cpp
+    APP/explorer/explorer_backend.cpp
     APP/explorer/explorer_clipboard.cpp
     APP/explorer/explorer_directory.cpp
     APP/explorer/explorer_navigation.cpp
@@ -277,9 +286,11 @@ add_executable(explorer_clipboard_tests
 
 target_include_directories(explorer_clipboard_tests
     PRIVATE
+        ${PROJECT_SOURCE_DIR}/APP/backend_client
         ${PROJECT_SOURCE_DIR}/APP/editor
         ${PROJECT_SOURCE_DIR}/APP/explorer
         ${PROJECT_SOURCE_DIR}/APP/file_manager
+        ${PROJECT_SOURCE_DIR}/BACKEND/core
         ${PROJECT_SOURCE_DIR}/SYSTEM/audit
         ${PROJECT_SOURCE_DIR}/SYSTEM/console
         ${PROJECT_SOURCE_DIR}/SYSTEM/crypto
@@ -289,6 +300,7 @@ target_include_directories(explorer_clipboard_tests
 target_link_libraries(explorer_clipboard_tests
     PRIVATE
         TundraTUI::TundraTUI
+        tundraux_backend_core
 )
 
 target_compile_features(explorer_clipboard_tests
@@ -438,6 +450,31 @@ target_compile_features(frontend_backend_client_tests
 )
 
 add_test(NAME frontend_backend_client_tests COMMAND frontend_backend_client_tests)
+
+add_executable(tux_frontend_command_tests
+    tests/tux_frontend_command_tests.cpp
+    APP/file_manager/tux_backend.cpp
+    APP/backend_client/backend_client.cpp
+)
+
+target_include_directories(tux_frontend_command_tests
+    PRIVATE
+        ${PROJECT_SOURCE_DIR}/APP/file_manager
+        ${PROJECT_SOURCE_DIR}/APP/backend_client
+        ${PROJECT_SOURCE_DIR}/BACKEND/core
+)
+
+target_link_libraries(tux_frontend_command_tests
+    PRIVATE
+        tundraux_backend_core
+)
+
+target_compile_features(tux_frontend_command_tests
+    PRIVATE
+        cxx_std_17
+)
+
+add_test(NAME tux_frontend_command_tests COMMAND tux_frontend_command_tests)
 
 if(TUNDRAUX_DEBUG_STARTUP)
     target_compile_definitions(${PROJECT_NAME}

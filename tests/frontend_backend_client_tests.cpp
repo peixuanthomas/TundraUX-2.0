@@ -231,6 +231,131 @@ bool runListDirectoryTest() {
         expect(result.value[0].size == 5ULL, "list directory entry size mismatch");
 }
 
+bool runFileMutationAndSearchMethodsTest() {
+    FakeTransport transport;
+    transport.nextResponse = R"({"id":"1","result":{"ok":true}})";
+    tundraux::frontend::BackendClient client(transport);
+
+    const auto deleteResult = client.deleteFile("session-1", "docs/old.txt");
+    if (!expect(deleteResult.ok && deleteResult.value, "delete file should succeed") ||
+        !expectRequestMethod(transport, "file.deleteFile", "delete file")) {
+        return false;
+    }
+
+    transport.nextResponse = R"({"id":"2","result":{"ok":true}})";
+    const auto renameResult = client.renameFile("session-1", "docs/old.txt", "docs/new.txt", false);
+    if (!expect(renameResult.ok && renameResult.value, "rename file should succeed") ||
+        !expectRequestMethod(transport, "file.renameFile", "rename file")) {
+        return false;
+    }
+
+    transport.nextResponse = R"({"id":"3","result":{"ok":true}})";
+    const auto copyResult = client.copyFile("session-1", "docs/new.txt", "docs/copy.txt", true);
+    if (!expect(copyResult.ok && copyResult.value, "copy file should succeed") ||
+        !expectRequestMethod(transport, "file.copyFile", "copy file")) {
+        return false;
+    }
+
+    transport.nextResponse = R"({"id":"4","result":{"ok":true}})";
+    const auto moveResult = client.moveFile("session-1", "docs/copy.txt", "archive/copy.txt", false);
+    if (!expect(moveResult.ok && moveResult.value, "move file should succeed") ||
+        !expectRequestMethod(transport, "file.moveFile", "move file")) {
+        return false;
+    }
+
+    transport.nextResponse = R"({"id":"5","result":{"ok":true}})";
+    const auto mkdirResult = client.createDirectory("session-1", "archive");
+    if (!expect(mkdirResult.ok && mkdirResult.value, "create directory should succeed") ||
+        !expectRequestMethod(transport, "file.createDirectory", "create directory")) {
+        return false;
+    }
+
+    transport.nextResponse = R"({"id":"6","result":{"ok":true}})";
+    const auto rmdirResult = client.removeDirectory("session-1", "archive", true);
+    if (!expect(rmdirResult.ok && rmdirResult.value, "remove directory should succeed") ||
+        !expectRequestMethod(transport, "file.removeDirectory", "remove directory")) {
+        return false;
+    }
+
+    transport.nextResponse = R"({"id":"7","result":{"entries":[{"name":"copy.txt","path":"archive/copy.txt","type":"file","size":4}]}})";
+    const auto searchResult = client.searchFiles("session-1", "archive", "copy");
+    return expect(searchResult.ok, "file search should succeed") &&
+        expect(searchResult.value.size() == 1, "file search entry count mismatch") &&
+        expect(searchResult.value[0].path == "archive/copy.txt", "file search path mismatch") &&
+        expectRequestMethod(transport, "file.search", "file search");
+}
+
+bool runTuxMethodsTest() {
+    FakeTransport transport;
+    transport.nextResponse = R"({"id":"1","result":{"entries":[{"name":"secret","path":"docs/secret","type":"file","size":12}]}})";
+    tundraux::frontend::BackendClient client(transport);
+
+    const auto listResult = client.listTux("session-1", "docs");
+    if (!expect(listResult.ok, "tux list should succeed") ||
+        !expect(listResult.value.size() == 1, "tux list entry count mismatch") ||
+        !expectRequestMethod(transport, "tux.list", "tux list")) {
+        return false;
+    }
+
+    transport.nextResponse = R"({"id":"2","result":{"ok":true}})";
+    const auto createResult = client.createTux("session-1", "docs/secret", false);
+    if (!expect(createResult.ok && createResult.value, "tux create should succeed") ||
+        !expectRequestMethod(transport, "tux.create", "tux create")) {
+        return false;
+    }
+
+    transport.nextResponse = R"({"id":"3","result":{"content":"hello","creator":"alice","lastEditor":"bob"}})";
+    const auto readResult = client.readTux("session-1", "docs/secret");
+    if (!expect(readResult.ok, "tux read should succeed") ||
+        !expect(readResult.value.content == "hello", "tux content mismatch") ||
+        !expect(readResult.value.creator == "alice", "tux creator mismatch") ||
+        !expect(readResult.value.lastEditor == "bob", "tux last editor mismatch") ||
+        !expectRequestMethod(transport, "tux.read", "tux read")) {
+        return false;
+    }
+
+    transport.nextResponse = R"({"id":"4","result":{"ok":true}})";
+    const auto writeResult = client.writeTux("session-1", "docs/secret", "updated");
+    if (!expect(writeResult.ok && writeResult.value, "tux write should succeed") ||
+        !expectRequestMethod(transport, "tux.write", "tux write")) {
+        return false;
+    }
+
+    transport.nextResponse = R"({"id":"5","result":{"ok":true}})";
+    const auto renameResult = client.renameTux("session-1", "docs/secret", "docs/renamed", false);
+    if (!expect(renameResult.ok && renameResult.value, "tux rename should succeed") ||
+        !expectRequestMethod(transport, "tux.rename", "tux rename")) {
+        return false;
+    }
+
+    transport.nextResponse = R"({"id":"6","result":{"ok":true}})";
+    const auto copyResult = client.copyTux("session-1", "docs/renamed", "docs/copy", true);
+    if (!expect(copyResult.ok && copyResult.value, "tux copy should succeed") ||
+        !expectRequestMethod(transport, "tux.copy", "tux copy")) {
+        return false;
+    }
+
+    transport.nextResponse = R"({"id":"7","result":{"ok":true}})";
+    const auto moveResult = client.moveTux("session-1", "docs/copy", "docs/moved", false);
+    if (!expect(moveResult.ok && moveResult.value, "tux move should succeed") ||
+        !expectRequestMethod(transport, "tux.move", "tux move")) {
+        return false;
+    }
+
+    transport.nextResponse = R"({"id":"8","result":{"entries":[{"name":"moved","path":"docs/moved","type":"file","size":7}]}})";
+    const auto searchResult = client.searchTux("session-1", "docs", "moved");
+    if (!expect(searchResult.ok, "tux search should succeed") ||
+        !expect(searchResult.value.size() == 1, "tux search entry count mismatch") ||
+        !expectRequestMethod(transport, "tux.search", "tux search")) {
+        return false;
+    }
+
+    transport.nextResponse = R"({"id":"9","result":{"ok":true}})";
+    const auto deleteResult = client.deleteTux("session-1", "docs/moved");
+    return expect(deleteResult.ok && deleteResult.value, "tux delete should succeed") &&
+        expectRequestMethod(transport, "tux.delete", "tux delete");
+}
+
 bool runListDirectoryMaxSafeSizeTest() {
     FakeTransport transport;
     transport.nextResponse = R"({"id":"1","result":{"entries":[{"name":"large.bin","path":"docs/large.bin","type":"file","size":9007199254740991}]}})";
@@ -392,6 +517,8 @@ int main(int argc, char* argv[]) {
     if (!runTransportFailureTest()) return 1;
     if (!runWriteFileTest()) return 1;
     if (!runListDirectoryTest()) return 1;
+    if (!runFileMutationAndSearchMethodsTest()) return 1;
+    if (!runTuxMethodsTest()) return 1;
     if (!runListDirectoryMaxSafeSizeTest()) return 1;
     if (!runListDirectoryUnsafeSizeTest()) return 1;
     if (!runListDirectoryFractionalSizeTest()) return 1;

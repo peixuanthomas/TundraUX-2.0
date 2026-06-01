@@ -33,13 +33,15 @@ cmake --build build
 
 The main frontend executable is named `TundraUX2`.
 
-### Backend Phase 2
+### Backend Phase 2 And Phase 3 First Batch
 
 The project also builds `tundraux_backend_stdio`, the local backend process boundary for the frontend/backend split. It exposes line-delimited JSON-RPC over stdin/stdout and supports session startup, login/logout/whoami, user listing, and plain file operations (`file.listDirectory`, `file.readFile`, `file.writeFile`).
 
 `TundraUX2` now starts the local stdio backend by default. The main shell account commands (`login`, `logout`, `whoami`, `listuser`) and the plain text editor path (`edit <filename>`) use the backend in default mode. Use `--legacy-direct` to run the previous direct frontend logic for debugging.
 
-The TUX File Manager, Explorer, account management UI, strict/audit controls, TUX import/export/metadata flows, and remote/HTTP adapters are still legacy-direct or not implemented as backend APIs in this phase.
+Phase 3 first-batch file migration moves Explorer and main TUX File Manager file operations through the local backend. Explorer refresh, folder creation, delete, copy/move paste, and search use backend APIs. TUX File Manager list/create/view/edit/delete/rename/copy/move/find/mkdir/rmdir use backend APIs.
+
+TUX import/export/metadata commands, full audit API migration, HTTP transport, remote access, and shared daemon mode remain future work.
 
 ## Validation
 
@@ -100,7 +102,7 @@ The main shell prompt changes according to the current session:
 
 Debug-only commands are hidden from normal help output and include editor backend inspection, forced login, display color testing, and diagnostic utilities.
 
-In the default backend mode, `login`, `logout`, `whoami`, `listuser`, and `edit <filename>` are served through `tundraux_backend_stdio`. `listuser` is available only to admin/debug users in backend mode. Legacy direct mode is available with `--legacy-direct`.
+In the default backend mode, `login`, `logout`, `whoami`, `listuser`, `edit <filename>`, Explorer first-batch file operations, and TUX File Manager first-batch file commands are served through `tundraux_backend_stdio`. `listuser` is available only to admin/debug users in backend mode. Legacy direct mode is available with `--legacy-direct`.
 
 ## User Roles
 

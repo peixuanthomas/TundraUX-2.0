@@ -1,6 +1,7 @@
 #include "explorer_clipboard.hpp"
 
 #include "audit_log.hpp"
+#include "explorer_backend.hpp"
 #include "explorer_directory.hpp"
 #include "explorer_navigation.hpp"
 #include "explorer_permissions.hpp"
@@ -160,6 +161,59 @@ void pasteClipboard(ExplorerState& state) {
 
     const std::string sourcePath = pathToDisplayString(state.clipboard.path);
     const std::string mode = state.clipboard.mode == ClipboardMode::Copy ? "copy" : "cut";
+    const fs::path requestedTarget = state.currentPath / fs::u8path(state.clipboard.name);
+
+    if (state.backend != nullptr) {
+        if (state.clipboard.mode == ClipboardMode::Cut && isSamePath(state.clipboard.path, requestedTarget)) {
+            state.clipboard = {};
+            refresh(state);
+            state.message = "Cut cancelled: item is already here";
+            return;
+        }
+
+        if (!isPathInsideRoot(requestedTarget, state.rootPath)) {
+            state.message = redMessage("Cannot paste outside explorer root.");
+            return;
+        }
+
+        if (state.clipboard.isDirectory && isPathInsideRoot(requestedTarget, state.clipboard.path)) {
+            state.message = redMessage("Cannot paste a directory into itself.");
+            return;
+        }
+
+        const std::string from = explorerRelativePath(state.rootPath, state.clipboard.path);
+        const std::string to = explorerRelativePath(state.rootPath, requestedTarget);
+        const auto result = state.clipboard.mode == ClipboardMode::Copy
+            ? state.backend->copyPath(from, to, false)
+            : state.backend->movePath(from, to, false);
+        if (!result.ok || !result.value) {
+            state.message = redMessage(result.message);
+            setAuditUser(state);
+            tundraux::audit::logEvent(
+                "explorer",
+                "paste failure mode=" + mode + " source=" + sourcePath +
+                    " destination=" + pathToDisplayString(requestedTarget) + " reason=" + result.message
+            );
+            return;
+        }
+
+        const bool copied = state.clipboard.mode == ClipboardMode::Copy;
+        const std::string pastedName = requestedTarget.filename().u8string();
+        state.clipboard = {};
+        refresh(state);
+        selectPath(state, requestedTarget);
+        state.message = copied
+            ? "Copied " + pastedName
+            : "Moved " + pastedName;
+        setAuditUser(state);
+        tundraux::audit::logEvent(
+            "explorer",
+            "paste success mode=" + mode + " source=" + sourcePath +
+                " destination=" + pathToDisplayString(requestedTarget)
+        );
+        return;
+    }
+
     std::error_code error;
     if (!fs::exists(state.clipboard.path, error)) {
         state.message = redMessage("Clipboard source no longer exists.");
@@ -196,7 +250,6 @@ void pasteClipboard(ExplorerState& state) {
         return;
     }
 
-    const fs::path requestedTarget = state.currentPath / fs::u8path(state.clipboard.name);
     if (state.clipboard.mode == ClipboardMode::Cut && isSamePath(state.clipboard.path, requestedTarget)) {
         state.clipboard = {};
         refresh(state);

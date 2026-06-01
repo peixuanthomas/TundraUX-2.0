@@ -1,6 +1,7 @@
 #include "explorer_folder_ops.hpp"
 
 #include "audit_log.hpp"
+#include "explorer_backend.hpp"
 #include "explorer_directory.hpp"
 #include "explorer_navigation.hpp"
 #include "explorer_style.hpp"
@@ -45,6 +46,27 @@ void createFolderFromInput(ExplorerState& state) {
             "explorer",
             "mkdir denied path=" + pathToDisplayString(target) + " reason=outside root"
         );
+        return;
+    }
+
+    if (state.backend != nullptr) {
+        const auto result = state.backend->createDirectory(explorerRelativePath(state.rootPath, target));
+        if (!result.ok || !result.value) {
+            state.message = redMessage(result.message);
+            setAuditUser(state);
+            tundraux::audit::logEvent(
+                "explorer",
+                "mkdir failure path=" + pathToDisplayString(target) + " reason=" + result.message
+            );
+            return;
+        }
+        state.creatingFolder = false;
+        state.newFolderName.clear();
+        refresh(state);
+        selectPath(state, target);
+        state.message = "Created folder " + folderName;
+        setAuditUser(state);
+        tundraux::audit::logEvent("explorer", "mkdir success path=" + pathToDisplayString(target));
         return;
     }
 

@@ -28,7 +28,11 @@ void handleListUserCommand(
     const std::string& input,
     tundraux::frontend::BackendRuntime* backendRuntime = nullptr
 );
-void handleTuxFileCommand(const std::string& input, USER& currentUser);
+void handleTuxFileCommand(
+    const std::string& input,
+    USER& currentUser,
+    tundraux::frontend::BackendRuntime* backendRuntime = nullptr
+);
 void handleInfoCommand(const std::string& input);
 void handleManageUsersCommand(const std::string& input, USER& currentUser);
 void handleEditCommand(
@@ -36,7 +40,11 @@ void handleEditCommand(
     USER& currentUser,
     tundraux::frontend::BackendRuntime* backendRuntime = nullptr
 );
-void handleExplorerCommand(const std::string& input, USER& currentUser);
+void handleExplorerCommand(
+    const std::string& input,
+    USER& currentUser,
+    tundraux::frontend::BackendRuntime* backendRuntime = nullptr
+);
 void handleWhoamiCommand(
     USER& currentUser,
     tundraux::frontend::BackendRuntime* backendRuntime = nullptr

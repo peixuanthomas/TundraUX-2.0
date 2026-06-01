@@ -13,6 +13,8 @@ namespace fs = std::filesystem;
 using tundra_tui::Key;
 using tundra_tui::KeyPress;
 
+class ExplorerBackend;
+
 struct FileEntry {
     std::string name;
     fs::path path;
@@ -60,6 +62,7 @@ struct DetailLine {
 };
 
 struct ExplorerState {
+    ExplorerBackend* backend = nullptr;
     fs::path rootPath;
     fs::path currentPath;
     std::vector<FileEntry> entries;

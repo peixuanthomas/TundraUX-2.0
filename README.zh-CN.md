@@ -33,13 +33,15 @@ cmake --build build
 
 主前端可执行文件名为 `TundraUX2`。
 
-### 后端第二阶段
+### 后端第二阶段与第三阶段第一批
 
 项目也会构建 `tundraux_backend_stdio`，这是前后端进程拆分的本地后端进程边界。它通过 stdin/stdout 提供按行传输的 JSON-RPC，目前支持创建会话、登录、登出、查询当前用户、列出用户，以及普通文件操作（`file.listDirectory`、`file.readFile`、`file.writeFile`）。
 
 `TundraUX2` 现在默认启动本地 stdio 后端。主 Shell 的账号命令（`login`、`logout`、`whoami`、`listuser`）和普通文本编辑器路径（`edit <filename>`）在默认模式下会通过后端执行。调试时可使用 `--legacy-direct` 运行旧的前端直连逻辑。
 
-TUX File Manager、Explorer、账号管理 UI、strict/audit 控制、TUX 导入/导出/元数据流程，以及远程/HTTP 适配器，在本阶段仍是 legacy-direct 或尚未实现为后端 API。
+第三阶段第一批文件迁移已将 Explorer 和主要 TUX File Manager 文件流程移到本地后端。Explorer 的刷新、创建文件夹、删除、复制/移动粘贴和搜索会使用后端 API。TUX File Manager 的 list/create/view/edit/delete/rename/copy/move/find/mkdir/rmdir 会使用后端 API。
+
+TUX 导入/导出/元数据命令、完整 audit API 迁移、HTTP 传输、远程访问和共享 daemon 模式仍是后续工作。
 
 ## 验证
 
@@ -100,7 +102,7 @@ cmake --build build
 
 调试命令不会出现在普通帮助中，包括编辑器后端检查、强制登录、显示颜色测试和诊断工具等。
 
-默认后端模式下，`login`、`logout`、`whoami`、`listuser` 和 `edit <filename>` 会通过 `tundraux_backend_stdio` 执行。`listuser` 在后端模式下仅 admin/debug 可用。可使用 `--legacy-direct` 切换回旧的前端直连模式。
+默认后端模式下，`login`、`logout`、`whoami`、`listuser`、`edit <filename>`、Explorer 第一批文件操作和 TUX File Manager 第一批文件命令会通过 `tundraux_backend_stdio` 执行。`listuser` 在后端模式下仅 admin/debug 可用。可使用 `--legacy-direct` 切换回旧的前端直连模式。
 
 ## 用户角色
 

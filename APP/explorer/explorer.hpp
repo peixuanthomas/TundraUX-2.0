@@ -10,10 +10,22 @@
 
 #include <string>
 
-void open_explorer(const std::string& username, const std::string& usertype);
+namespace tundraux::frontend {
+class BackendRuntime;
+}
+
+void open_explorer(
+    const std::string& username,
+    const std::string& usertype,
+    tundraux::frontend::BackendRuntime* backendRuntime = nullptr
+);
 
 namespace tundraux::explorer {
 
-void open(const std::string& username, const std::string& usertype);
+void open(
+    const std::string& username,
+    const std::string& usertype,
+    tundraux::frontend::BackendRuntime* backendRuntime = nullptr
+);
 
 }

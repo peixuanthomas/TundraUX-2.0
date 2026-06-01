@@ -22,6 +22,12 @@ struct FrontendFileEntry {
     unsigned long long size = 0;
 };
 
+struct FrontendTuxContent {
+    std::string content;
+    std::string creator;
+    std::string lastEditor;
+};
+
 template <typename T>
 struct ClientResult {
     bool ok = false;
@@ -59,6 +65,60 @@ public:
         const std::string& sessionId,
         const std::string& path,
         const std::string& content
+    );
+    ClientResult<bool> deleteFile(const std::string& sessionId, const std::string& path);
+    ClientResult<bool> renameFile(
+        const std::string& sessionId,
+        const std::string& from,
+        const std::string& to,
+        bool overwrite
+    );
+    ClientResult<bool> copyFile(
+        const std::string& sessionId,
+        const std::string& from,
+        const std::string& to,
+        bool overwrite
+    );
+    ClientResult<bool> moveFile(
+        const std::string& sessionId,
+        const std::string& from,
+        const std::string& to,
+        bool overwrite
+    );
+    ClientResult<bool> createDirectory(const std::string& sessionId, const std::string& path);
+    ClientResult<bool> removeDirectory(const std::string& sessionId, const std::string& path, bool recursive);
+    ClientResult<std::vector<FrontendFileEntry>> searchFiles(
+        const std::string& sessionId,
+        const std::string& root,
+        const std::string& query
+    );
+    ClientResult<std::vector<FrontendFileEntry>> listTux(const std::string& sessionId, const std::string& path);
+    ClientResult<bool> createTux(const std::string& sessionId, const std::string& path, bool overwrite);
+    ClientResult<FrontendTuxContent> readTux(const std::string& sessionId, const std::string& path);
+    ClientResult<bool> writeTux(const std::string& sessionId, const std::string& path, const std::string& content);
+    ClientResult<bool> deleteTux(const std::string& sessionId, const std::string& path);
+    ClientResult<bool> renameTux(
+        const std::string& sessionId,
+        const std::string& from,
+        const std::string& to,
+        bool overwrite
+    );
+    ClientResult<bool> copyTux(
+        const std::string& sessionId,
+        const std::string& from,
+        const std::string& to,
+        bool overwrite
+    );
+    ClientResult<bool> moveTux(
+        const std::string& sessionId,
+        const std::string& from,
+        const std::string& to,
+        bool overwrite
+    );
+    ClientResult<std::vector<FrontendFileEntry>> searchTux(
+        const std::string& sessionId,
+        const std::string& root,
+        const std::string& query
     );
 
 private:

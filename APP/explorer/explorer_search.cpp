@@ -1,5 +1,6 @@
 #include "explorer_search.hpp"
 
+#include "explorer_backend.hpp"
 #include "explorer_directory.hpp"
 #include "explorer_navigation.hpp"
 #include "explorer_open.hpp"
@@ -11,6 +12,7 @@
 #include <regex>
 #include <string>
 #include <system_error>
+#include <utility>
 
 namespace tundraux::explorer {
 namespace {
@@ -126,6 +128,27 @@ void runSearch(ExplorerState& state) {
     if (query.empty()) {
         search.error = "Enter a file name query.";
         state.message = redMessage(search.error);
+        return;
+    }
+
+    if (state.backend != nullptr) {
+        const auto result = state.backend->search(explorerRelativePath(state.rootPath, search.rootPath), query);
+        if (!result.ok) {
+            search.error = result.message;
+            state.message = redMessage(result.message);
+            return;
+        }
+        search.results.clear();
+        search.results.reserve(result.value.size());
+        for (auto entry : result.value) {
+            if (entry.path.is_relative()) {
+                entry.path = state.rootPath / entry.path;
+            }
+            if (state.showHidden || !isHiddenPath(entry.path)) {
+                search.results.push_back(std::move(entry));
+            }
+        }
+        state.message = std::to_string(search.results.size()) + " search result(s)";
         return;
     }
 

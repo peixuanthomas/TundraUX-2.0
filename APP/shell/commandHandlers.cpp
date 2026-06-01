@@ -509,8 +509,12 @@ void handleListUserCommand(
     listUser();
 }
 
-void handleTuxFileCommand(const std::string&, USER& currentUser) {
-    file_editor(currentUser.name, currentUser.type);
+void handleTuxFileCommand(
+    const std::string&,
+    USER& currentUser,
+    tundraux::frontend::BackendRuntime* backendRuntime
+) {
+    file_editor(currentUser.name, currentUser.type, backendRuntime);
 }
 
 void handleInfoCommand(const std::string&) {
@@ -615,10 +619,14 @@ void handleEditCommand(
     run_editor(path, filename);
 }
 
-void handleExplorerCommand(const std::string&, USER& currentUser) {
+void handleExplorerCommand(
+    const std::string&,
+    USER& currentUser,
+    tundraux::frontend::BackendRuntime* backendRuntime
+) {
     tundraux::audit::setCurrentUser(currentUser);
     tundraux::audit::logEvent("explorer", "open");
-    open_explorer(currentUser.name, currentUser.type);
+    open_explorer(currentUser.name, currentUser.type, backendRuntime);
 }
 
 void handleWhoamiCommand(

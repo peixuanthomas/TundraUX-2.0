@@ -1,11 +1,13 @@
 #include "explorer_directory.hpp"
 
+#include "explorer_backend.hpp"
 #include "explorer_text.hpp"
 
 #include <algorithm>
 #include <fstream>
 #include <sstream>
 #include <system_error>
+#include <utility>
 #include <windows.h>
 
 namespace tundraux::explorer {
@@ -136,10 +138,64 @@ std::vector<FileEntry> readDirectory(const fs::path& path, const fs::path& rootP
     return entries;
 }
 
+std::vector<FileEntry> entriesFromBackend(
+    std::vector<FileEntry> entries,
+    const fs::path& rootPath,
+    bool showHidden
+) {
+    std::vector<FileEntry> mapped;
+    mapped.reserve(entries.size());
+    for (auto& entry : entries) {
+        if (entry.path.is_relative()) {
+            entry.path = rootPath / entry.path;
+        }
+        entry.isHidden = isHiddenPath(entry.path);
+        if (showHidden || !entry.isHidden) {
+            mapped.push_back(std::move(entry));
+        }
+    }
+    return mapped;
+}
+
 void refresh(ExplorerState& state) {
     try {
         if (!isPathInsideRoot(state.currentPath, state.rootPath)) {
             state.currentPath = state.rootPath;
+        }
+
+        if (state.backend != nullptr) {
+            const auto entries = state.backend->listDirectory(explorerRelativePath(state.rootPath, state.currentPath));
+            if (!entries.ok) {
+                state.entries.clear();
+                state.parentEntries.clear();
+                state.message = std::string("Read failed: ") + entries.message;
+                return;
+            }
+
+            state.entries = entriesFromBackend(std::move(entries.value), state.rootPath, state.showHidden);
+            state.parentEntries.clear();
+            if (!isSamePath(state.currentPath, state.rootPath) && state.currentPath.has_parent_path()) {
+                const fs::path parentPath = state.currentPath.parent_path();
+                if (isPathInsideRoot(parentPath, state.rootPath)) {
+                    const auto parentEntries = state.backend->listDirectory(explorerRelativePath(state.rootPath, parentPath));
+                    if (parentEntries.ok) {
+                        state.parentEntries = entriesFromBackend(
+                            std::move(parentEntries.value),
+                            state.rootPath,
+                            state.showHidden
+                        );
+                    }
+                }
+            }
+            if (state.entries.empty()) {
+                state.cursor = 0;
+                state.scroll = 0;
+            } else {
+                state.cursor = std::min(state.cursor, state.entries.size() - 1);
+                state.scroll = std::min(state.scroll, state.cursor);
+            }
+            state.message = std::to_string(state.entries.size()) + " item(s)";
+            return;
         }
 
         state.entries = readDirectory(state.currentPath, state.rootPath, state.showHidden);

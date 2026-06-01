@@ -1,6 +1,7 @@
 //Attention: windows only code.
 #include "TUXfile.hpp"
 #include "audit_log.hpp"
+#include "backend_runtime.hpp"
 #include <fstream>
 #include <stdexcept>
 #include <string>
@@ -20,10 +21,12 @@
 #include <functional>
 #include <unordered_map>
 #include <utility>
+#include <memory>
 #include "udata.hpp"
 #include <conio.h>
 #include <random>
 #include "editor.hpp"
+#include "tux_backend.hpp"
 // Simple XOR encryption/decryption 
 void writeEncryptedString(std::ofstream& out, const std::string& data) {
     std::string enc = encryptDecrypt(data);
@@ -74,6 +77,7 @@ private:
 };
 
 USER currentUser;
+static tundraux::file_manager::TuxBackend* g_tuxBackend = nullptr;
 static bool g_lastTuxReadOk = true;
 const size_t MAX_TUX_STRING_LEN  = 1024;
 const size_t MAX_TUX_CONTENT_LEN = 16 * 1024 * 1024;
@@ -314,6 +318,76 @@ static void printInvalidTuxPath() {
     colorcout("YELLOW","Invalid filename. Use alphanumeric, '-', '_', and '/' for subfolders.\n");
 }
 
+static std::string backendErrorMessage(const std::string& fallback, const std::string& message) {
+    return message.empty() ? fallback : message;
+}
+
+static std::string displayTuxEntryName(const tundraux::frontend::FrontendFileEntry& entry) {
+    std::filesystem::path path = std::filesystem::u8path(entry.name);
+    return path.stem().u8string();
+}
+
+static std::string tuxPathInDirectory(const std::string& source, const std::string& directory) {
+    std::string stem = stripOptionalExtension(source, ".TUX");
+    const auto slash = stem.find_last_of('/');
+    if (slash != std::string::npos) {
+        stem = stem.substr(slash + 1);
+    }
+    if (directory.empty()) {
+        return stem;
+    }
+    return directory + "/" + stem;
+}
+
+static void printBackendTuxTree(const std::string& path, const std::string& prefix, std::size_t& count) {
+    if (g_tuxBackend == nullptr) {
+        return;
+    }
+
+    auto result = g_tuxBackend->list(path);
+    if (!result.ok) {
+        colorcout("RED", backendErrorMessage("List failed.", result.message) + "\n");
+        return;
+    }
+
+    for (std::size_t i = 0; i < result.value.size(); ++i) {
+        const auto& entry = result.value[i];
+        const bool last = i + 1 == result.value.size();
+        const std::string conn = last ? "`- " : "|- ";
+        const std::string next = prefix + (last ? "   " : "|  ");
+        if (entry.type == "directory") {
+            colorcout("CYAN", prefix + conn + entry.name + "/\n");
+            printBackendTuxTree(entry.path, next, count);
+        } else {
+            ++count;
+            colorcout("white", prefix + conn + displayTuxEntryName(entry) + "\n");
+        }
+    }
+}
+
+static bool writeBackendEditorTempFile(
+    const std::filesystem::path& path,
+    const std::string& content
+) {
+    std::ofstream tempFile(path, std::ios::binary | std::ios::trunc);
+    if (!tempFile) {
+        return false;
+    }
+    tempFile.write(content.data(), static_cast<std::streamsize>(content.size()));
+    return static_cast<bool>(tempFile);
+}
+
+static bool readBackendEditorTempFile(const std::filesystem::path& path, std::string& content) {
+    std::ifstream tempFile(path, std::ios::binary);
+    if (!tempFile) {
+        return false;
+    }
+    std::ostringstream buffer;
+    buffer << tempFile.rdbuf();
+    content = buffer.str();
+    return !tempFile.bad();
+}
+
 // ---------- Paths & Directories ----------
 std::string getTuxPath(const std::string& filename) {
     std::string path;
@@ -496,6 +570,15 @@ bool writeTuxFile(const std::string& path, const std::string& content, const Fil
 
 // ---------- List ----------
 void listTuxFiles() {
+    if (g_tuxBackend != nullptr) {
+        colorcout("CYAN", "Files/\n");
+        std::size_t count = 0;
+        printBackendTuxTree("", "", count);
+        if (count == 0) colorcout("YELLOW", "\n(No files)\n");
+        colorcout("", "\n");
+        return;
+    }
+
     const std::string root = "Files";
     if (!std::filesystem::exists(root)) {
         colorcout("YELLOW", "(Files directory does not exist)\n\n"); return;
@@ -538,6 +621,21 @@ void listTuxFiles() {
 // ---------- Create ----------
 void createTuxFile(const std::string& filename) {
     if (filename.empty()) { colorcout("RED","Usage: create <filename>\n"); return; }
+    if (g_tuxBackend != nullptr) {
+        auto result = g_tuxBackend->create(filename, false);
+        if (!result.ok && result.errorCode == "AlreadyExists" && getYN("File already exists, overwrite?")) {
+            result = g_tuxBackend->create(filename, true);
+        }
+        if (!result.ok || !result.value) {
+            colorcout("RED", backendErrorMessage("Create failed.", result.message) + "\n");
+            logTuxOperation("create", "failure", filename, result.message);
+            return;
+        }
+        logTuxOperation("create", "success", filename);
+        colorcout("GREEN","Created empty file: "+filename+"\n\n");
+        return;
+    }
+
     std::string path;
     if (!tryResolveTuxPath(filename, path)) {
         printInvalidTuxPath();
@@ -580,6 +678,17 @@ void createTuxFile(const std::string& filename) {
 // ---------- View Content ----------
 void viewTuxFile(const std::string& filename) {
     if (filename.empty()) { colorcout("RED","Usage: view <filename>\n"); return; }
+    if (g_tuxBackend != nullptr) {
+        const auto result = g_tuxBackend->read(filename);
+        if (!result.ok) {
+            colorcout("RED", backendErrorMessage("Read failed.", result.message) + "\n");
+            return;
+        }
+        colorcout("CYAN","=== "+filename+" ===\n");
+        colorcout("", result.value.content + "\n\n");
+        return;
+    }
+
     std::string path;
     if (!tryResolveTuxPath(filename, path)) {
         printInvalidTuxPath();
@@ -695,6 +804,62 @@ int open_tux_file_in_editor(
 
 void editTuxFile(const std::string& filename) {
     if (filename.empty()) { colorcout("RED","Usage: edit <filename>\n"); return; }
+    if (g_tuxBackend != nullptr) {
+        const auto readResult = g_tuxBackend->read(filename);
+        if (!readResult.ok) {
+            colorcout("RED", backendErrorMessage("Read failed.", readResult.message) + "\n");
+            logTuxOperation("edit", "failure", filename, readResult.message);
+            return;
+        }
+
+        const std::string tempDir = "Files\\temp";
+        std::error_code ec;
+        std::filesystem::create_directories(tempDir, ec);
+        if (ec) {
+            colorcout("RED","Failed to create temp directory\n\n");
+            logTuxOperation("edit", "failure", filename, "failed to create temp directory");
+            return;
+        }
+        ScopedTuxTempFiles tempCleanup(tempDir);
+
+        static std::mt19937 rng(
+            static_cast<unsigned>(std::chrono::steady_clock::now().time_since_epoch().count()));
+        std::uniform_int_distribution<int> hexDist(0, 15);
+        std::string name(16, '0');
+        for (auto& c : name) {
+            const int value = hexDist(rng);
+            c = value < 10 ? static_cast<char>('0' + value) : static_cast<char>('a' + value - 10);
+        }
+        const std::filesystem::path tempPath = std::filesystem::path(tempDir) / (name + ".txt");
+        tempCleanup.add(tempPath);
+
+        if (!writeBackendEditorTempFile(tempPath, readResult.value.content)) {
+            colorcout("RED","Failed to create temp file\n\n");
+            logTuxOperation("edit", "failure", filename, "failed to create temp file");
+            return;
+        }
+
+        run_editor(tempPath.string(), filename);
+
+        std::string newContent;
+        if (!readBackendEditorTempFile(tempPath, newContent)) {
+            colorcout("RED","Failed to read temp file\n\n");
+            logTuxOperation("edit", "failure", filename, "failed to read temp file");
+            return;
+        }
+
+        if (newContent != readResult.value.content) {
+            const auto writeResult = g_tuxBackend->write(filename, newContent);
+            if (!writeResult.ok || !writeResult.value) {
+                colorcout("RED", backendErrorMessage("Save failed.", writeResult.message) + "\n");
+                logTuxOperation("edit", "failure", filename, writeResult.message);
+                return;
+            }
+            logTuxOperation("edit", "success", filename);
+        }
+        return;
+    }
+
     std::string path;
     if (!tryResolveTuxPath(filename, path)) {
         printInvalidTuxPath();
@@ -805,6 +970,23 @@ void editTuxFile(const std::string& filename) {
 // ---------- Delete ----------
 void deleteTuxFile(const std::string& filename) {
     if (filename.empty()) { colorcout("RED","Usage: delete <filename>\n"); return; }
+    if (g_tuxBackend != nullptr) {
+        if (!getYN("Confirm delete "+filename)) {
+            colorcout("YELLOW","Cancelled\n\n");
+            logTuxOperation("delete", "denied", filename, "cancelled");
+            return;
+        }
+        const auto result = g_tuxBackend->deleteFile(filename);
+        if (!result.ok || !result.value) {
+            colorcout("RED", backendErrorMessage("Delete failed.", result.message) + "\n");
+            logTuxOperation("delete", "failure", filename, result.message);
+            return;
+        }
+        colorcout("GREEN","Deleted\n\n");
+        logTuxOperation("delete", "success", filename);
+        return;
+    }
+
     std::string path;
     if (!tryResolveTuxPath(filename, path)) {
         printInvalidTuxPath();
@@ -838,6 +1020,18 @@ void deleteTuxFile(const std::string& filename) {
 // ---------- Rename ----------
 void renameTuxFile(const std::string& oldname, const std::string& newname) {
     if (oldname.empty()||newname.empty()) { colorcout("RED","Usage: rename <old> <new>\n"); return; }
+    if (g_tuxBackend != nullptr) {
+        const auto result = g_tuxBackend->renameFile(oldname, newname, false);
+        if (!result.ok || !result.value) {
+            colorcout("RED", backendErrorMessage("Rename failed.", result.message) + "\n");
+            logTuxTransferOperation("rename", "failure", oldname, newname, result.message);
+            return;
+        }
+        logTuxTransferOperation("rename", "success", oldname, newname);
+        colorcout("GREEN","Renamed: "+oldname+" -> "+newname+"\n\n");
+        return;
+    }
+
     std::string op, np;
     if (!tryResolveTuxPath(oldname, op) || !tryResolveTuxPath(newname, np)) {
         printInvalidTuxPath();
@@ -884,6 +1078,18 @@ void renameTuxFile(const std::string& oldname, const std::string& newname) {
 // ---------- Make Directory ----------
 void makeTuxDir(const std::string& dirname) {
     if (dirname.empty()) { colorcout("RED","Usage: mkdir <dirname>\n"); return; }
+    if (g_tuxBackend != nullptr) {
+        const auto result = g_tuxBackend->createDirectory(dirname);
+        if (!result.ok || !result.value) {
+            colorcout("RED", backendErrorMessage("Create directory failed.", result.message) + "\n");
+            logTuxOperation("mkdir", "failure", dirname, result.message);
+            return;
+        }
+        colorcout("GREEN","Created directory: "+dirname+"\n\n");
+        logTuxOperation("mkdir", "success", dirname);
+        return;
+    }
+
     std::string path;
     if (!tryResolveDirectoryPath(dirname, path)) {
         colorcout("YELLOW","Invalid name. Use alphanumeric, '-', '_', and '/' for nested dirs.\n");
@@ -909,6 +1115,21 @@ void makeTuxDir(const std::string& dirname) {
 // ---------- Remove Directory ----------
 void removeTuxDir(const std::string& dirname) {
     if (dirname.empty()) { colorcout("RED","Usage: rmdir <dirname>\n"); return; }
+    if (g_tuxBackend != nullptr) {
+        auto result = g_tuxBackend->removeDirectory(dirname, false);
+        if (!result.ok && result.errorCode == "Conflict" && getYN("Directory is not empty, remove all contents?")) {
+            result = g_tuxBackend->removeDirectory(dirname, true);
+        }
+        if (!result.ok || !result.value) {
+            colorcout("RED", backendErrorMessage("Remove directory failed.", result.message) + "\n");
+            logTuxOperation("rmdir", "failure", dirname, result.message);
+            return;
+        }
+        colorcout("GREEN","Removed directory: "+dirname+"\n\n");
+        logTuxOperation("rmdir", "success", dirname);
+        return;
+    }
+
     std::string path;
     if (!tryResolveDirectoryPath(dirname, path)) {
         colorcout("YELLOW","Invalid name. Use alphanumeric, '-', '_', and '/' for nested dirs.\n");
@@ -951,6 +1172,21 @@ void removeTuxDir(const std::string& dirname) {
 // ---------- Copy ----------
 void copyTuxFile(const std::string& src, const std::string& dst) {
     if (src.empty() || dst.empty()) { colorcout("RED","Usage: cp <src> <dst>\n"); return; }
+    if (g_tuxBackend != nullptr) {
+        auto result = g_tuxBackend->copyFile(src, dst, false);
+        if (!result.ok && result.errorCode == "AlreadyExists" && getYN("File already exists, overwrite?")) {
+            result = g_tuxBackend->copyFile(src, dst, true);
+        }
+        if (!result.ok || !result.value) {
+            colorcout("RED", backendErrorMessage("Copy failed.", result.message) + "\n");
+            logTuxTransferOperation("copy", "failure", src, dst, result.message);
+            return;
+        }
+        logTuxTransferOperation("copy", "success", src, dst);
+        colorcout("GREEN","Copied: "+src+" -> "+dst+"\n\n");
+        return;
+    }
+
     std::string srcPath;
     if (!tryResolveTuxPath(src, srcPath)) {
         colorcout("YELLOW","Invalid source path.\n");
@@ -1033,6 +1269,18 @@ void copyTuxFile(const std::string& src, const std::string& dst) {
 // ---------- Move ----------
 void moveTuxFile(const std::string& src, const std::string& dst) {
     if (src.empty() || dst.empty()) { colorcout("RED","Usage: mv <src> <dst>\n"); return; }
+    if (g_tuxBackend != nullptr) {
+        const auto result = g_tuxBackend->moveFile(src, dst, false);
+        if (!result.ok || !result.value) {
+            colorcout("RED", backendErrorMessage("Move failed.", result.message) + "\n");
+            logTuxTransferOperation("move", "failure", src, dst, result.message);
+            return;
+        }
+        logTuxTransferOperation("move", "success", src, dst);
+        colorcout("GREEN","Moved: "+src+" -> "+dst+"\n\n");
+        return;
+    }
+
     std::string srcPath;
     if (!tryResolveTuxPath(src, srcPath)) {
         colorcout("YELLOW","Invalid source path.\n");
@@ -1100,6 +1348,24 @@ void moveTuxFile(const std::string& src, const std::string& dst) {
 // ---------- Find ----------
 void findTuxFiles(const std::string& pattern) {
     if (pattern.empty()) { colorcout("RED","Usage: find <pattern>\n"); return; }
+    if (g_tuxBackend != nullptr) {
+        const auto result = g_tuxBackend->search("", pattern);
+        if (!result.ok) {
+            colorcout("RED", backendErrorMessage("Search failed.", result.message) + "\n");
+            return;
+        }
+        if (result.value.empty()) {
+            colorcout("YELLOW","No files found matching: "+pattern+"\n\n");
+        } else {
+            colorcout("CYAN","Found "+std::to_string(result.value.size())+" file(s):\n");
+            for (const auto& entry : result.value) {
+                colorcout("white","  "+stripOptionalExtension(entry.path, ".TUX")+"\n");
+            }
+            colorcout("", "\n");
+        }
+        return;
+    }
+
     const std::string root = "Files";
     if (!std::filesystem::exists(root)) { colorcout("YELLOW","(Files directory does not exist)\n\n"); return; }
 
@@ -1315,11 +1581,28 @@ void showHelp() {
     colorcout("YELLOW","Tip: Use '/' for subdirectories, e.g. 'touch docs/readme'\n\n");
 }
 
-void file_editor(const std::string& currentUsername, const std::string& currentUsertype) {
+void file_editor(
+    const std::string& currentUsername,
+    const std::string& currentUsertype,
+    tundraux::frontend::BackendRuntime* backendRuntime
+) {
     ConsoleScreenGuard screenGuard;
     set_title("TUX File Manager");
     currentUser.name = currentUsername;
     currentUser.type = currentUsertype;
+    std::unique_ptr<tundraux::file_manager::BackendClientTuxBackend> backend;
+    if (backendRuntime != nullptr &&
+        !backendRuntime->legacyDirect() &&
+        backendRuntime->client() != nullptr &&
+        !backendRuntime->sessionId().empty()) {
+        backend = std::make_unique<tundraux::file_manager::BackendClientTuxBackend>(
+            *backendRuntime->client(),
+            backendRuntime->sessionId()
+        );
+        g_tuxBackend = backend.get();
+    } else {
+        g_tuxBackend = nullptr;
+    }
     initFilesDir();
     colorcout("CYAN","=== TUX File Manager ===\n");
     colorcout("white","Current user: "+currentUser.name+"\n\n");
@@ -1362,7 +1645,11 @@ void file_editor(const std::string& currentUsername, const std::string& currentU
                     colorcout("RED","Destination must be an existing directory for batch move: "+dstDir+"\n");
                     logTuxTransferOperation("move", "denied", "(batch)", dstDir, "invalid batch destination directory");
                 }
-                else { for (size_t i = 0; i+1 < args.size(); ++i) moveTuxFile(args[i], dstDir); }
+                else {
+                    for (size_t i = 0; i+1 < args.size(); ++i) {
+                        moveTuxFile(args[i], g_tuxBackend != nullptr ? tuxPathInDirectory(args[i], dstDir) : dstDir);
+                    }
+                }
             }
         }
         else if (cmd=="cp" || cmd=="copy") {
@@ -1378,7 +1665,11 @@ void file_editor(const std::string& currentUsername, const std::string& currentU
                     colorcout("RED","Destination must be an existing directory for batch copy: "+dstDir+"\n");
                     logTuxTransferOperation("copy", "denied", "(batch)", dstDir, "invalid batch destination directory");
                 }
-                else { for (size_t i = 0; i+1 < args.size(); ++i) copyTuxFile(args[i], dstDir); }
+                else {
+                    for (size_t i = 0; i+1 < args.size(); ++i) {
+                        copyTuxFile(args[i], g_tuxBackend != nullptr ? tuxPathInDirectory(args[i], dstDir) : dstDir);
+                    }
+                }
             }
         }
         else if (cmd=="rn" || cmd=="rename") { std::string a,b; iss>>a>>b; renameTuxFile(a,b); }
@@ -1409,5 +1700,6 @@ void file_editor(const std::string& currentUsername, const std::string& currentU
         }
         else { colorcout("RED","Unknown command: "+cmd+"\n"); }
     }
+    g_tuxBackend = nullptr;
     colorcout("green", "Program exited\n");
 }
