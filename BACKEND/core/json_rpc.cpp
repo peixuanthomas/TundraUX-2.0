@@ -31,75 +31,75 @@ private:
     std::string message_;
 };
 
-JsonValue userToJson(const BackendUser& user) {
-    return JsonValue::object({
-        {"name", JsonValue::string(user.name)},
-        {"type", JsonValue::string(user.type)},
-        {"passwordHint", JsonValue::string(user.passwordHint)},
-        {"failedCount", JsonValue::number(static_cast<double>(user.failedCount))}
+protocol::JsonValue userToJson(const BackendUser& user) {
+    return protocol::JsonValue::object({
+        {"name", protocol::JsonValue::string(user.name)},
+        {"type", protocol::JsonValue::string(user.type)},
+        {"passwordHint", protocol::JsonValue::string(user.passwordHint)},
+        {"failedCount", protocol::JsonValue::number(static_cast<double>(user.failedCount))}
     });
 }
 
-JsonValue sessionToJson(const SessionInfo& session) {
-    return JsonValue::object({
-        {"sessionId", JsonValue::string(session.sessionId)},
+protocol::JsonValue sessionToJson(const SessionInfo& session) {
+    return protocol::JsonValue::object({
+        {"sessionId", protocol::JsonValue::string(session.sessionId)},
         {"user", userToJson(session.user)}
     });
 }
 
-JsonValue fileEntryToJson(const FileEntry& entry) {
-    return JsonValue::object({
-        {"name", JsonValue::string(entry.name)},
-        {"path", JsonValue::string(entry.path)},
-        {"type", JsonValue::string(entry.type == FileEntryType::Directory ? "directory" : "file")},
-        {"size", JsonValue::number(static_cast<double>(entry.size))}
+protocol::JsonValue fileEntryToJson(const FileEntry& entry) {
+    return protocol::JsonValue::object({
+        {"name", protocol::JsonValue::string(entry.name)},
+        {"path", protocol::JsonValue::string(entry.path)},
+        {"type", protocol::JsonValue::string(entry.type == FileEntryType::Directory ? "directory" : "file")},
+        {"size", protocol::JsonValue::number(static_cast<double>(entry.size))}
     });
 }
 
-std::string requiredStringParam(const JsonValue::Object& params, const std::string& name) {
+std::string requiredStringParam(const protocol::JsonValue::Object& params, const std::string& name) {
     const auto found = params.find(name);
-    if (found == params.end() || found->second.type() != JsonValue::Type::String) {
+    if (found == params.end() || found->second.type() != protocol::JsonValue::Type::String) {
         throw RpcError(ErrorCode::InvalidParams, "Missing or invalid parameter: " + name + ".");
     }
     return found->second.asString();
 }
 
-bool optionalBoolParam(const JsonValue::Object& params, const std::string& name, bool defaultValue = false) {
+bool optionalBoolParam(const protocol::JsonValue::Object& params, const std::string& name, bool defaultValue = false) {
     const auto found = params.find(name);
     if (found == params.end()) {
         return defaultValue;
     }
-    if (found->second.type() != JsonValue::Type::Boolean) {
+    if (found->second.type() != protocol::JsonValue::Type::Boolean) {
         throw RpcError(ErrorCode::InvalidParams, "Missing or invalid parameter: " + name + ".");
     }
     return found->second.asBoolean();
 }
 
-bool requiredBoolParam(const JsonValue::Object& params, const std::string& name) {
+bool requiredBoolParam(const protocol::JsonValue::Object& params, const std::string& name) {
     const auto found = params.find(name);
-    if (found == params.end() || found->second.type() != JsonValue::Type::Boolean) {
+    if (found == params.end() || found->second.type() != protocol::JsonValue::Type::Boolean) {
         throw RpcError(ErrorCode::InvalidParams, "Missing or invalid parameter: " + name + ".");
     }
     return found->second.asBoolean();
 }
 
-std::string optionalStringParam(const JsonValue::Object& params, const std::string& name, const std::string& defaultValue = "") {
+std::string optionalStringParam(const protocol::JsonValue::Object& params, const std::string& name, const std::string& defaultValue = "") {
     const auto found = params.find(name);
     if (found == params.end()) {
         return defaultValue;
     }
-    if (found->second.type() != JsonValue::Type::String) {
+    if (found->second.type() != protocol::JsonValue::Type::String) {
         throw RpcError(ErrorCode::InvalidParams, "Missing or invalid parameter: " + name + ".");
     }
     return found->second.asString();
 }
 
-int optionalIntParam(const JsonValue::Object& params, const std::string& name, int defaultValue = 0) {
+int optionalIntParam(const protocol::JsonValue::Object& params, const std::string& name, int defaultValue = 0) {
     const auto found = params.find(name);
     if (found == params.end()) {
         return defaultValue;
     }
-    if (found->second.type() != JsonValue::Type::Number) {
+    if (found->second.type() != protocol::JsonValue::Type::Number) {
         throw RpcError(ErrorCode::InvalidParams, "Missing or invalid parameter: " + name + ".");
     }
     const double number = found->second.asNumber();
@@ -111,15 +111,15 @@ int optionalIntParam(const JsonValue::Object& params, const std::string& name, i
     return static_cast<int>(number);
 }
 
-const JsonValue::Object& requiredObjectParam(const JsonValue::Object& params, const std::string& name) {
+const protocol::JsonValue::Object& requiredObjectParam(const protocol::JsonValue::Object& params, const std::string& name) {
     const auto found = params.find(name);
-    if (found == params.end() || found->second.type() != JsonValue::Type::Object) {
+    if (found == params.end() || found->second.type() != protocol::JsonValue::Type::Object) {
         throw RpcError(ErrorCode::InvalidParams, "Missing or invalid parameter: " + name + ".");
     }
     return found->second.asObject();
 }
 
-BackendUser userFromJson(const JsonValue::Object& object, bool requirePassword) {
+BackendUser userFromJson(const protocol::JsonValue::Object& object, bool requirePassword) {
     BackendUser user;
     user.type = requiredStringParam(object, "type");
     user.name = requiredStringParam(object, "name");
@@ -135,12 +135,12 @@ void throwIfFailed(const BackendError& error) {
     throw RpcError(error.code, error.message);
 }
 
-JsonValue entriesToJson(const std::vector<FileEntry>& value) {
-    JsonValue::Array entries;
+protocol::JsonValue entriesToJson(const std::vector<FileEntry>& value) {
+    protocol::JsonValue::Array entries;
     for (const auto& entry : value) {
         entries.push_back(fileEntryToJson(entry));
     }
-    return JsonValue::object({{"entries", JsonValue::array(std::move(entries))}});
+    return protocol::JsonValue::object({{"entries", protocol::JsonValue::array(std::move(entries))}});
 }
 
 } // namespace
@@ -176,50 +176,50 @@ JsonRpcDispatcher::JsonRpcDispatcher(
     debugSessionToken_(std::move(debugSessionToken)) {}
 
 std::string JsonRpcDispatcher::handleLine(const std::string& line) {
-    JsonValue id = JsonValue::null();
-    const auto parsed = parseJson(line);
+    protocol::JsonValue id = protocol::JsonValue::null();
+    const auto parsed = protocol::parseJson(line);
     if (!parsed.ok) {
-        return stringifyJson(errorResponse(id, ErrorCode::InvalidRequest, parsed.error.message));
+        return protocol::stringifyJson(errorResponse(id, ErrorCode::InvalidRequest, parsed.error.message));
     }
 
     try {
-        if (parsed.value.type() != JsonValue::Type::Object) {
-            return stringifyJson(errorResponse(id, ErrorCode::InvalidRequest, "Request must be an object."));
+        if (parsed.value.type() != protocol::JsonValue::Type::Object) {
+            return protocol::stringifyJson(errorResponse(id, ErrorCode::InvalidRequest, "Request must be an object."));
         }
 
         const auto& request = parsed.value.asObject();
         const auto idEntry = request.find("id");
         if (idEntry != request.end()) {
-            if (idEntry->second.type() != JsonValue::Type::String) {
-                return stringifyJson(errorResponse(JsonValue::null(), ErrorCode::InvalidRequest, "Request id must be a string."));
+            if (idEntry->second.type() != protocol::JsonValue::Type::String) {
+                return protocol::stringifyJson(errorResponse(protocol::JsonValue::null(), ErrorCode::InvalidRequest, "Request id must be a string."));
             }
             id = idEntry->second;
         }
 
         const auto methodEntry = request.find("method");
-        if (methodEntry == request.end() || methodEntry->second.type() != JsonValue::Type::String) {
-            return stringifyJson(errorResponse(id, ErrorCode::InvalidRequest, "Request method must be a string."));
+        if (methodEntry == request.end() || methodEntry->second.type() != protocol::JsonValue::Type::String) {
+            return protocol::stringifyJson(errorResponse(id, ErrorCode::InvalidRequest, "Request method must be a string."));
         }
 
-        JsonValue::Object emptyParams;
-        const JsonValue::Object* params = &emptyParams;
+        protocol::JsonValue::Object emptyParams;
+        const protocol::JsonValue::Object* params = &emptyParams;
         const auto paramsEntry = request.find("params");
         if (paramsEntry != request.end()) {
-            if (paramsEntry->second.type() != JsonValue::Type::Object) {
-                return stringifyJson(errorResponse(id, ErrorCode::InvalidParams, "Request params must be an object."));
+            if (paramsEntry->second.type() != protocol::JsonValue::Type::Object) {
+                return protocol::stringifyJson(errorResponse(id, ErrorCode::InvalidParams, "Request params must be an object."));
             }
             params = &paramsEntry->second.asObject();
         }
 
-        return stringifyJson(successResponse(id, dispatch(methodEntry->second.asString(), *params)));
+        return protocol::stringifyJson(successResponse(id, dispatch(methodEntry->second.asString(), *params)));
     } catch (const RpcError& error) {
-        return stringifyJson(errorResponse(id, error.code(), error.message()));
+        return protocol::stringifyJson(errorResponse(id, error.code(), error.message()));
     } catch (const std::exception&) {
-        return stringifyJson(errorResponse(id, ErrorCode::InternalError, "Internal error."));
+        return protocol::stringifyJson(errorResponse(id, ErrorCode::InternalError, "Internal error."));
     }
 }
 
-JsonValue JsonRpcDispatcher::dispatch(const std::string& method, const JsonValue::Object& params) {
+protocol::JsonValue JsonRpcDispatcher::dispatch(const std::string& method, const protocol::JsonValue::Object& params) {
     if (method == "session.startGuestSession") {
         return sessionToJson(sessions_.startGuestSession());
     }
@@ -248,7 +248,7 @@ JsonValue JsonRpcDispatcher::dispatch(const std::string& method, const JsonValue
         if (!result.ok) {
             throwIfFailed(result.error);
         }
-        return JsonValue::object({{"ok", JsonValue::boolean(true)}});
+        return protocol::JsonValue::object({{"ok", protocol::JsonValue::boolean(true)}});
     }
 
     if (method == "session.whoami") {
@@ -256,7 +256,7 @@ JsonValue JsonRpcDispatcher::dispatch(const std::string& method, const JsonValue
         if (!result.ok) {
             throwIfFailed(result.error);
         }
-        return JsonValue::object({{"user", userToJson(result.value)}});
+        return protocol::JsonValue::object({{"user", userToJson(result.value)}});
     }
 
     if (method == "user.listUsers") {
@@ -265,11 +265,11 @@ JsonValue JsonRpcDispatcher::dispatch(const std::string& method, const JsonValue
             throwIfFailed(result.error);
         }
 
-        JsonValue::Array jsonUsers;
+        protocol::JsonValue::Array jsonUsers;
         for (const auto& user : result.value) {
             jsonUsers.push_back(userToJson(user));
         }
-        return JsonValue::object({{"users", JsonValue::array(std::move(jsonUsers))}});
+        return protocol::JsonValue::object({{"users", protocol::JsonValue::array(std::move(jsonUsers))}});
     }
 
     if (method == "user.currentProfile") {
@@ -277,7 +277,7 @@ JsonValue JsonRpcDispatcher::dispatch(const std::string& method, const JsonValue
         if (!result.ok) {
             throwIfFailed(result.error);
         }
-        return JsonValue::object({{"user", userToJson(result.value)}});
+        return protocol::JsonValue::object({{"user", userToJson(result.value)}});
     }
 
     if (method == "user.createUser") {
@@ -289,7 +289,7 @@ JsonValue JsonRpcDispatcher::dispatch(const std::string& method, const JsonValue
         if (!result.ok) {
             throwIfFailed(result.error);
         }
-        return JsonValue::object({{"ok", JsonValue::boolean(true)}});
+        return protocol::JsonValue::object({{"ok", protocol::JsonValue::boolean(true)}});
     }
 
     if (method == "user.updateUser") {
@@ -304,7 +304,7 @@ JsonValue JsonRpcDispatcher::dispatch(const std::string& method, const JsonValue
         if (!result.ok) {
             throwIfFailed(result.error);
         }
-        return JsonValue::object({{"ok", JsonValue::boolean(true)}});
+        return protocol::JsonValue::object({{"ok", protocol::JsonValue::boolean(true)}});
     }
 
     if (method == "user.deleteUser") {
@@ -315,7 +315,7 @@ JsonValue JsonRpcDispatcher::dispatch(const std::string& method, const JsonValue
         if (!result.ok) {
             throwIfFailed(result.error);
         }
-        return JsonValue::object({{"ok", JsonValue::boolean(true)}});
+        return protocol::JsonValue::object({{"ok", protocol::JsonValue::boolean(true)}});
     }
 
     if (method == "user.resetFailedCount") {
@@ -326,7 +326,7 @@ JsonValue JsonRpcDispatcher::dispatch(const std::string& method, const JsonValue
         if (!result.ok) {
             throwIfFailed(result.error);
         }
-        return JsonValue::object({{"ok", JsonValue::boolean(true)}});
+        return protocol::JsonValue::object({{"ok", protocol::JsonValue::boolean(true)}});
     }
 
     if (method == "user.disableUser") {
@@ -337,7 +337,7 @@ JsonValue JsonRpcDispatcher::dispatch(const std::string& method, const JsonValue
         if (!result.ok) {
             throwIfFailed(result.error);
         }
-        return JsonValue::object({{"ok", JsonValue::boolean(true)}});
+        return protocol::JsonValue::object({{"ok", protocol::JsonValue::boolean(true)}});
     }
 
     if (method == "user.updateOwnAccount") {
@@ -353,7 +353,7 @@ JsonValue JsonRpcDispatcher::dispatch(const std::string& method, const JsonValue
         if (!result.ok) {
             throwIfFailed(result.error);
         }
-        return JsonValue::object({{"ok", JsonValue::boolean(true)}});
+        return protocol::JsonValue::object({{"ok", protocol::JsonValue::boolean(true)}});
     }
 
     if (method == "user.getStrictMode") {
@@ -361,7 +361,7 @@ JsonValue JsonRpcDispatcher::dispatch(const std::string& method, const JsonValue
         if (!result.ok) {
             throwIfFailed(result.error);
         }
-        return JsonValue::object({{"enabled", JsonValue::boolean(result.value)}});
+        return protocol::JsonValue::object({{"enabled", protocol::JsonValue::boolean(result.value)}});
     }
 
     if (method == "user.setStrictMode") {
@@ -372,7 +372,7 @@ JsonValue JsonRpcDispatcher::dispatch(const std::string& method, const JsonValue
         if (!result.ok) {
             throwIfFailed(result.error);
         }
-        return JsonValue::object({{"ok", JsonValue::boolean(true)}});
+        return protocol::JsonValue::object({{"ok", protocol::JsonValue::boolean(true)}});
     }
 
     if (files_ != nullptr && method == "file.listDirectory") {
@@ -393,7 +393,7 @@ JsonValue JsonRpcDispatcher::dispatch(const std::string& method, const JsonValue
         if (!result.ok) {
             throwIfFailed(result.error);
         }
-        return JsonValue::object({{"content", JsonValue::string(result.value.content)}});
+        return protocol::JsonValue::object({{"content", protocol::JsonValue::string(result.value.content)}});
     }
 
     if (files_ != nullptr && method == "file.writeFile") {
@@ -404,7 +404,7 @@ JsonValue JsonRpcDispatcher::dispatch(const std::string& method, const JsonValue
         if (!result.ok) {
             throwIfFailed(result.error);
         }
-        return JsonValue::object({{"ok", JsonValue::boolean(true)}});
+        return protocol::JsonValue::object({{"ok", protocol::JsonValue::boolean(true)}});
     }
 
     if (files_ != nullptr && method == "file.createDirectory") {
@@ -414,7 +414,7 @@ JsonValue JsonRpcDispatcher::dispatch(const std::string& method, const JsonValue
         if (!result.ok) {
             throwIfFailed(result.error);
         }
-        return JsonValue::object({{"ok", JsonValue::boolean(true)}});
+        return protocol::JsonValue::object({{"ok", protocol::JsonValue::boolean(true)}});
     }
 
     if (files_ != nullptr && method == "file.deleteFile") {
@@ -424,7 +424,7 @@ JsonValue JsonRpcDispatcher::dispatch(const std::string& method, const JsonValue
         if (!result.ok) {
             throwIfFailed(result.error);
         }
-        return JsonValue::object({{"ok", JsonValue::boolean(true)}});
+        return protocol::JsonValue::object({{"ok", protocol::JsonValue::boolean(true)}});
     }
 
     if (files_ != nullptr && method == "file.renameFile") {
@@ -436,7 +436,7 @@ JsonValue JsonRpcDispatcher::dispatch(const std::string& method, const JsonValue
         if (!result.ok) {
             throwIfFailed(result.error);
         }
-        return JsonValue::object({{"ok", JsonValue::boolean(true)}});
+        return protocol::JsonValue::object({{"ok", protocol::JsonValue::boolean(true)}});
     }
 
     if (files_ != nullptr && method == "file.copyFile") {
@@ -448,7 +448,7 @@ JsonValue JsonRpcDispatcher::dispatch(const std::string& method, const JsonValue
         if (!result.ok) {
             throwIfFailed(result.error);
         }
-        return JsonValue::object({{"ok", JsonValue::boolean(true)}});
+        return protocol::JsonValue::object({{"ok", protocol::JsonValue::boolean(true)}});
     }
 
     if (files_ != nullptr && method == "file.moveFile") {
@@ -460,7 +460,7 @@ JsonValue JsonRpcDispatcher::dispatch(const std::string& method, const JsonValue
         if (!result.ok) {
             throwIfFailed(result.error);
         }
-        return JsonValue::object({{"ok", JsonValue::boolean(true)}});
+        return protocol::JsonValue::object({{"ok", protocol::JsonValue::boolean(true)}});
     }
 
     if (files_ != nullptr && method == "file.removeDirectory") {
@@ -471,7 +471,7 @@ JsonValue JsonRpcDispatcher::dispatch(const std::string& method, const JsonValue
         if (!result.ok) {
             throwIfFailed(result.error);
         }
-        return JsonValue::object({{"ok", JsonValue::boolean(true)}});
+        return protocol::JsonValue::object({{"ok", protocol::JsonValue::boolean(true)}});
     }
 
     if (files_ != nullptr && method == "file.search") {
@@ -503,7 +503,7 @@ JsonValue JsonRpcDispatcher::dispatch(const std::string& method, const JsonValue
         if (!result.ok) {
             throwIfFailed(result.error);
         }
-        return JsonValue::object({{"ok", JsonValue::boolean(true)}});
+        return protocol::JsonValue::object({{"ok", protocol::JsonValue::boolean(true)}});
     }
 
     if (tux_ != nullptr && method == "tux.write") {
@@ -514,7 +514,7 @@ JsonValue JsonRpcDispatcher::dispatch(const std::string& method, const JsonValue
         if (!result.ok) {
             throwIfFailed(result.error);
         }
-        return JsonValue::object({{"ok", JsonValue::boolean(true)}});
+        return protocol::JsonValue::object({{"ok", protocol::JsonValue::boolean(true)}});
     }
 
     if (tux_ != nullptr && method == "tux.read") {
@@ -524,10 +524,10 @@ JsonValue JsonRpcDispatcher::dispatch(const std::string& method, const JsonValue
         if (!result.ok) {
             throwIfFailed(result.error);
         }
-        return JsonValue::object({
-            {"content", JsonValue::string(result.value.content)},
-            {"creator", JsonValue::string(result.value.metadata.creator)},
-            {"lastEditor", JsonValue::string(result.value.metadata.lastEditor)}
+        return protocol::JsonValue::object({
+            {"content", protocol::JsonValue::string(result.value.content)},
+            {"creator", protocol::JsonValue::string(result.value.metadata.creator)},
+            {"lastEditor", protocol::JsonValue::string(result.value.metadata.lastEditor)}
         });
     }
 
@@ -538,7 +538,7 @@ JsonValue JsonRpcDispatcher::dispatch(const std::string& method, const JsonValue
         if (!result.ok) {
             throwIfFailed(result.error);
         }
-        return JsonValue::object({{"ok", JsonValue::boolean(true)}});
+        return protocol::JsonValue::object({{"ok", protocol::JsonValue::boolean(true)}});
     }
 
     if (tux_ != nullptr && method == "tux.rename") {
@@ -550,7 +550,7 @@ JsonValue JsonRpcDispatcher::dispatch(const std::string& method, const JsonValue
         if (!result.ok) {
             throwIfFailed(result.error);
         }
-        return JsonValue::object({{"ok", JsonValue::boolean(true)}});
+        return protocol::JsonValue::object({{"ok", protocol::JsonValue::boolean(true)}});
     }
 
     if (tux_ != nullptr && method == "tux.copy") {
@@ -562,7 +562,7 @@ JsonValue JsonRpcDispatcher::dispatch(const std::string& method, const JsonValue
         if (!result.ok) {
             throwIfFailed(result.error);
         }
-        return JsonValue::object({{"ok", JsonValue::boolean(true)}});
+        return protocol::JsonValue::object({{"ok", protocol::JsonValue::boolean(true)}});
     }
 
     if (tux_ != nullptr && method == "tux.move") {
@@ -574,7 +574,7 @@ JsonValue JsonRpcDispatcher::dispatch(const std::string& method, const JsonValue
         if (!result.ok) {
             throwIfFailed(result.error);
         }
-        return JsonValue::object({{"ok", JsonValue::boolean(true)}});
+        return protocol::JsonValue::object({{"ok", protocol::JsonValue::boolean(true)}});
     }
 
     if (tux_ != nullptr && method == "tux.search") {
@@ -591,21 +591,22 @@ JsonValue JsonRpcDispatcher::dispatch(const std::string& method, const JsonValue
     throw RpcError(ErrorCode::UnknownMethod, "Unknown method.");
 }
 
-JsonValue JsonRpcDispatcher::errorResponse(const JsonValue& id, ErrorCode code, const std::string& message) const {
-    return JsonValue::object({
-        {"error", JsonValue::object({
-            {"code", JsonValue::string(toString(code))},
-            {"message", JsonValue::string(message)}
+protocol::JsonValue JsonRpcDispatcher::errorResponse(const protocol::JsonValue& id, ErrorCode code, const std::string& message) const {
+    return protocol::JsonValue::object({
+        {"error", protocol::JsonValue::object({
+            {"code", protocol::JsonValue::string(toString(code))},
+            {"message", protocol::JsonValue::string(message)}
         })},
         {"id", id}
     });
 }
 
-JsonValue JsonRpcDispatcher::successResponse(const JsonValue& id, JsonValue result) const {
-    return JsonValue::object({
+protocol::JsonValue JsonRpcDispatcher::successResponse(const protocol::JsonValue& id, protocol::JsonValue result) const {
+    return protocol::JsonValue::object({
         {"id", id},
         {"result", std::move(result)}
     });
 }
 
 } // namespace tundraux::backend
+

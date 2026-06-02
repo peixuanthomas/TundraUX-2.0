@@ -1,6 +1,6 @@
 #include "backend_client.hpp"
 
-#include "json.hpp"
+#include "protocol_json.hpp"
 
 #include <cmath>
 #include <stdexcept>
@@ -9,7 +9,7 @@
 namespace tundraux::frontend {
 namespace {
 
-using tundraux::backend::JsonValue;
+using tundraux::protocol::JsonValue;
 
 constexpr const char* transportErrorCode = "TransportError";
 constexpr const char* transportErrorMessage = "Backend unavailable.";
@@ -227,7 +227,7 @@ JsonValue makeRequest(const std::string& id, const std::string& method, JsonValu
 
 template <typename T, typename Parser>
 ClientResult<T> parseClientResponse(const std::string& response, const std::string& expectedId, Parser parser) {
-    const auto parsed = tundraux::backend::parseJson(response);
+    const auto parsed = tundraux::protocol::parseJson(response);
     if (!parsed.ok || parsed.value.type() != JsonValue::Type::Object) {
         return errorResult<T>(invalidResponseCode, invalidResponseMessage);
     }
@@ -274,7 +274,7 @@ ClientResult<T> sendRequest(
     JsonValue::Object params,
     Parser parser
 ) {
-    const std::string requestLine = tundraux::backend::stringifyJson(makeRequest(id, method, std::move(params)));
+    const std::string requestLine = tundraux::protocol::stringifyJson(makeRequest(id, method, std::move(params)));
     std::string response;
     if (!transport.requestLine(requestLine, response)) {
         return errorResult<T>(transportErrorCode, transportErrorMessage);

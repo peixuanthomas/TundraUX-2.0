@@ -239,7 +239,7 @@ bool expect(bool condition, const std::string& message) {
 bool expectInvalidJson(const std::string& input, const std::string& message) {
     const auto parsed = tundraux::backend::parseJson(input);
     return expect(!parsed.ok, message)
-        && expect(parsed.error.code == tundraux::backend::ErrorCode::InvalidRequest, message + " error code");
+        && expect(!parsed.error.message.empty(), message + " error message");
 }
 
 bool expectNoErrorResponse(const std::string& response, const std::string& expectedId, const std::string& label) {

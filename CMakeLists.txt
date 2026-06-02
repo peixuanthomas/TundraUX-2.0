@@ -30,9 +30,57 @@ add_custom_target(tundraux_generate_build_info
     VERBATIM
 )
 
+add_library(tundraux_protocol
+    SHARED/protocol/json.cpp
+)
+
+target_include_directories(tundraux_protocol
+    PUBLIC
+        ${PROJECT_SOURCE_DIR}/SHARED/protocol
+)
+
+add_executable(protocol_json_smoke_test
+    tests/protocol_json_smoke_test.cpp
+)
+
+target_link_libraries(protocol_json_smoke_test
+    PRIVATE
+        tundraux_protocol
+)
+
+target_compile_features(protocol_json_smoke_test
+    PRIVATE
+        cxx_std_17
+)
+
+add_executable(backend_client_protocol_boundary_test
+    tests/backend_client_protocol_boundary_test.cpp
+)
+
+target_link_libraries(backend_client_protocol_boundary_test
+    PRIVATE
+        tundraux_protocol
+)
+
+target_include_directories(backend_client_protocol_boundary_test
+    PRIVATE
+        ${PROJECT_SOURCE_DIR}/BACKEND/core
+        ${PROJECT_SOURCE_DIR}/SHARED/protocol
+        ${PROJECT_SOURCE_DIR}/APP/backend_client
+)
+
+target_compile_features(backend_client_protocol_boundary_test
+    PRIVATE
+        cxx_std_17
+)
+
+target_compile_features(tundraux_protocol
+    PUBLIC
+        cxx_std_17
+)
+
 add_library(tundraux_backend_core
     BACKEND/core/file_service.cpp
-    BACKEND/core/json.cpp
     BACKEND/core/json_rpc.cpp
     BACKEND/core/session_service.cpp
     BACKEND/core/tux_service.cpp
@@ -42,6 +90,11 @@ add_library(tundraux_backend_core
 target_include_directories(tundraux_backend_core
     PUBLIC
         ${PROJECT_SOURCE_DIR}/BACKEND/core
+)
+
+target_link_libraries(tundraux_backend_core
+    PUBLIC
+        tundraux_protocol
 )
 
 target_compile_features(tundraux_backend_core
@@ -90,6 +143,7 @@ target_link_libraries(tundraux_backend_stdio
     PRIVATE
         tundraux_backend_core
         tundraux_backend_adapters
+        tundraux_protocol
 )
 
 target_compile_features(tundraux_backend_stdio
@@ -98,6 +152,9 @@ target_compile_features(tundraux_backend_stdio
 )
 
 enable_testing()
+
+add_test(NAME protocol_json_smoke_test COMMAND protocol_json_smoke_test)
+add_test(NAME backend_client_protocol_boundary_test COMMAND backend_client_protocol_boundary_test)
 
 add_executable(backend_core_tests
     tests/backend_core_tests.cpp
@@ -283,6 +340,7 @@ target_link_libraries(${PROJECT_NAME}
     PRIVATE
         TundraTUI::TundraTUI
         tundraux_backend_core
+        tundraux_protocol
 )
 
 target_compile_features(${PROJECT_NAME}
@@ -531,6 +589,7 @@ target_include_directories(frontend_backend_client_tests
 target_link_libraries(frontend_backend_client_tests
     PRIVATE
         tundraux_backend_core
+        tundraux_protocol
 )
 
 target_compile_features(frontend_backend_client_tests
