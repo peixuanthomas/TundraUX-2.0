@@ -6,7 +6,8 @@
 
 std::vector<RegisteredCommand> buildNewCommandRegistry(
     USER& currentUser,
-    tundraux::frontend::BackendRuntime* backendRuntime
+    tundraux::frontend::BackendRuntime* backendRuntime,
+    tundraux::frontend::FrontendAuditSink* auditSink
 ) {
     return {
         {
@@ -41,8 +42,8 @@ std::vector<RegisteredCommand> buildNewCommandRegistry(
             "login <username>",
             "Log in as specified user",
             {},
-            [&currentUser, backendRuntime](const std::string& input) {
-                handleLoginCommand(input, currentUser, backendRuntime);
+            [auditSink, &currentUser, backendRuntime](const std::string& input) {
+                handleLoginCommand(input, currentUser, backendRuntime, auditSink);
             },
             "guest,debug",
             false,
@@ -53,8 +54,8 @@ std::vector<RegisteredCommand> buildNewCommandRegistry(
             "logout",
             "Log out current user",
             {},
-            [&currentUser, backendRuntime](const std::string& input) {
-                handleLogoutCommand(input, currentUser, backendRuntime);
+            [auditSink, &currentUser, backendRuntime](const std::string& input) {
+                handleLogoutCommand(input, currentUser, backendRuntime, auditSink);
             },
             "",
             false
@@ -64,8 +65,8 @@ std::vector<RegisteredCommand> buildNewCommandRegistry(
             "listuser",
             "List all users",
             {},
-            [backendRuntime](const std::string& input) {
-                handleListUserCommand(input, backendRuntime);
+            [auditSink, backendRuntime](const std::string& input) {
+                handleListUserCommand(input, backendRuntime, auditSink);
             },
             backendRuntime != nullptr && !backendRuntime->legacyDirect() ? "admin,debug" : "",
             false
@@ -75,8 +76,8 @@ std::vector<RegisteredCommand> buildNewCommandRegistry(
             "manageuser",
             "Open user management interface",
             {"manageusers"},
-            [&currentUser, backendRuntime](const std::string& input) {
-                handleManageUsersCommand(input, currentUser, backendRuntime);
+            [auditSink, &currentUser, backendRuntime](const std::string& input) {
+                handleManageUsersCommand(input, currentUser, backendRuntime, auditSink);
             },
             "admin,debug",
             false
@@ -86,8 +87,8 @@ std::vector<RegisteredCommand> buildNewCommandRegistry(
             "modify",
             "Modify current user information",
             {},
-            [&currentUser, backendRuntime](const std::string& input) {
-                handleModifyCommand(input, currentUser, backendRuntime);
+            [auditSink, &currentUser, backendRuntime](const std::string& input) {
+                handleModifyCommand(input, currentUser, backendRuntime, auditSink);
             },
             "",
             false
@@ -124,8 +125,8 @@ std::vector<RegisteredCommand> buildNewCommandRegistry(
             "strict <status|on|off>",
             "View or change strict audit mode",
             {},
-            [&currentUser, backendRuntime](const std::string& input) {
-                handleStrictCommand(input, currentUser, backendRuntime);
+            [auditSink, &currentUser, backendRuntime](const std::string& input) {
+                handleStrictCommand(input, currentUser, backendRuntime, auditSink);
             },
             "admin,debug",
             false,
@@ -136,8 +137,8 @@ std::vector<RegisteredCommand> buildNewCommandRegistry(
             "export log <tlog-file>",
             "Export an encrypted audit log to plaintext",
             {},
-            [&currentUser, backendRuntime](const std::string& input) {
-                handleExportCommand(input, currentUser, backendRuntime);
+            [auditSink, &currentUser, backendRuntime](const std::string& input) {
+                handleExportCommand(input, currentUser, backendRuntime, auditSink);
             },
             "admin,debug",
             false,
@@ -148,8 +149,8 @@ std::vector<RegisteredCommand> buildNewCommandRegistry(
             "edit [filename]",
             "Open the text editor",
             {},
-            [&currentUser, backendRuntime](const std::string& input) {
-                handleEditCommand(input, currentUser, backendRuntime);
+            [auditSink, &currentUser, backendRuntime](const std::string& input) {
+                handleEditCommand(input, currentUser, backendRuntime, auditSink);
             },
             "admin,user,debug",
             false,
@@ -160,8 +161,8 @@ std::vector<RegisteredCommand> buildNewCommandRegistry(
             "explorer",
             "Open the file explorer",
             {},
-            [&currentUser, backendRuntime](const std::string &input) {
-                handleExplorerCommand(input, currentUser, backendRuntime);
+            [auditSink, &currentUser, backendRuntime](const std::string& input) {
+                handleExplorerCommand(input, currentUser, backendRuntime, auditSink);
             },
             "admin,user,debug",
             false
@@ -245,8 +246,8 @@ std::vector<RegisteredCommand> buildNewCommandRegistry(
             "whoami",
             "Display the current logged in user",
             {},
-            [&currentUser, backendRuntime](const std::string&) {
-                handleWhoamiCommand(currentUser, backendRuntime);
+            [auditSink, &currentUser, backendRuntime](const std::string&) {
+                handleWhoamiCommand(currentUser, backendRuntime, auditSink);
             },
             "",
             false

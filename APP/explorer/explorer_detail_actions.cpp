@@ -1,10 +1,10 @@
 #include "explorer_detail_actions.hpp"
 
-#include "audit_log.hpp"
 #include "explorer_details.hpp"
 #include "explorer_render.hpp"
 #include "explorer_style.hpp"
 #include "explorer_text.hpp"
+#include "backend_facade.hpp"
 
 #include <algorithm>
 
@@ -12,7 +12,18 @@ namespace tundraux::explorer {
 namespace {
 
 void setAuditUser(const ExplorerState& state) {
-    tundraux::audit::setCurrentUser(USER{state.usertype, state.username, "", "", 0});
+    if (state.audit == nullptr) {
+        return;
+    }
+    state.audit->setCurrentUser({state.usertype, state.username, "", 0});
+}
+
+void logAuditEvent(const ExplorerState& state, const std::string& category, const std::string& detail) {
+    if (state.audit == nullptr) {
+        return;
+    }
+    setAuditUser(state);
+    state.audit->logEvent(category, detail);
 }
 
 }
@@ -20,8 +31,7 @@ void setAuditUser(const ExplorerState& state) {
 void beginShowDetails(ExplorerState& state) {
     if (state.entries.empty() || state.cursor >= state.entries.size()) {
         state.message = redMessage("Nothing selected");
-        setAuditUser(state);
-        tundraux::audit::logEvent("explorer", "details denied reason=nothing selected");
+        logAuditEvent(state, "explorer", "details denied reason=nothing selected");
         return;
     }
 
@@ -30,8 +40,7 @@ void beginShowDetails(ExplorerState& state) {
     state.detailName = entry.name;
     state.detailScroll = 0;
     state.showDetails = true;
-    setAuditUser(state);
-    tundraux::audit::logEvent("explorer", "details success path=" + pathToDisplayString(entry.path));
+    logAuditEvent(state, "explorer", "details success path=" + pathToDisplayString(entry.path));
 }
 
 std::size_t maxDetailScroll(const ExplorerState& state) {

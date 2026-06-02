@@ -1,5 +1,6 @@
 #pragma once
 
+#include "backend_facade.hpp"
 #include "TundraTUI/input.hpp"
 
 #include <cstdint>
@@ -63,6 +64,7 @@ struct DetailLine {
 
 struct ExplorerState {
     ExplorerBackend* backend = nullptr;
+    ::tundraux::frontend::FrontendAuditSink* audit = nullptr;
     fs::path rootPath;
     fs::path currentPath;
     std::vector<FileEntry> entries;

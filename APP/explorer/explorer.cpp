@@ -20,7 +20,8 @@ namespace fs = std::filesystem;
 void open(
     const std::string& username,
     const std::string& usertype,
-    tundraux::frontend::BackendRuntime* backendRuntime
+    tundraux::frontend::BackendRuntime* backendRuntime,
+    tundraux::frontend::FrontendAuditSink* auditSink
 ) {
     ConsoleScreenGuard screenGuard;
 
@@ -43,6 +44,7 @@ void open(
         state.backend = backend.get();
     }
     state.currentPath = state.rootPath;
+    state.audit = auditSink;
     state.username = username;
     state.usertype = usertype;
     refresh(state);
@@ -64,7 +66,8 @@ void open(
 void open_explorer(
     const std::string& username,
     const std::string& usertype,
-    tundraux::frontend::BackendRuntime* backendRuntime
+    tundraux::frontend::BackendRuntime* backendRuntime,
+    tundraux::frontend::FrontendAuditSink* auditSink
 ) {
-    tundraux::explorer::open(username, usertype, backendRuntime);
+    tundraux::explorer::open(username, usertype, backendRuntime, auditSink);
 }

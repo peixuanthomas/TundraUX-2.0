@@ -1,6 +1,6 @@
 #include "account_settings.hpp"
 
-#include "audit_log.hpp"
+#include "backend_facade.hpp"
 #include "backend_client.hpp"
 #include "backend_runtime.hpp"
 
@@ -29,6 +29,38 @@ using tundra_tui::Key;
 using tundra_tui::KeyPress;
 using tundra_tui::readKey;
 using tundra_tui::set_title;
+
+tundraux::frontend::ShellUser shellUserFromUser(const USER& user) {
+    return {
+        user.type,
+        user.name,
+        "",
+        user.count
+    };
+}
+
+void setAuditCurrentUser(
+    tundraux::frontend::FrontendAuditSink* auditSink,
+    const USER& currentUser
+) {
+    if (auditSink == nullptr) {
+        return;
+    }
+    auditSink->setCurrentUser(shellUserFromUser(currentUser));
+}
+
+void logAuditEvent(
+    tundraux::frontend::FrontendAuditSink* auditSink,
+    const USER& currentUser,
+    const std::string& category,
+    const std::string& detail
+) {
+    if (auditSink == nullptr) {
+        return;
+    }
+    setAuditCurrentUser(auditSink, currentUser);
+    auditSink->logEvent(category, detail);
+}
 
 struct PasswordStatus {
     bool hasMinLength = false;
@@ -417,13 +449,16 @@ std::string& activeField(AccountSettingsState& state) {
 bool saveSettings(
     AccountSettingsState& state,
     USER& currentUser,
-    tundraux::frontend::BackendRuntime* backendRuntime
+    tundraux::frontend::BackendRuntime* backendRuntime,
+    tundraux::frontend::FrontendAuditSink* auditSink
 ) {
-    tundraux::audit::setCurrentUser(USER{currentUser.type, currentUser.name, "", "", 0});
+    setAuditCurrentUser(auditSink, currentUser);
     const std::string validationError = validateSettings(state);
     if (!validationError.empty()) {
         state.message = validationError;
-        tundraux::audit::logEvent(
+        logAuditEvent(
+            auditSink,
+            currentUser,
             "manage",
             "account settings update failure user=" + currentUser.name + " reason=" + validationError
         );
@@ -437,7 +472,9 @@ bool saveSettings(
     if (usesBackendMode(backendRuntime)) {
         if (backendRuntime == nullptr || backendRuntime->sessionId().empty() || backendRuntime->client() == nullptr) {
             state.message = "No backend session is active.";
-            tundraux::audit::logEvent(
+            logAuditEvent(
+                auditSink,
+                currentUser,
                 "manage",
                 "account settings update failure user=" + currentUser.name + " reason=backend unavailable"
             );
@@ -460,7 +497,9 @@ bool saveSettings(
                 updateResult.errorCode,
                 updateResult.message
             );
-            tundraux::audit::logEvent(
+            logAuditEvent(
+                auditSink,
+                currentUser,
                 "manage",
                 "account settings update failure user=" + currentUser.name + " reason=" + state.message
             );
@@ -491,7 +530,9 @@ bool saveSettings(
         DataManager dataManager("user_data.dat");
         if (!dataManager.UpdateUser(state.original.name, updated)) {
             state.message = "Failed to update user info.";
-            tundraux::audit::logEvent(
+            logAuditEvent(
+                auditSink,
+                currentUser,
                 "manage",
                 "account settings update failure user=" + currentUser.name + " reason=update user_data.dat failed"
             );
@@ -509,14 +550,16 @@ bool saveSettings(
     state.message = degradedProfileRefresh
         ? "Settings saved, but profile refresh failed. Press Enter or Esc to return."
         : "Settings saved. Press Enter or Esc to return.";
-    tundraux::audit::setCurrentUser(USER{updated.type, updated.name, "", "", 0});
+    setAuditCurrentUser(auditSink, updated);
     if (degradedProfileRefresh) {
-        tundraux::audit::logEvent(
+        logAuditEvent(
+            auditSink,
+            currentUser,
             "manage",
             "account settings update success/degraded user=" + updated.name + " reason=" + degradedProfileReason
         );
     } else {
-        tundraux::audit::logEvent("manage", "account settings update success user=" + updated.name);
+        logAuditEvent(auditSink, currentUser, "manage", "account settings update success user=" + updated.name);
     }
     return true;
 }
@@ -525,6 +568,7 @@ bool handleSettingsKey(
     AccountSettingsState& state,
     USER& currentUser,
     tundraux::frontend::BackendRuntime* backendRuntime,
+    tundraux::frontend::FrontendAuditSink* auditSink,
     const KeyPress& key
 ) {
     if (state.showHelp) {
@@ -574,7 +618,7 @@ bool handleSettingsKey(
             activeField(state).clear();
             break;
         case Key::Enter:
-            saveSettings(state, currentUser, backendRuntime);
+            saveSettings(state, currentUser, backendRuntime, auditSink);
             break;
         case Key::Character:
             activeField(state).push_back(key.character);
@@ -606,7 +650,8 @@ const USER* findCurrentUser(const DataManager& dataManager, const USER& currentU
 
 void open_account_settings(
     USER& currentUser,
-    tundraux::frontend::BackendRuntime* backendRuntime
+    tundraux::frontend::BackendRuntime* backendRuntime,
+    tundraux::frontend::FrontendAuditSink* auditSink
 ) {
     const bool backendMode = usesBackendMode(backendRuntime);
 
@@ -690,6 +735,6 @@ void open_account_settings(
             renderSettings(state);
         }
 
-        running = handleSettingsKey(state, currentUser, backendRuntime, readKey());
+        running = handleSettingsKey(state, currentUser, backendRuntime, auditSink, readKey());
     }
 }

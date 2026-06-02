@@ -9,6 +9,10 @@
 #include <system_error>
 #include <vector>
 
+namespace tundraux::frontend {
+class FrontendAuditSink;
+}
+
 namespace tundraux::audit {
 void logEvent(const std::string&, const std::string&) {}
 int openTlogInEditor(const std::string&, const std::string&, const std::string&, const std::string&) {
@@ -33,7 +37,8 @@ int open_tux_file_in_editor(
     const std::string&,
     const std::string&,
     const std::string&,
-    bool
+    bool,
+    tundraux::frontend::FrontendAuditSink*
 ) {
     return 0;
 }

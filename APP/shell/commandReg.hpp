@@ -8,6 +8,7 @@
 
 namespace tundraux::frontend {
 class BackendRuntime;
+class FrontendAuditSink;
 }
 
 using RegisteredCommandHandler = std::function<void(const std::string&)>;
@@ -26,10 +27,12 @@ struct RegisteredCommand {
 bool hasCommandPermission(const std::string& requiredUserType, const std::string& currentUserType);
 std::vector<RegisteredCommand> buildNewCommandRegistry(
     USER& currentUser,
-    tundraux::frontend::BackendRuntime* backendRuntime = nullptr
+    tundraux::frontend::BackendRuntime* backendRuntime = nullptr,
+    tundraux::frontend::FrontendAuditSink* auditSink = nullptr
 );
 bool tryExecuteRegisteredCommand(
     const std::string& input,
     const std::vector<RegisteredCommand>& commands,
-    const USER& currentUser
+    const USER& currentUser,
+    tundraux::frontend::FrontendAuditSink* auditSink = nullptr
 );

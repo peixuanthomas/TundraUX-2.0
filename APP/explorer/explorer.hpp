@@ -12,12 +12,14 @@
 
 namespace tundraux::frontend {
 class BackendRuntime;
+class FrontendAuditSink;
 }
 
 void open_explorer(
     const std::string& username,
     const std::string& usertype,
-    tundraux::frontend::BackendRuntime* backendRuntime = nullptr
+    tundraux::frontend::BackendRuntime* backendRuntime = nullptr,
+    tundraux::frontend::FrontendAuditSink* auditSink = nullptr
 );
 
 namespace tundraux::explorer {
@@ -25,7 +27,8 @@ namespace tundraux::explorer {
 void open(
     const std::string& username,
     const std::string& usertype,
-    tundraux::frontend::BackendRuntime* backendRuntime = nullptr
+    tundraux::frontend::BackendRuntime* backendRuntime = nullptr,
+    tundraux::frontend::FrontendAuditSink* auditSink = nullptr
 );
 
 }

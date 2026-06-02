@@ -5,10 +5,12 @@
 #include <exception>
 #include <sstream>
 
-#include "audit_log.hpp"
+#include "backend_facade.hpp"
 #include "color.hpp"
 
 namespace {
+using namespace tundra_tui;
+
 std::string toLowerCopy(const std::string& value) {
     std::string lowered = value;
     std::transform(lowered.begin(), lowered.end(), lowered.begin(), [](unsigned char ch) {
@@ -63,7 +65,8 @@ bool hasCommandPermission(const std::string& requiredUserType, const std::string
 bool tryExecuteRegisteredCommand(
     const std::string& input,
     const std::vector<RegisteredCommand>& commands,
-    const USER& currentUser
+    const USER& currentUser,
+    tundraux::frontend::FrontendAuditSink* auditSink
 ) {
     std::istringstream iss(input);
     std::string inputCommand;
@@ -87,10 +90,26 @@ bool tryExecuteRegisteredCommand(
         }
 
         if (!hasCommandPermission(cmd.requiredUserType, currentUser.type)) {
-            tundraux::audit::logEvent("command", "denied " + inputCommand);
+            if (auditSink != nullptr) {
+                auditSink->setCurrentUser(tundraux::frontend::ShellUser{
+                    currentUser.type,
+                    currentUser.name,
+                    "",
+                    currentUser.count
+                });
+                auditSink->logEvent("command", "denied " + inputCommand);
+            }
             colorcout("red", "Access Denied.\n");
         } else {
-            tundraux::audit::logEvent("command", "execute " + inputCommand);
+            if (auditSink != nullptr) {
+                auditSink->setCurrentUser(tundraux::frontend::ShellUser{
+                    currentUser.type,
+                    currentUser.name,
+                    "",
+                    currentUser.count
+                });
+                auditSink->logEvent("command", "execute " + inputCommand);
+            }
 
             if (cmd.name == "help") {
                 colorcout("cyan", "Available commands:\n");

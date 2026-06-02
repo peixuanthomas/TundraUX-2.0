@@ -1,6 +1,5 @@
 #include "explorer_open.hpp"
 
-#include "audit_log.hpp"
 #include "editor.hpp"
 #include "explorer_backend.hpp"
 #include "explorer_directory.hpp"
@@ -8,6 +7,7 @@
 #include "explorer_style.hpp"
 #include "explorer_text.hpp"
 #include "tux_editor.hpp"
+#include "backend_facade.hpp"
 
 #include <chrono>
 #include <cstdint>
@@ -20,8 +20,32 @@
 #include <windows.h>
 #include <shellapi.h>
 
+namespace tundraux::audit {
+int openTlogInEditor(
+    const std::string&,
+    const std::string&,
+    const std::string&,
+    const std::string&
+);
+}
+
 namespace tundraux::explorer {
 namespace {
+
+void setAuditUser(const ExplorerState& state) {
+    if (state.audit == nullptr) {
+        return;
+    }
+    state.audit->setCurrentUser({state.usertype, state.username, "", 0});
+}
+
+void logAuditEvent(const ExplorerState& state, const std::string& category, const std::string& detail) {
+    if (state.audit == nullptr) {
+        return;
+    }
+    setAuditUser(state);
+    state.audit->logEvent(category, detail);
+}
 
 class ScopedEditorTempFile {
 public:
@@ -157,7 +181,7 @@ std::string tuxApiPathFromExplorerPath(const fs::path& rootPath, const fs::path&
 
 void openBackendTuxFile(ExplorerState& state, const FileEntry& selected) {
     const std::string backendPath = tuxApiPathFromExplorerPath(state.rootPath, selected.path);
-    tundraux::audit::logEvent("explorer", "backend open " + backendPath);
+    logAuditEvent(state, "explorer", "backend open " + backendPath);
 
     const auto readResult = state.backend->readTux(backendPath);
     if (!readResult.ok) {
@@ -201,7 +225,7 @@ void openBackendTuxFile(ExplorerState& state, const FileEntry& selected) {
 
 void openBackendPlainFile(ExplorerState& state, const FileEntry& selected) {
     const std::string backendPath = explorerRelativePath(state.rootPath, selected.path);
-    tundraux::audit::logEvent("explorer", "backend open " + backendPath);
+    logAuditEvent(state, "explorer", "backend open " + backendPath);
 
     const auto readResult = state.backend->readFile(backendPath);
     if (!readResult.ok) {
@@ -245,7 +269,7 @@ void openBackendPlainFile(ExplorerState& state, const FileEntry& selected) {
 
 void openBackendExternalFile(ExplorerState& state, const FileEntry& selected) {
     const std::string backendPath = explorerRelativePath(state.rootPath, selected.path);
-    tundraux::audit::logEvent("explorer", "backend open " + backendPath);
+    logAuditEvent(state, "explorer", "backend open " + backendPath);
 
     const auto readResult = state.backend->readFile(backendPath);
     if (!readResult.ok) {
@@ -266,7 +290,7 @@ void openBackendExternalFile(ExplorerState& state, const FileEntry& selected) {
         return;
     }
 
-    tundraux::audit::logEvent("explorer", "open temporary " + backendPath);
+    logAuditEvent(state, "explorer", "open temporary " + backendPath);
     const HINSTANCE result = ShellExecuteW(
         nullptr,
         L"open",
@@ -312,14 +336,15 @@ void openSelected(ExplorerState& state) {
             return;
         }
 
-        tundraux::audit::logEvent("explorer", "open " + selectedPath);
+        logAuditEvent(state, "explorer", "open " + selectedPath);
         std::cout << "\x1b[?25h" << std::flush;
         const int result = open_tux_file_in_editor(
             selectedPath,
             selected.name,
             state.username,
             state.usertype,
-            true
+            true,
+            state.audit
         );
         std::cout << "\x1b[?25l" << std::flush;
         if (result == 0) {
@@ -344,7 +369,7 @@ void openSelected(ExplorerState& state) {
             state.message = redMessage("Audit logs cannot be opened in backend mode.");
             return;
         }
-        tundraux::audit::logEvent("explorer", "open " + selectedPath);
+        logAuditEvent(state, "explorer", "open " + selectedPath);
         std::cout << "\x1b[?25h" << std::flush;
         const int result = tundraux::audit::openTlogInEditor(
             selectedPath,
@@ -373,7 +398,7 @@ void openSelected(ExplorerState& state) {
             return;
         }
 
-        tundraux::audit::logEvent("explorer", "open " + selectedPath);
+        logAuditEvent(state, "explorer", "open " + selectedPath);
         std::cout << "\x1b[?25h" << std::flush;
         const int result = run_editor(selectedPath, selected.name);
         std::cout << "\x1b[?25l" << std::flush;
@@ -384,7 +409,7 @@ void openSelected(ExplorerState& state) {
         return;
     }
 
-    tundraux::audit::logEvent("explorer", "open " + selectedPath);
+    logAuditEvent(state, "explorer", "open " + selectedPath);
     if (state.backend != nullptr) {
         openBackendExternalFile(state, selected);
         return;

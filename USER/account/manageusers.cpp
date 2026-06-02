@@ -1,6 +1,7 @@
 // Attention: Windows only code.
 #include "manageusers.hpp"
 
+#include "backend_facade.hpp"
 #include "backend_client.hpp"
 #include "backend_runtime.hpp"
 #include "TundraTUI/color.hpp"
@@ -9,7 +10,6 @@
 #include "TundraTUI/screen.hpp"
 #include "TundraTUI/style.hpp"
 #include "TundraTUI/text.hpp"
-#include "audit_log.hpp"
 
 #include <algorithm>
 #include <cctype>
@@ -78,6 +78,7 @@ struct UserManagerState {
     std::string pendingDeleteName;
     std::string message = "Ready";
     std::string lastBackendErrorCode;
+    tundraux::frontend::FrontendAuditSink* auditSink = nullptr;
 };
 
 struct UserManagerBackend {
@@ -128,9 +129,38 @@ USER guestUser() {
     return USER{"guest", "", "", "", 0};
 }
 
-void syncAuditUser(USER& currentUser, USER user) {
+void syncAuditUser(
+    UserManagerState& state,
+    USER& currentUser,
+    USER user
+) {
     currentUser = std::move(user);
-    tundraux::audit::setCurrentUser(currentUser);
+    if (state.auditSink != nullptr) {
+        state.auditSink->setCurrentUser(frontend::ShellUser{
+            currentUser.type,
+            currentUser.name,
+            "",
+            currentUser.count
+        });
+    }
+}
+
+void logAuditEvent(
+    UserManagerState& state,
+    USER& currentUser,
+    const std::string& category,
+    const std::string& detail
+) {
+    if (state.auditSink == nullptr) {
+        return;
+    }
+    state.auditSink->setCurrentUser(frontend::ShellUser{
+        currentUser.type,
+        currentUser.name,
+        "",
+        currentUser.count
+    });
+    state.auditSink->logEvent(category, detail);
 }
 
 bool isTerminalBackendFailure(const std::string& errorCode) {
@@ -140,37 +170,37 @@ bool isTerminalBackendFailure(const std::string& errorCode) {
            errorCode == "InvalidResponse";
 }
 
-void startGuestSessionOrClear(UserManagerBackend& backend, USER& currentUser) {
+void startGuestSessionOrClear(UserManagerBackend& backend, UserManagerState& state, USER& currentUser) {
     const auto guestSession = backend.client.startGuestSession();
     if (guestSession.ok) {
         backend.sessionId = guestSession.value.sessionId;
-        syncAuditUser(currentUser, shellUserFromBackend(guestSession.value.user));
+        syncAuditUser(state, currentUser, shellUserFromBackend(guestSession.value.user));
         return;
     }
 
     backend.sessionId.clear();
-    syncAuditUser(currentUser, guestUser());
+    syncAuditUser(state, currentUser, guestUser());
 }
 
-void syncProfileOrGuest(UserManagerBackend& backend, USER& currentUser) {
+void syncProfileOrGuest(UserManagerBackend& backend, USER& currentUser, UserManagerState& state) {
     if (backend.sessionId.empty()) {
-        startGuestSessionOrClear(backend, currentUser);
+        startGuestSessionOrClear(backend, state, currentUser);
         return;
     }
 
     const auto profile = backend.client.currentProfile(backend.sessionId);
     if (profile.ok) {
-        syncAuditUser(currentUser, shellUserFromBackend(profile.value));
+        syncAuditUser(state, currentUser, shellUserFromBackend(profile.value));
         return;
     }
 
     if (profile.errorCode == "SessionExpired") {
-        startGuestSessionOrClear(backend, currentUser);
+        startGuestSessionOrClear(backend, state, currentUser);
         return;
     }
 
     backend.sessionId.clear();
-    syncAuditUser(currentUser, guestUser());
+    syncAuditUser(state, currentUser, guestUser());
 }
 
 bool handleTerminalBackendFailure(
@@ -187,12 +217,12 @@ bool handleTerminalBackendFailure(
     state.message = backendFailureMessage(fallback, errorCode);
     state.forceExit = true;
     if (errorCode == "PermissionDenied") {
-        syncProfileOrGuest(backend, currentUser);
+        syncProfileOrGuest(backend, currentUser, state);
     } else if (errorCode == "SessionExpired") {
-        startGuestSessionOrClear(backend, currentUser);
+        startGuestSessionOrClear(backend, state, currentUser);
     } else {
         backend.sessionId.clear();
-        syncAuditUser(currentUser, guestUser());
+        syncAuditUser(state, currentUser, guestUser());
     }
     return true;
 }
@@ -223,17 +253,17 @@ bool syncCurrentUserAfterMutation(UserManagerBackend& backend, USER& currentUser
     const auto profile = backend.client.currentProfile(backend.sessionId);
     if (!profile.ok) {
         if (profile.errorCode == "SessionExpired") {
-            startGuestSessionOrClear(backend, currentUser);
+            startGuestSessionOrClear(backend, state, currentUser);
         } else {
             backend.sessionId.clear();
-            syncAuditUser(currentUser, guestUser());
+            syncAuditUser(state, currentUser, guestUser());
         }
         state.message = backendFailureMessage("Your account lost management privileges. Returning to shell.", profile.errorCode);
         state.forceExit = true;
         return false;
     }
 
-    syncAuditUser(currentUser, shellUserFromBackend(profile.value));
+    syncAuditUser(state, currentUser, shellUserFromBackend(profile.value));
     return true;
 }
 
@@ -676,7 +706,12 @@ void saveForm(UserManagerState& state, UserManagerBackend& backend, USER& curren
 
     state.formOpen = false;
     state.message = state.form.editing ? "User updated: " + user.name : "User created: " + user.name;
-    tundraux::audit::logEvent("manage-users", std::string(state.form.editing ? "backend edit " : "backend create ") + user.name);
+    logAuditEvent(
+        state,
+        currentUser,
+        "manage-users",
+        std::string(state.form.editing ? "backend edit " : "backend create ") + user.name
+    );
     syncCurrentUserAfterMutation(backend, currentUser, state);
     if (!state.forceExit) {
         if (refreshUsers(backend, state)) {
@@ -798,7 +833,7 @@ void deleteSelected(UserManagerState& state, UserManagerBackend& backend, USER& 
     }
 
     state.message = "User deleted: " + name;
-    tundraux::audit::logEvent("manage-users", "backend delete " + name);
+    logAuditEvent(state, currentUser, "manage-users", "backend delete " + name);
     syncCurrentUserAfterMutation(backend, currentUser, state);
     if (!state.forceExit) {
         if (refreshUsers(backend, state)) {
@@ -833,7 +868,7 @@ void disableSelected(UserManagerState& state, UserManagerBackend& backend, USER&
     }
 
     state.message = "User disabled: " + name;
-    tundraux::audit::logEvent("manage-users", "backend disable " + name);
+    logAuditEvent(state, currentUser, "manage-users", "backend disable " + name);
     syncCurrentUserAfterMutation(backend, currentUser, state);
     if (!state.forceExit) {
         if (refreshUsers(backend, state)) {
@@ -867,7 +902,7 @@ void resetSelected(UserManagerState& state, UserManagerBackend& backend, USER& c
     }
 
     state.message = "Login count reset: " + name;
-    tundraux::audit::logEvent("manage-users", "backend reset " + name);
+    logAuditEvent(state, currentUser, "manage-users", "backend reset " + name);
     syncCurrentUserAfterMutation(backend, currentUser, state);
     if (!state.forceExit) {
         if (refreshUsers(backend, state)) {
@@ -1005,13 +1040,19 @@ void renderBackendUnavailable(const std::string& message) {
 
 } // namespace
 
-void manage_users(USER& currentUser, frontend::BackendRuntime* backendRuntime) {
+void manage_users(
+    USER& currentUser,
+    frontend::BackendRuntime* backendRuntime,
+    tundraux::frontend::FrontendAuditSink* auditSink
+) {
     tundra_tui::set_title("User Management");
 
     if (backendRuntime == nullptr || backendRuntime->legacyDirect() ||
         backendRuntime->client() == nullptr || backendRuntime->sessionId().empty()) {
         renderBackendUnavailable("User management requires an active backend session.");
-        tundraux::audit::setCurrentUser(currentUser);
+        if (auditSink != nullptr) {
+            auditSink->setCurrentUser(frontend::ShellUser{currentUser.type, currentUser.name, "", currentUser.count});
+        }
         return;
     }
 
@@ -1019,12 +1060,20 @@ void manage_users(USER& currentUser, frontend::BackendRuntime* backendRuntime) {
     UserManagerBackend backend{*backendRuntime->client(), sessionId};
     ConsoleScreenGuard screenGuard;
     UserManagerState state;
+    state.auditSink = auditSink;
     if (!refreshUsers(backend, state)) {
         handleTerminalBackendFailure(backend, state, currentUser, state.lastBackendErrorCode, "Unable to list users.");
     }
     if (state.forceExit) {
         backendRuntime->setSessionId(sessionId);
-        tundraux::audit::setCurrentUser(currentUser);
+        if (state.auditSink != nullptr) {
+            state.auditSink->setCurrentUser(frontend::ShellUser{
+                currentUser.type,
+                currentUser.name,
+                "",
+                currentUser.count
+            });
+        }
         return;
     }
 
@@ -1048,5 +1097,12 @@ void manage_users(USER& currentUser, frontend::BackendRuntime* backendRuntime) {
     }
 
     backendRuntime->setSessionId(sessionId);
-    tundraux::audit::setCurrentUser(currentUser);
+    if (state.auditSink != nullptr) {
+        state.auditSink->setCurrentUser(frontend::ShellUser{
+            currentUser.type,
+            currentUser.name,
+            "",
+            currentUser.count
+        });
+    }
 }

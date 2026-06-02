@@ -526,14 +526,22 @@ add_test(NAME explorer_open_tests COMMAND explorer_open_tests)
 add_executable(command_registry_tests
     tests/command_registry_tests.cpp
     APP/shell/commandRegistry.cpp
+    APP/shell/commandReg.cpp
 )
 
 target_include_directories(command_registry_tests
     PRIVATE
+        ${PROJECT_SOURCE_DIR}/APP
         ${PROJECT_SOURCE_DIR}/APP/backend_client
         ${PROJECT_SOURCE_DIR}/APP/shell
+        ${PROJECT_SOURCE_DIR}/TundraTUI/include/TundraTUI
         ${PROJECT_SOURCE_DIR}/SYSTEM/debug
         ${PROJECT_SOURCE_DIR}/USER/udata
+)
+
+target_link_libraries(command_registry_tests
+    PRIVATE
+        TundraTUI::TundraTUI
 )
 
 target_compile_features(command_registry_tests

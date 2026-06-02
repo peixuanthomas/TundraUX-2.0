@@ -1,6 +1,6 @@
 #include "tux_editor.hpp"
 
-#include "audit_log.hpp"
+#include "backend_facade.hpp"
 #include "editor.hpp"
 #include "udata.hpp"
 
@@ -117,11 +117,19 @@ void writeEncryptedString(std::ofstream& out, const std::string& data) {
     out.write(encrypted.data(), static_cast<std::streamsize>(encrypted.size()));
 }
 
-void setAuditUser(const std::string& username, const std::string& usertype) {
-    tundraux::audit::setCurrentUser(USER{usertype, username, "", "", 0});
+void setAuditUser(
+    tundraux::frontend::FrontendAuditSink* auditSink,
+    const std::string& username,
+    const std::string& usertype
+) {
+    if (auditSink == nullptr) {
+        return;
+    }
+    auditSink->setCurrentUser({usertype, username, "", 0});
 }
 
 void logTuxOperation(
+    tundraux::frontend::FrontendAuditSink* auditSink,
     const std::string& username,
     const std::string& usertype,
     const std::string& operation,
@@ -129,12 +137,14 @@ void logTuxOperation(
     const std::string& path,
     const std::string& reason = ""
 ) {
-    setAuditUser(username, usertype);
+    setAuditUser(auditSink, username, usertype);
     std::string detail = operation + " " + status + " path=" + path;
     if (!reason.empty()) {
         detail += " reason=" + reason;
     }
-    tundraux::audit::logEvent("tux", detail);
+    if (auditSink != nullptr) {
+        auditSink->logEvent("tux", detail);
+    }
 }
 
 std::filesystem::path createUniqueEditorTempDir(std::error_code& error) {
@@ -340,30 +350,31 @@ int open_tux_file_in_editor(
     const std::string& displayName,
     const std::string& currentUsername,
     const std::string& currentUsertype,
-    bool allowReadOnly
+    bool allowReadOnly,
+    tundraux::frontend::FrontendAuditSink* auditSink
 ) {
     if (!std::filesystem::exists(tuxPath)) {
-        logTuxOperation(currentUsername, currentUsertype, "edit", "failure", tuxPath, "not found");
+        logTuxOperation(auditSink, currentUsername, currentUsertype, "edit", "failure", tuxPath, "not found");
         return 1;
     }
 
     bool readOk = false;
     auto [oldContent, metadata] = readFullTuxFile(tuxPath, readOk);
     if (!readOk) {
-        logTuxOperation(currentUsername, currentUsertype, "edit", "failure", tuxPath, "corrupted file");
+        logTuxOperation(auditSink, currentUsername, currentUsertype, "edit", "failure", tuxPath, "corrupted file");
         return 2;
     }
 
     const bool canModify = canModifyTuxMetadata(metadata, currentUsername, currentUsertype);
     if (!canModify && !allowReadOnly) {
-        logTuxOperation(currentUsername, currentUsertype, "edit", "denied", tuxPath, "cannot modify");
+        logTuxOperation(auditSink, currentUsername, currentUsertype, "edit", "denied", tuxPath, "cannot modify");
         return 3;
     }
 
     std::error_code error;
     const std::filesystem::path tempDir = createUniqueEditorTempDir(error);
     if (error) {
-        logTuxOperation(currentUsername, currentUsertype, "edit", "failure", tuxPath, "failed to create temp directory");
+        logTuxOperation(auditSink, currentUsername, currentUsertype, "edit", "failure", tuxPath, "failed to create temp directory");
         return 4;
     }
     ScopedTuxTempFiles tempCleanup(tempDir);
@@ -383,7 +394,7 @@ int open_tux_file_in_editor(
     const std::filesystem::path tempPath = tempDir / (name + ".txt");
     tempCleanup.add(tempPath);
     if (!writeTempFile(tempPath, oldContent)) {
-        logTuxOperation(currentUsername, currentUsertype, "edit", "failure", tuxPath, "failed to create temp file");
+        logTuxOperation(auditSink, currentUsername, currentUsertype, "edit", "failure", tuxPath, "failed to create temp file");
         return 5;
     }
 
@@ -391,7 +402,7 @@ int open_tux_file_in_editor(
 
     std::string newContent;
     if (!readTempFile(tempPath, newContent)) {
-        logTuxOperation(currentUsername, currentUsertype, "edit", "failure", tuxPath, "failed to read temp file");
+        logTuxOperation(auditSink, currentUsername, currentUsertype, "edit", "failure", tuxPath, "failed to read temp file");
         return 6;
     }
 
@@ -399,10 +410,10 @@ int open_tux_file_in_editor(
         metadata.lastEditor = currentUsername;
         metadata.modifyTime = std::chrono::system_clock::to_time_t(std::chrono::system_clock::now());
         if (!writeTuxFile(tuxPath, newContent, metadata)) {
-            logTuxOperation(currentUsername, currentUsertype, "edit", "failure", tuxPath, "write failed");
+            logTuxOperation(auditSink, currentUsername, currentUsertype, "edit", "failure", tuxPath, "write failed");
             return 8;
         }
-        logTuxOperation(currentUsername, currentUsertype, "edit", "success", tuxPath);
+        logTuxOperation(auditSink, currentUsername, currentUsertype, "edit", "success", tuxPath);
     }
 
     return canModify ? editorResult : 7;

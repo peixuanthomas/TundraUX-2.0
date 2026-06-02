@@ -6,17 +6,26 @@
 #include <iostream>
 #include <sstream>
 #include <string>
+#include <memory>
 #include <unordered_set>
 #include <vector>
 
 #include <TundraTUI/input.hpp>
 
-#include "audit_log.hpp"
+#include "backend_facade.hpp"
 #include "backend_runtime.hpp"
 #include "color.hpp"
 #include "commandHandlers.hpp"
 #include "commandReg.hpp"
+#include "command_key_audit.hpp"
 #include "udata.hpp"
+
+namespace tundraux::audit {
+void initialize();
+void setCurrentUser(const USER& user);
+void logEvent(const std::string& category, const std::string& detail);
+void logKeyPress(const tundra_tui::KeyPress& key, bool sensitive);
+}
 
 #ifndef TUNDRAUX_DEFAULT_USER_TYPE                    //This default type is set in cmakelists.txt.
 #define TUNDRAUX_DEFAULT_USER_TYPE "guest"
@@ -36,6 +45,51 @@ bool isLikelyCmd(const std::string& input);
 bool canRunSystemCommand(const USER& currentUser) {
     return currentUser.type == "admin" || currentUser.type == "debug";
 }
+
+namespace {
+class LegacyAuditSink : public tundraux::frontend::FrontendAuditSink {
+public:
+    void setCurrentUser(const tundraux::frontend::ShellUser& user) override {
+        tundraux::audit::setCurrentUser(USER{
+            user.type,
+            user.name,
+            "",
+            user.passwordHint,
+            user.failedCount
+        });
+    }
+
+    tundraux::frontend::FacadeResult logEvent(
+        const std::string& category,
+        const std::string& detail
+    ) override {
+        tundraux::audit::logEvent(category, detail);
+        return {true, "", ""};
+    }
+
+    tundraux::frontend::FacadeResult logKeyPress(
+        const std::string& key,
+        bool sensitive
+    ) override {
+        tundra_tui::KeyPress keyPress = tundraux::frontend::keyPressFromFrontendAuditText(key);
+        tundraux::audit::logKeyPress(keyPress, sensitive);
+        return {true, "", ""};
+    }
+};
+
+tundraux::frontend::FrontendAuditSink* g_commandKeyAuditSink = nullptr;
+
+void dispatchCommandKeyAudit(
+    const tundra_tui::KeyPress& key,
+    bool sensitive
+) {
+    if (g_commandKeyAuditSink == nullptr) {
+        return;
+    }
+    const std::string keyText = tundraux::frontend::toFrontendAuditKeyText(key);
+    g_commandKeyAuditSink->logKeyPress(keyText, sensitive);
+}
+} // namespace
 
 bool usesBackendRuntime(tundraux::frontend::BackendRuntime* backendRuntime) {
     return backendRuntime != nullptr && !backendRuntime->legacyDirect();
@@ -61,15 +115,44 @@ USER shellUserFromBackend(const tundraux::frontend::FrontendUser& user) {
     };
 }
 
+void setAuditCurrentUser(
+    tundraux::frontend::FrontendAuditSink* auditSink,
+    const USER& currentUser
+) {
+    if (auditSink == nullptr) {
+        return;
+    }
+    auditSink->setCurrentUser({
+        currentUser.type,
+        currentUser.name,
+        "",
+        currentUser.count
+    });
+}
+
+void logAuditEvent(
+    tundraux::frontend::FrontendAuditSink* auditSink,
+    const USER& currentUser,
+    const std::string& category,
+    const std::string& detail
+) {
+    if (auditSink == nullptr) {
+        return;
+    }
+    setAuditCurrentUser(auditSink, currentUser);
+    auditSink->logEvent(category, detail);
+}
+
 bool syncSystemCommandUserFromBackend(
     USER& currentUser,
     tundraux::frontend::BackendRuntime& backendRuntime,
+    tundraux::frontend::FrontendAuditSink* auditSink,
     std::string& denyMessage
 ) {
     auto* client = backendRuntime.client();
     if (client == nullptr) {
         currentUser = guestShellUser();
-        tundraux::audit::setCurrentUser(currentUser);
+        setAuditCurrentUser(auditSink, currentUser);
         denyMessage = "Backend unavailable.";
         return false;
     }
@@ -78,7 +161,7 @@ bool syncSystemCommandUserFromBackend(
         const auto guestSession = client->startGuestSession();
         if (!guestSession.ok) {
             currentUser = guestShellUser();
-            tundraux::audit::setCurrentUser(currentUser);
+            setAuditCurrentUser(auditSink, currentUser);
             denyMessage = guestSession.errorCode == "TransportError"
                 ? "Backend unavailable."
                 : "Backend session unavailable.";
@@ -86,13 +169,13 @@ bool syncSystemCommandUserFromBackend(
         }
         backendRuntime.setSessionId(guestSession.value.sessionId);
         currentUser = shellUserFromBackend(guestSession.value.user);
-        tundraux::audit::setCurrentUser(currentUser);
+        setAuditCurrentUser(auditSink, currentUser);
     }
 
     const auto profileResult = client->currentProfile(backendRuntime.sessionId());
     if (profileResult.ok) {
         currentUser = shellUserFromBackend(profileResult.value);
-        tundraux::audit::setCurrentUser(currentUser);
+        setAuditCurrentUser(auditSink, currentUser);
         denyMessage = "Access Denied.";
         return canRunSystemCommand(currentUser);
     }
@@ -105,13 +188,13 @@ bool syncSystemCommandUserFromBackend(
         } else {
             currentUser = guestShellUser();
         }
-        tundraux::audit::setCurrentUser(currentUser);
+        setAuditCurrentUser(auditSink, currentUser);
         denyMessage = "Backend session expired.";
         return false;
     }
 
     currentUser = guestShellUser();
-    tundraux::audit::setCurrentUser(currentUser);
+    setAuditCurrentUser(auditSink, currentUser);
     denyMessage = profileResult.errorCode == "PermissionDenied"
         ? "Access Denied."
         : "Unable to verify backend identity.";
@@ -127,9 +210,36 @@ bool redrawsShellHeader(const std::string& input) {
 }
 
 void task_main(tundraux::frontend::BackendRuntime* backendRuntime) {
+    std::unique_ptr<tundraux::frontend::BackendFacade> backendFacade;
+    std::unique_ptr<tundraux::frontend::BackendAuditSink> backendAuditSink;
+    std::unique_ptr<LegacyAuditSink> legacyAuditSink;
+    tundraux::frontend::FrontendAuditSink* auditSink = nullptr;
+    if (backendRuntime != nullptr) {
+        backendFacade = std::make_unique<tundraux::frontend::BackendFacade>(*backendRuntime);
+        if (!backendRuntime->legacyDirect() && backendFacade->active()) {
+            backendAuditSink = std::make_unique<tundraux::frontend::BackendAuditSink>(*backendFacade);
+            auditSink = backendAuditSink.get();
+        } else {
+            legacyAuditSink = std::make_unique<LegacyAuditSink>();
+            auditSink = legacyAuditSink.get();
+            tundraux::audit::initialize();
+        }
+    } else {
+        legacyAuditSink = std::make_unique<LegacyAuditSink>();
+        auditSink = legacyAuditSink.get();
+        tundraux::audit::initialize();
+    }
+
     renderShellHeader();
-    tundraux::audit::initialize();
-    tundra_tui::setKeyAuditSink(tundraux::audit::logKeyPress);
+    if (auditSink != nullptr) {
+        g_commandKeyAuditSink = auditSink;
+        tundra_tui::setKeyAuditSink([](const tundra_tui::KeyPress& key, bool sensitive) {
+            dispatchCommandKeyAudit(key, sensitive);
+        });
+    } else {
+        g_commandKeyAuditSink = nullptr;
+        tundra_tui::setKeyAuditSink(tundraux::audit::logKeyPress);
+    }
 
     USER currentUser = {
         TUNDRAUX_DEFAULT_USER_TYPE,
@@ -138,16 +248,16 @@ void task_main(tundraux::frontend::BackendRuntime* backendRuntime) {
         "",
         0
     };
-    tundraux::audit::setCurrentUser(currentUser);
+    setAuditCurrentUser(auditSink, currentUser);
 
-    std::vector<RegisteredCommand> registeredCommands = buildNewCommandRegistry(currentUser, backendRuntime);
+    std::vector<RegisteredCommand> registeredCommands = buildNewCommandRegistry(currentUser, backendRuntime, auditSink);
     std::vector<std::string> commandHistory;
     int historyIndex = -1;
     const int MAX_HISTORY = 100;
     bool shellHeaderWasJustRendered = true;
 
     while (true) {
-        tundraux::audit::setCurrentUser(currentUser);
+        setAuditCurrentUser(auditSink, currentUser);
         if (shellHeaderWasJustRendered) {
             shellHeaderWasJustRendered = false;
         } else {
@@ -168,7 +278,7 @@ void task_main(tundraux::frontend::BackendRuntime* backendRuntime) {
         if (input.empty()) {
             continue;
         }
-        tundraux::audit::logEvent("shell", "input " + input);
+        logAuditEvent(auditSink, currentUser, "shell", "input " + input);
 
         if (commandHistory.empty() || commandHistory.back() != input) {
             if (static_cast<int>(commandHistory.size()) >= MAX_HISTORY) {
@@ -181,19 +291,19 @@ void task_main(tundraux::frontend::BackendRuntime* backendRuntime) {
         if (input.length() > 1 && input[0] == '/') {
             if (usesBackendRuntime(backendRuntime)) {
                 std::string denyMessage;
-                if (!syncSystemCommandUserFromBackend(currentUser, *backendRuntime, denyMessage)) {
-                    tundraux::audit::logEvent("shell", "system denied backend");
+                if (!syncSystemCommandUserFromBackend(currentUser, *backendRuntime, auditSink, denyMessage)) {
+                    logAuditEvent(auditSink, currentUser, "shell", "system denied backend");
                     colorcout("red", denyMessage + "\n");
                     continue;
                 }
             }
 
             if (!canRunSystemCommand(currentUser)) {
-                tundraux::audit::logEvent("shell", "system denied");
+                logAuditEvent(auditSink, currentUser, "shell", "system denied");
                 colorcout("red", "Access Denied.\n");
                 continue;
             }
-            tundraux::audit::logEvent("shell", "system execute");
+            logAuditEvent(auditSink, currentUser, "shell", "system execute");
             std::string command = input.substr(1);
             colorcout("yellow", "=== Executing: " + command + " ===\n");
             int result = system(command.c_str());
@@ -209,7 +319,7 @@ void task_main(tundraux::frontend::BackendRuntime* backendRuntime) {
         }
 
         const bool commandRedrawsShellHeader = redrawsShellHeader(input);
-        if (tryExecuteRegisteredCommand(input, registeredCommands, currentUser)) {
+        if (tryExecuteRegisteredCommand(input, registeredCommands, currentUser, auditSink)) {
             shellHeaderWasJustRendered = commandRedrawsShellHeader;
             continue;
         }

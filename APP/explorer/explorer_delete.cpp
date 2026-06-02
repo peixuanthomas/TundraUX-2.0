@@ -1,12 +1,12 @@
 #include "explorer_delete.hpp"
 
-#include "audit_log.hpp"
 #include "explorer_backend.hpp"
 #include "explorer_directory.hpp"
 #include "explorer_navigation.hpp"
 #include "explorer_permissions.hpp"
 #include "explorer_style.hpp"
 #include "explorer_text.hpp"
+#include "backend_facade.hpp"
 
 #include <string>
 #include <system_error>
@@ -15,7 +15,18 @@ namespace tundraux::explorer {
 namespace {
 
 void setAuditUser(const ExplorerState& state) {
-    tundraux::audit::setCurrentUser(USER{state.usertype, state.username, "", "", 0});
+    if (state.audit == nullptr) {
+        return;
+    }
+    state.audit->setCurrentUser({state.usertype, state.username, "", 0});
+}
+
+void logAuditEvent(const ExplorerState& state, const std::string& category, const std::string& detail) {
+    if (state.audit == nullptr) {
+        return;
+    }
+    setAuditUser(state);
+    state.audit->logEvent(category, detail);
 }
 
 }
@@ -31,8 +42,8 @@ void requestDelete(ExplorerState& state) {
     if (!permissionError.empty()) {
         state.pendingDelete = false;
         state.message = redMessage(permissionError);
-        setAuditUser(state);
-        tundraux::audit::logEvent(
+        logAuditEvent(
+            state,
             "explorer",
             "delete denied path=" + pathToDisplayString(entry->path) + " reason=" + permissionError
         );
@@ -55,8 +66,8 @@ void confirmDelete(ExplorerState& state) {
     if (!isPathInsideRoot(target, state.rootPath)) {
         state.pendingDelete = false;
         state.message = redMessage("Cannot delete outside explorer root.");
-        setAuditUser(state);
-        tundraux::audit::logEvent(
+        logAuditEvent(
+            state,
             "explorer",
             "delete denied path=" + pathToDisplayString(target) + " reason=outside root"
         );
@@ -78,8 +89,8 @@ void confirmDelete(ExplorerState& state) {
         const auto result = state.backend->deletePath(explorerRelativePath(state.rootPath, target), entry.isDirectory);
         if (!result.ok || !result.value) {
             state.message = redMessage(result.message);
-            setAuditUser(state);
-            tundraux::audit::logEvent(
+            logAuditEvent(
+                state,
                 "explorer",
                 "delete failure path=" + pathToDisplayString(target) + " reason=" + result.message
             );
@@ -96,8 +107,7 @@ void confirmDelete(ExplorerState& state) {
         state.pendingDelete = false;
         refresh(state);
         state.message = "Deleted " + deletedName;
-        setAuditUser(state);
-        tundraux::audit::logEvent("explorer", "delete success path=" + pathToDisplayString(target));
+        logAuditEvent(state, "explorer", "delete success path=" + pathToDisplayString(target));
         return;
     }
 
@@ -106,8 +116,8 @@ void confirmDelete(ExplorerState& state) {
         state.pendingDelete = false;
         refresh(state);
         state.message = "Delete skipped: item no longer exists";
-        setAuditUser(state);
-        tundraux::audit::logEvent(
+        logAuditEvent(
+            state,
             "explorer",
             "delete failure path=" + pathToDisplayString(target) + " reason=missing"
         );
@@ -120,8 +130,8 @@ void confirmDelete(ExplorerState& state) {
     entry.isDirectory = fs::is_directory(target, error);
     if (error) {
         state.message = redMessage("Delete failed: " + error.message());
-        setAuditUser(state);
-        tundraux::audit::logEvent(
+        logAuditEvent(
+            state,
             "explorer",
             "delete failure path=" + pathToDisplayString(target) + " reason=" + error.message()
         );
@@ -132,8 +142,8 @@ void confirmDelete(ExplorerState& state) {
     if (!permissionError.empty()) {
         state.pendingDelete = false;
         state.message = redMessage(permissionError);
-        setAuditUser(state);
-        tundraux::audit::logEvent(
+        logAuditEvent(
+            state,
             "explorer",
             "delete denied path=" + pathToDisplayString(target) + " reason=" + permissionError
         );
@@ -148,8 +158,8 @@ void confirmDelete(ExplorerState& state) {
 
     if (error) {
         state.message = redMessage("Delete failed: " + error.message());
-        setAuditUser(state);
-        tundraux::audit::logEvent(
+        logAuditEvent(
+            state,
             "explorer",
             "delete failure path=" + pathToDisplayString(target) + " reason=" + error.message()
         );
@@ -166,8 +176,7 @@ void confirmDelete(ExplorerState& state) {
     state.pendingDelete = false;
     refresh(state);
     state.message = "Deleted " + deletedName;
-    setAuditUser(state);
-    tundraux::audit::logEvent("explorer", "delete success path=" + pathToDisplayString(target));
+    logAuditEvent(state, "explorer", "delete success path=" + pathToDisplayString(target));
 }
 
 }
