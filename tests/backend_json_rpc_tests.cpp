@@ -3,18 +3,24 @@
 #include "file_service.hpp"
 #include "file_store.hpp"
 #include "session_service.hpp"
+#include "audit_service.hpp"
 #include "tux_service.hpp"
 #include "tux_store.hpp"
 #include "user_service.hpp"
 #include "user_store.hpp"
 
 #include <algorithm>
+#include <chrono>
 #include <cmath>
+#include <filesystem>
 #include <iostream>
 #include <limits>
 #include <locale>
 #include <map>
+#include <functional>
 #include <stdexcept>
+#include <system_error>
+#include <thread>
 #include <string>
 #include <utility>
 #include <vector>
@@ -249,6 +255,33 @@ bool expectNoErrorResponse(const std::string& response, const std::string& expec
     return expect(object.at("id").asString() == expectedId, label + " response id mismatch") &&
         expect(object.find("error") == object.end(), label + " should not return error: " + response);
 }
+
+std::filesystem::path uniqueTempPath(const std::string& label) {
+    const auto ticks = std::chrono::high_resolution_clock::now().time_since_epoch().count();
+    const auto threadId = std::hash<std::thread::id>{}(std::this_thread::get_id());
+    return std::filesystem::temp_directory_path() /
+        ("tundraux_backend_json_rpc_audit_" + label + "_" + std::to_string(ticks) + "_" + std::to_string(threadId));
+}
+
+class ScopedDirectory {
+public:
+    explicit ScopedDirectory(std::filesystem::path path) : path_(std::move(path)) {
+        std::filesystem::remove_all(path_);
+        std::filesystem::create_directories(path_);
+    }
+
+    ~ScopedDirectory() {
+        std::error_code error;
+        std::filesystem::remove_all(path_, error);
+    }
+
+    const std::filesystem::path& path() const {
+        return path_;
+    }
+
+private:
+    std::filesystem::path path_;
+};
 
 bool runCommaLocaleNumberTest() {
     using tundraux::backend::JsonValue;
@@ -775,6 +808,141 @@ bool runDispatcherWithoutFileServiceTest() {
     if (!expect(file.value.asObject().at("id").asString() == "2", "two-arg file response id mismatch")) return false;
     if (!expect(file.value.asObject().at("error").asObject().at("code").asString() == "UnknownMethod", "two-arg file code mismatch")) return false;
 
+    const std::string auditResponse = dispatcher.handleLine(
+        R"({"id":"3","method":"audit.readTlog","params":{"sessionId":")" + sessionId + R"(","path":"audit.tlog"}})"
+    );
+    const auto audit = parseJson(auditResponse);
+    if (!expect(audit.ok, "two-arg audit response should parse: " + auditResponse)) return false;
+    if (!expect(audit.value.asObject().at("id").asString() == "3", "two-arg audit response id mismatch")) return false;
+    if (!expect(
+            audit.value.asObject().at("error").asObject().at("code").asString() == "UnknownMethod",
+            "two-arg audit method should be unknown"
+    )) return false;
+
+    return true;
+}
+
+bool runDispatcherAuditMethodsTest() {
+    using tundraux::backend::AuditService;
+    using tundraux::backend::FileService;
+    using tundraux::backend::JsonRpcDispatcher;
+    using tundraux::backend::SessionService;
+    using tundraux::backend::TuxService;
+    using tundraux::backend::UserService;
+    using tundraux::backend::parseJson;
+
+    InMemoryUserStore store;
+    store.strictMode = true;
+    SessionService sessions(store);
+    UserService users(store, sessions);
+    InMemoryFileStore fileStore;
+    FileService files(fileStore, sessions, store);
+    InMemoryTuxStore tuxStore;
+    TuxService tux(tuxStore, sessions, store);
+    ScopedDirectory logs(uniqueTempPath("dispatcher"));
+    AuditService audit(store, sessions, logs.path().string());
+    JsonRpcDispatcher dispatcher(sessions, users, files, tux, "", &audit);
+
+    const std::string guestResponse = dispatcher.handleLine(R"({"id":"1","method":"session.startGuestSession","params":{}})");
+    const auto guest = parseJson(guestResponse);
+    if (!expect(guest.ok, "audit method guest response should parse: " + guestResponse)) return false;
+    const auto guestObject = guest.value.asObject();
+    const auto guestResultEntry = guestObject.find("result");
+    if (!expect(guestResultEntry != guestObject.end(), "audit method guest should include result")) return false;
+    const auto guestSessionEntry = guestResultEntry->second.asObject().find("sessionId");
+    if (!expect(guestSessionEntry != guestResultEntry->second.asObject().end(), "audit method guest should include sessionId")) return false;
+    const std::string guestSessionId = guestSessionEntry->second.asString();
+
+    const std::string loginResponse = dispatcher.handleLine(
+        R"({"id":"2","method":"session.login","params":{"sessionId":")" + guestSessionId +
+        R"(","username":"alice","password":"Secret1"}})"
+    );
+    if (!expectNoErrorResponse(loginResponse, "2", "audit method login")) return false;
+    const auto parsedLogin = parseJson(loginResponse);
+    if (!expect(parsedLogin.ok, "audit method login response should re-parse")) return false;
+    const auto loginObject = parsedLogin.value.asObject();
+    const auto loginResult = loginObject.find("result") != loginObject.end() ? &loginObject.at("result").asObject() : nullptr;
+    if (!expect(loginResult != nullptr, "audit method login should include result")) return false;
+    const auto loginSessionEntry = loginResult->find("sessionId");
+    if (!expect(loginSessionEntry != loginResult->end(), "audit method login should include sessionId")) return false;
+    const std::string adminSessionId = loginSessionEntry->second.asString();
+
+    const std::string logResponse = dispatcher.handleLine(
+        R"({"id":"3","method":"audit.logEvent","params":{"sessionId":")" + adminSessionId +
+        R"(","category":"shell","detail":"shell command"}})"
+    );
+    if (!expectNoErrorResponse(logResponse, "3", "audit.logEvent")) return false;
+
+    const std::string keyResponse = dispatcher.handleLine(
+        R"({"id":"4","method":"audit.logKeyPress","params":{"sessionId":")" + adminSessionId +
+        R"(","key":"x","sensitive":true}})"
+    );
+    if (!expectNoErrorResponse(keyResponse, "4", "audit.logKeyPress")) return false;
+
+    const std::string readResponse = dispatcher.handleLine(
+        R"({"id":"5","method":"audit.readTlog","params":{"sessionId":")" + adminSessionId +
+        R"(","path":"audit.tlog"}})"
+    );
+    const auto read = parseJson(readResponse);
+    if (!expect(read.ok, "audit.readTlog response should parse: " + readResponse)) return false;
+    if (!expect(read.value.asObject().at("id").asString() == "5", "audit.readTlog response id mismatch")) return false;
+    const auto readObject = read.value.asObject();
+    if (!expect(readObject.find("result") != readObject.end(), "audit.readTlog should include result")) return false;
+    const auto& readResult = readObject.at("result").asObject();
+    const auto readLinesEntry = readResult.find("lines");
+    if (!expect(readLinesEntry != readResult.end(), "audit.readTlog should include lines")) return false;
+    const auto readLines = readLinesEntry->second.asArray();
+    if (!expect(readLines.size() == 2, "audit.readTlog should return two lines")) return false;
+    bool hasSanitized = false;
+    for (const auto& entry : readLines) {
+        if (entry.asString().find("Character [redacted]") != std::string::npos) {
+            hasSanitized = true;
+            break;
+        }
+    }
+    if (!expect(hasSanitized, "audit.readTlog should redact sensitive key presses")) return false;
+
+    const std::string exportResponse = dispatcher.handleLine(
+        R"({"id":"6","method":"audit.exportTlog","params":{"sessionId":")" + adminSessionId +
+        R"(","path":"audit.tlog"}})"
+    );
+    const auto exported = parseJson(exportResponse);
+    if (!expect(exported.ok, "audit.exportTlog response should parse: " + exportResponse)) return false;
+    if (!expect(exported.value.asObject().at("id").asString() == "6", "audit.exportTlog response id mismatch")) return false;
+    const auto exportObject = exported.value.asObject();
+    const auto exportResultEntry = exportObject.find("result");
+    if (!expect(exportResultEntry != exportObject.end(), "audit.exportTlog should include result")) return false;
+    const auto exportContentEntry = exportResultEntry->second.asObject().find("content");
+    if (!expect(exportContentEntry != exportResultEntry->second.asObject().end(), "audit.exportTlog should include content")) return false;
+    if (!expect(
+            exportContentEntry->second.asString().find("Character [redacted]") != std::string::npos,
+            "audit.exportTlog should include redacted key press detail"
+    )) return false;
+
+    const std::string deniedGuestResponse = dispatcher.handleLine(R"({"id":"7","method":"session.startGuestSession","params":{}})");
+    const auto deniedGuest = parseJson(deniedGuestResponse);
+    if (!expect(deniedGuest.ok, "guest read denial should start a guest session")) return false;
+    const auto deniedGuestObject = deniedGuest.value.asObject();
+    const auto deniedGuestResultEntry = deniedGuestObject.find("result");
+    if (!expect(deniedGuestResultEntry != deniedGuestObject.end(), "guest read denial should include result")) return false;
+    const auto deniedGuestSessionEntry = deniedGuestResultEntry->second.asObject().find("sessionId");
+    if (!expect(deniedGuestSessionEntry != deniedGuestResultEntry->second.asObject().end(), "guest read denial should include sessionId")) return false;
+    const std::string deniedGuestSessionId = deniedGuestSessionEntry->second.asString();
+
+    const std::string deniedResponse = dispatcher.handleLine(
+        R"({"id":"8","method":"audit.readTlog","params":{"sessionId":")" + deniedGuestSessionId +
+        R"(","path":"audit.tlog"}})"
+    );
+    const auto denied = parseJson(deniedResponse);
+    if (!expect(denied.ok, "guest audit.readTlog should parse: " + deniedResponse)) return false;
+    const auto deniedObject = denied.value.asObject();
+    if (!expect(deniedObject.find("error") != deniedObject.end(), "guest should receive audit.readTlog error")) return false;
+    const auto deniedError = deniedObject.at("error").asObject();
+    if (!expect(
+            deniedError.find("code") != deniedError.end() &&
+            deniedError.at("code").asString() == "PermissionDenied",
+            "guest should be denied audit.readTlog")) return false;
+
     return true;
 }
 
@@ -847,6 +1015,7 @@ int main() {
     if (!expect(runDispatcherFileMutationTest(), "json rpc file mutation behavior failed")) return 1;
     if (!expect(runDispatcherTuxMethodsTest(), "json rpc tux behavior failed")) return 1;
     if (!expect(runDispatcherWithoutFileServiceTest(), "json rpc dispatcher without file service behavior failed")) return 1;
+    if (!expect(runDispatcherAuditMethodsTest(), "json rpc audit methods behavior failed")) return 1;
 
     return 0;
 }

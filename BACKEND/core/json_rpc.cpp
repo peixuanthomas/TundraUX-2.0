@@ -150,29 +150,35 @@ JsonRpcDispatcher::JsonRpcDispatcher(
     UserService& users,
     FileService& files,
     TuxService& tux,
-    std::string debugSessionToken
+    std::string debugSessionToken,
+    AuditService* audit
 ) : sessions_(sessions),
     users_(users),
     files_(&files),
     tux_(&tux),
+    audit_(audit),
     debugSessionToken_(std::move(debugSessionToken)) {}
 
 JsonRpcDispatcher::JsonRpcDispatcher(
     SessionService& sessions,
     UserService& users,
     FileService& files,
-    std::string debugSessionToken
+    std::string debugSessionToken,
+    AuditService* audit
 ) : sessions_(sessions),
     users_(users),
     files_(&files),
+    audit_(audit),
     debugSessionToken_(std::move(debugSessionToken)) {}
 
 JsonRpcDispatcher::JsonRpcDispatcher(
     SessionService& sessions,
     UserService& users,
-    std::string debugSessionToken
+    std::string debugSessionToken,
+    AuditService* audit
 ) : sessions_(sessions),
     users_(users),
+    audit_(audit),
     debugSessionToken_(std::move(debugSessionToken)) {}
 
 std::string JsonRpcDispatcher::handleLine(const std::string& line) {
@@ -586,6 +592,52 @@ protocol::JsonValue JsonRpcDispatcher::dispatch(const std::string& method, const
             throwIfFailed(result.error);
         }
         return entriesToJson(result.value);
+    }
+
+    if (audit_ != nullptr && method == "audit.logEvent") {
+        const std::string sessionId = requiredStringParam(params, "sessionId");
+        const std::string category = requiredStringParam(params, "category");
+        const std::string detail = requiredStringParam(params, "detail");
+        const auto result = audit_->logEvent(sessionId, category, detail);
+        if (!result.ok) {
+            throwIfFailed(result.error);
+        }
+        return protocol::JsonValue::object({{"ok", protocol::JsonValue::boolean(true)}});
+    }
+
+    if (audit_ != nullptr && method == "audit.logKeyPress") {
+        const std::string sessionId = requiredStringParam(params, "sessionId");
+        const std::string key = requiredStringParam(params, "key");
+        const bool sensitive = requiredBoolParam(params, "sensitive");
+        const auto result = audit_->logKeyPress(sessionId, key, sensitive);
+        if (!result.ok) {
+            throwIfFailed(result.error);
+        }
+        return protocol::JsonValue::object({{"ok", protocol::JsonValue::boolean(true)}});
+    }
+
+    if (audit_ != nullptr && method == "audit.readTlog") {
+        const std::string sessionId = requiredStringParam(params, "sessionId");
+        const std::string path = requiredStringParam(params, "path");
+        const auto result = audit_->readTlog(sessionId, path);
+        if (!result.ok) {
+            throwIfFailed(result.error);
+        }
+        protocol::JsonValue::Array lines;
+        for (const auto& line : result.value.lines) {
+            lines.push_back(protocol::JsonValue::string(line));
+        }
+        return protocol::JsonValue::object({{"lines", protocol::JsonValue::array(std::move(lines))}});
+    }
+
+    if (audit_ != nullptr && method == "audit.exportTlog") {
+        const std::string sessionId = requiredStringParam(params, "sessionId");
+        const std::string path = requiredStringParam(params, "path");
+        const auto result = audit_->exportTlog(sessionId, path);
+        if (!result.ok) {
+            throwIfFailed(result.error);
+        }
+        return protocol::JsonValue::object({{"content", protocol::JsonValue::string(result.value.content)}});
     }
 
     throw RpcError(ErrorCode::UnknownMethod, "Unknown method.");

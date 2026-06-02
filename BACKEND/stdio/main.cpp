@@ -2,6 +2,7 @@
 #include "file_service.hpp"
 #include "filesystem_file_store.hpp"
 #include "filesystem_tux_store.hpp"
+#include "audit_service.hpp"
 #include "json_rpc.hpp"
 #include "session_service.hpp"
 #include "tux_service.hpp"
@@ -67,7 +68,8 @@ int main(int argc, char* argv[]) {
     tundraux::backend::FileService files(filesStore, sessions, usersStore);
     tundraux::backend::FilesystemTuxStore tuxStore(filesRoot);
     tundraux::backend::TuxService tux(tuxStore, sessions, usersStore);
-    tundraux::backend::JsonRpcDispatcher dispatcher(sessions, users, files, tux, debugSessionToken);
+    tundraux::backend::AuditService audit(usersStore, sessions, filesRoot + "/Logs");
+    tundraux::backend::JsonRpcDispatcher dispatcher(sessions, users, files, tux, debugSessionToken, &audit);
 
     std::string line;
     while (std::getline(std::cin, line)) {

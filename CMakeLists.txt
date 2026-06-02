@@ -82,6 +82,7 @@ target_compile_features(tundraux_protocol
 add_library(tundraux_backend_core
     BACKEND/core/file_service.cpp
     BACKEND/core/json_rpc.cpp
+    BACKEND/core/audit_service.cpp
     BACKEND/core/session_service.cpp
     BACKEND/core/tux_service.cpp
     BACKEND/core/user_service.cpp
@@ -192,6 +193,23 @@ target_compile_features(backend_file_service_tests
 )
 
 add_test(NAME backend_file_service_tests COMMAND backend_file_service_tests)
+
+add_executable(backend_audit_service_tests
+    tests/backend_audit_service_tests.cpp
+)
+
+target_link_libraries(backend_audit_service_tests
+    PRIVATE
+        tundraux_backend_core
+        tundraux_protocol
+)
+
+target_compile_features(backend_audit_service_tests
+    PRIVATE
+        cxx_std_17
+)
+
+add_test(NAME backend_audit_service_tests COMMAND backend_audit_service_tests)
 
 add_executable(tux_service_tests
     tests/tux_service_tests.cpp

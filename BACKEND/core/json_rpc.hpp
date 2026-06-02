@@ -5,6 +5,7 @@
 #include "session_service.hpp"
 #include "tux_service.hpp"
 #include "user_service.hpp"
+#include "audit_service.hpp"
 
 #include <string>
 
@@ -17,18 +18,21 @@ public:
         UserService& users,
         FileService& files,
         TuxService& tux,
-        std::string debugSessionToken = ""
+        std::string debugSessionToken = "",
+        AuditService* audit = nullptr
     );
     JsonRpcDispatcher(
         SessionService& sessions,
         UserService& users,
         FileService& files,
-        std::string debugSessionToken = ""
+        std::string debugSessionToken = "",
+        AuditService* audit = nullptr
     );
     JsonRpcDispatcher(
         SessionService& sessions,
         UserService& users,
-        std::string debugSessionToken = ""
+        std::string debugSessionToken = "",
+        AuditService* audit = nullptr
     );
 
     std::string handleLine(const std::string& line);
@@ -38,6 +42,7 @@ private:
     UserService& users_;
     FileService* files_ = nullptr;
     TuxService* tux_ = nullptr;
+    AuditService* audit_ = nullptr;
     std::string debugSessionToken_;
 
     JsonValue dispatch(const std::string& method, const JsonValue::Object& params);
