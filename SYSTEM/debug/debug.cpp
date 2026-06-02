@@ -18,6 +18,18 @@ namespace {
 constexpr size_t MAX_USER_COUNT = 10000;
 constexpr size_t MAX_USER_STRING_LENGTH = 1024 * 1024;
 
+bool usesBackend(bool backendMode) {
+    return backendMode;
+}
+
+void printBackendModeDisabledMessage(const char* command) {
+    colorcout(
+        "red",
+        std::string(command) +
+        " is unavailable in backend mode; use --legacy-direct for local file debugging.\n"
+    );
+}
+
 void print_display_test_line(const std::string& colorName) {
     colorcout(colorName, "Display test: " + colorName + "\n");
 }
@@ -156,7 +168,12 @@ void handleDisplayTestCommand(const std::string& input) {
     display_test(colorName);
 }
 
-void handleDebugCreateFileCommand(const std::string&) {
+void handleDebugCreateFileCommand(const std::string&, bool backendMode) {
+    if (usesBackend(backendMode)) {
+        printBackendModeDisabledMessage("dbg:createfile");
+        return;
+    }
+
     createfile();
     USER debuguser;
     debuguser.type = "admin";
@@ -178,11 +195,21 @@ void handleDebugHelloCommand(const std::string&) {
     hello();
 }
 
-void handleDebugDeleteFileCommand(const std::string&) {
+void handleDebugDeleteFileCommand(const std::string&, bool backendMode) {
+    if (usesBackend(backendMode)) {
+        printBackendModeDisabledMessage("dbg:deletefile");
+        return;
+    }
+
     delete_file();
 }
 
-void handleDebugStructFileCommand(const std::string&) {
+void handleDebugStructFileCommand(const std::string&, bool backendMode) {
+    if (usesBackend(backendMode)) {
+        printBackendModeDisabledMessage("dbg:structfile");
+        return;
+    }
+
     struct_file();
 }
 
@@ -190,7 +217,19 @@ void handleDebugEnvCommand(const std::string&) {
     dbg_env();
 }
 
-void handleDebugForceLoginCommand(const std::string& input, USER& currentUser) {
+void handleDebugForceLoginCommand(
+    const std::string& input,
+    USER& currentUser,
+    bool backendMode
+) {
+    if (usesBackend(backendMode)) {
+        colorcout(
+            "red",
+            "dbg:forcelogin is unavailable in backend mode; use --legacy-direct for local file debugging.\n"
+        );
+        return;
+    }
+
     std::istringstream iss(input);
     std::string cmd, username;
     iss >> cmd >> username;

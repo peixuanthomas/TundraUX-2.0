@@ -5,7 +5,6 @@
 #include <vector>
 
 namespace tundraux::frontend {
-namespace {
 
 ShellUser shellUserFromFrontendUser(const FrontendUser& user) {
     return {
@@ -15,6 +14,8 @@ ShellUser shellUserFromFrontendUser(const FrontendUser& user) {
         user.failedCount
     };
 }
+
+namespace {
 
 std::string defaultFailureMessage(const std::string& fallback, const std::string& backendMessage) {
     return backendMessage.empty() ? fallback : backendMessage;

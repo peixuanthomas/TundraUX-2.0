@@ -15,6 +15,7 @@
 
 #include "account_settings.hpp"
 #include "backend_facade.hpp"
+#include "user_conversion_compat.hpp"
 #include "backend_runtime.hpp"
 #include "build_info.hpp"
 #include "color.hpp"
@@ -230,21 +231,12 @@ bool usesBackend(tundraux::frontend::BackendRuntime* backendRuntime) {
     return backendRuntime != nullptr && !backendRuntime->legacyDirect();
 }
 
-tundraux::frontend::ShellUser shellUserFromUser(const USER& user) {
-    return {
-        user.type,
-        user.name,
-        user.password_hint,
-        user.count
-    };
-}
-
 void setAuditCurrentUser(
     tundraux::frontend::FrontendAuditSink* auditSink,
     const USER& currentUser
 ) {
     if (auditSink != nullptr) {
-        auditSink->setCurrentUser(shellUserFromUser(currentUser));
+        auditSink->setCurrentUser(tundraux::frontend::toShellUser(currentUser));
     }
 }
 
@@ -262,23 +254,7 @@ void logAuditEvent(
 }
 
 USER guestUser() {
-    return {
-        "guest",
-        "",
-        "",
-        "",
-        0
-    };
-}
-
-USER shellUserFromBackend(const tundraux::frontend::FrontendUser& user) {
-    return {
-        user.type,
-        user.name,
-        "",
-        "",
-        0
-    };
+    return tundraux::frontend::toLegacyUser(tundraux::frontend::ShellUser{"guest", "", "", 0});
 }
 
 std::string backendFailureMessage(
@@ -328,23 +304,6 @@ bool ensureBackendSession(tundraux::frontend::BackendRuntime& backendRuntime) {
     return true;
 }
 
-bool refreshBackendGuestSession(tundraux::frontend::BackendRuntime& backendRuntime) {
-    auto* client = backendRuntime.client();
-    if (client == nullptr) {
-        colorcout("red", "Backend unavailable.\n");
-        return false;
-    }
-
-    const auto guestSession = client->startGuestSession();
-    if (!guestSession.ok) {
-        colorcout("red", backendFailureMessage("Unable to start backend guest session.", guestSession.errorCode) + "\n");
-        return false;
-    }
-
-    backendRuntime.setSessionId(guestSession.value.sessionId);
-    return true;
-}
-
 void displayLocalWhoami(const USER& currentUser) {
     if (currentUser.name.empty()) {
         colorcout("yellow", "No user is currently logged in.\n");
@@ -364,37 +323,23 @@ void syncCurrentUserToGuest(
 bool syncCurrentUserFromBackend(
     USER& currentUser,
     tundraux::frontend::BackendRuntime& backendRuntime,
+    tundraux::frontend::BackendFacade& facade,
     tundraux::frontend::FrontendAuditSink* auditSink
 ) {
-    auto* client = backendRuntime.client();
-    if (client == nullptr || backendRuntime.sessionId().empty()) {
+    if (backendRuntime.client() == nullptr || backendRuntime.sessionId().empty()) {
         syncCurrentUserToGuest(currentUser, auditSink);
         return false;
     }
 
-    const auto profile = client->currentProfile(backendRuntime.sessionId());
+    const auto profile = facade.refreshProfile();
     if (profile.ok) {
-        currentUser = shellUserFromBackend(profile.value);
+        currentUser = tundraux::frontend::toLegacyUser(profile.value);
         setAuditCurrentUser(auditSink, currentUser);
         return true;
     }
 
     syncCurrentUserToGuest(currentUser, auditSink);
     return false;
-}
-
-void recoverBackendGuestSession(
-    USER& currentUser,
-    tundraux::frontend::BackendRuntime& backendRuntime,
-    tundraux::frontend::FrontendAuditSink* auditSink
-) {
-    backendRuntime.setSessionId("");
-    if (refreshBackendGuestSession(backendRuntime)) {
-        if (syncCurrentUserFromBackend(currentUser, backendRuntime, auditSink)) {
-            return;
-        }
-    }
-    syncCurrentUserToGuest(currentUser, auditSink);
 }
 }
 
@@ -432,7 +377,9 @@ void handleLoginCommand(
         }
 
         backendRuntime->setSessionId(result.value.sessionId);
-        currentUser = shellUserFromBackend(result.value.user);
+        currentUser = tundraux::frontend::toLegacyUser(
+            tundraux::frontend::shellUserFromFrontendUser(result.value.user)
+        );
         setAuditCurrentUser(auditSink, currentUser);
         logAuditEvent(auditSink, currentUser, "login", "backend success");
         rollcout("green", "Welcome, " + currentUser.name + "!");
@@ -550,7 +497,7 @@ void handleLogoutCommand(
         backendRuntime->setSessionId("");
         currentUser = guestUser();
         setAuditCurrentUser(auditSink, currentUser);
-        if (!refreshBackendGuestSession(*backendRuntime)) {
+        if (!ensureBackendSession(*backendRuntime)) {
             colorcout("yellow", "Logged out, but backend guest session recovery failed.\n");
             return;
         }
@@ -743,13 +690,17 @@ void handleWhoamiCommand(
         return;
     }
 
-    const auto result = client->currentProfile(backendRuntime->sessionId());
+    tundraux::frontend::BackendFacade facade(*backendRuntime);
+    const auto result = facade.refreshProfile();
     if (!result.ok) {
+        if (result.errorCode == "SessionExpired") {
+            syncCurrentUserToGuest(currentUser, auditSink);
+        }
         colorcout("yellow", backendFailureMessage("Unable to query backend session.", result.errorCode) + "\n");
         return;
     }
 
-    currentUser = shellUserFromBackend(result.value);
+    currentUser = tundraux::frontend::toLegacyUser(result.value);
     setAuditCurrentUser(auditSink, currentUser);
     displayLocalWhoami(currentUser);
 }
@@ -783,16 +734,13 @@ void handleStrictCommand(
             return;
         }
 
-        syncCurrentUserFromBackend(currentUser, *backendRuntime, auditSink);
+        tundraux::frontend::BackendFacade facade(*backendRuntime);
+        (void)syncCurrentUserFromBackend(currentUser, *backendRuntime, facade, auditSink);
 
         if (action.empty() || action == "status") {
-            const auto strictResult = client->getStrictMode(backendRuntime->sessionId());
+            const auto strictResult = facade.getStrictMode();
             if (!strictResult.ok) {
-                if (strictResult.errorCode == "SessionExpired") {
-                    recoverBackendGuestSession(currentUser, *backendRuntime, auditSink);
-                } else if (strictResult.errorCode == "PermissionDenied") {
-                    syncCurrentUserFromBackend(currentUser, *backendRuntime, auditSink);
-                }
+                (void)syncCurrentUserFromBackend(currentUser, *backendRuntime, facade, auditSink);
                 colorcout("yellow", backendFailureMessage("Unable to query strict mode.", strictResult.errorCode) + "\n");
                 return;
             }
@@ -808,13 +756,9 @@ void handleStrictCommand(
         }
 
         const bool enabled = action == "on";
-        const auto setResult = client->setStrictMode(backendRuntime->sessionId(), enabled);
+        const auto setResult = facade.setStrictMode(enabled);
         if (!setResult.ok) {
-            if (setResult.errorCode == "SessionExpired") {
-                recoverBackendGuestSession(currentUser, *backendRuntime, auditSink);
-            } else if (setResult.errorCode == "PermissionDenied") {
-                syncCurrentUserFromBackend(currentUser, *backendRuntime, auditSink);
-            }
+            (void)syncCurrentUserFromBackend(currentUser, *backendRuntime, facade, auditSink);
             colorcout("red", backendFailureMessage("Failed to update strict mode.", setResult.errorCode) + "\n");
             return;
         }

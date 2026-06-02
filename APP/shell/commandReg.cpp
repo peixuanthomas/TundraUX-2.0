@@ -6,6 +6,7 @@
 #include <sstream>
 
 #include "backend_facade.hpp"
+#include "user_conversion_compat.hpp"
 #include "color.hpp"
 
 namespace {
@@ -91,23 +92,13 @@ bool tryExecuteRegisteredCommand(
 
         if (!hasCommandPermission(cmd.requiredUserType, currentUser.type)) {
             if (auditSink != nullptr) {
-                auditSink->setCurrentUser(tundraux::frontend::ShellUser{
-                    currentUser.type,
-                    currentUser.name,
-                    "",
-                    currentUser.count
-                });
+                auditSink->setCurrentUser(tundraux::frontend::toShellUser(currentUser));
                 auditSink->logEvent("command", "denied " + inputCommand);
             }
             colorcout("red", "Access Denied.\n");
         } else {
             if (auditSink != nullptr) {
-                auditSink->setCurrentUser(tundraux::frontend::ShellUser{
-                    currentUser.type,
-                    currentUser.name,
-                    "",
-                    currentUser.count
-                });
+                auditSink->setCurrentUser(tundraux::frontend::toShellUser(currentUser));
                 auditSink->logEvent("command", "execute " + inputCommand);
             }
 

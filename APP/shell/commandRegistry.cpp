@@ -9,6 +9,8 @@ std::vector<RegisteredCommand> buildNewCommandRegistry(
     tundraux::frontend::BackendRuntime* backendRuntime,
     tundraux::frontend::FrontendAuditSink* auditSink
 ) {
+    const bool backendMode = backendRuntime != nullptr && !backendRuntime->legacyDirect();
+
     return {
         {
             "help",
@@ -181,7 +183,9 @@ std::vector<RegisteredCommand> buildNewCommandRegistry(
             "dbg:createfile",
             "Create user data file",
             {},
-            handleDebugCreateFileCommand,
+            [backendMode](const std::string& input) {
+                handleDebugCreateFileCommand(input, backendMode);
+            },
             "debug",
             true
         },
@@ -199,7 +203,9 @@ std::vector<RegisteredCommand> buildNewCommandRegistry(
             "dbg:deletefile",
             "Delete debug file",
             {},
-            handleDebugDeleteFileCommand,
+            [backendMode](const std::string& input) {
+                handleDebugDeleteFileCommand(input, backendMode);
+            },
             "debug",
             true
         },
@@ -208,7 +214,9 @@ std::vector<RegisteredCommand> buildNewCommandRegistry(
             "dbg:structfile",
             "Show file structure debug output",
             {},
-            handleDebugStructFileCommand,
+            [backendMode](const std::string& input) {
+                handleDebugStructFileCommand(input, backendMode);
+            },
             "debug",
             true
         },
@@ -236,7 +244,9 @@ std::vector<RegisteredCommand> buildNewCommandRegistry(
             "dbg:forcelogin <username>",
             "Force login as a user",
             {},
-            [&currentUser](const std::string& input) { handleDebugForceLoginCommand(input, currentUser); },
+            [&currentUser, backendMode](const std::string& input) {
+                handleDebugForceLoginCommand(input, currentUser, backendMode);
+            },
             "debug",
             true,
             true

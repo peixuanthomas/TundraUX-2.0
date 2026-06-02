@@ -48,6 +48,8 @@ private:
     BackendRuntime& runtime_;
 };
 
+ShellUser shellUserFromFrontendUser(const FrontendUser& user);
+
 class BackendAuditSink : public FrontendAuditSink {
 public:
     explicit BackendAuditSink(BackendFacade& facade) : facade_(facade) {}

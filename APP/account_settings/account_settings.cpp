@@ -3,6 +3,7 @@
 #include "backend_facade.hpp"
 #include "backend_client.hpp"
 #include "backend_runtime.hpp"
+#include "user_conversion_compat.hpp"
 
 #include <algorithm>
 #include <cctype>
@@ -30,15 +31,6 @@ using tundra_tui::KeyPress;
 using tundra_tui::readKey;
 using tundra_tui::set_title;
 
-tundraux::frontend::ShellUser shellUserFromUser(const USER& user) {
-    return {
-        user.type,
-        user.name,
-        "",
-        user.count
-    };
-}
-
 void setAuditCurrentUser(
     tundraux::frontend::FrontendAuditSink* auditSink,
     const USER& currentUser
@@ -46,7 +38,7 @@ void setAuditCurrentUser(
     if (auditSink == nullptr) {
         return;
     }
-    auditSink->setCurrentUser(shellUserFromUser(currentUser));
+    auditSink->setCurrentUser(tundraux::frontend::toShellUser(currentUser));
 }
 
 void logAuditEvent(
@@ -92,6 +84,18 @@ bool usesBackendMode(tundraux::frontend::BackendRuntime* backendRuntime) {
     return backendRuntime != nullptr && !backendRuntime->legacyDirect();
 }
 
+USER guestUser() {
+    return tundraux::frontend::toLegacyUser(tundraux::frontend::ShellUser{"guest", "", "", 0});
+}
+
+void syncCurrentUserToGuest(
+    USER& currentUser,
+    tundraux::frontend::FrontendAuditSink* auditSink
+) {
+    currentUser = guestUser();
+    setAuditCurrentUser(auditSink, currentUser);
+}
+
 std::string backendErrorMessage(
     const std::string& fallback,
     const std::string& errorCode,
@@ -113,16 +117,6 @@ std::string backendErrorMessage(
         return "Invalid backend response.";
     }
     return fallback;
-}
-
-USER shellUserFromBackendProfile(const tundraux::frontend::FrontendUser& user) {
-    return {
-        user.type,
-        user.name,
-        "",
-        user.passwordHint,
-        user.failedCount
-    };
 }
 
 std::string trimCopy(std::string value) {
@@ -467,10 +461,11 @@ bool saveSettings(
 
     USER updated = state.original;
     bool degradedProfileRefresh = false;
+    bool profileExpired = false;
     std::string degradedProfileReason;
     const std::string trimmedHint = trimCopy(state.passwordHint);
     if (usesBackendMode(backendRuntime)) {
-        if (backendRuntime == nullptr || backendRuntime->sessionId().empty() || backendRuntime->client() == nullptr) {
+        if (backendRuntime == nullptr || backendRuntime->client() == nullptr) {
             state.message = "No backend session is active.";
             logAuditEvent(
                 auditSink,
@@ -506,7 +501,8 @@ bool saveSettings(
             return false;
         }
 
-        const auto profileResult = client->currentProfile(backendRuntime->sessionId());
+        tundraux::frontend::BackendFacade facade(*backendRuntime);
+        const auto profileResult = facade.refreshProfile();
         if (!profileResult.ok) {
             degradedProfileRefresh = true;
             degradedProfileReason = backendErrorMessage(
@@ -518,8 +514,12 @@ bool saveSettings(
             if (passwordHintProvided) {
                 updated.password_hint = trimmedHint;
             }
+            if (profileResult.errorCode == "SessionExpired") {
+                profileExpired = true;
+                syncCurrentUserToGuest(currentUser, auditSink);
+            }
         } else {
-            updated = shellUserFromBackendProfile(profileResult.value);
+            updated = tundraux::frontend::toLegacyUser(profileResult.value);
         }
     } else {
         if (passwordWillChange(state)) {
@@ -540,8 +540,10 @@ bool saveSettings(
         }
     }
 
-    currentUser = updated;
-    currentUser.password.clear();
+    if (!profileExpired) {
+        currentUser = updated;
+        currentUser.password.clear();
+    }
     state.original = updated;
     state.newPassword.clear();
     state.confirmPassword.clear();
@@ -550,7 +552,7 @@ bool saveSettings(
     state.message = degradedProfileRefresh
         ? "Settings saved, but profile refresh failed. Press Enter or Esc to return."
         : "Settings saved. Press Enter or Esc to return.";
-    setAuditCurrentUser(auditSink, updated);
+    setAuditCurrentUser(auditSink, profileExpired ? currentUser : updated);
     if (degradedProfileRefresh) {
         logAuditEvent(
             auditSink,
@@ -686,8 +688,12 @@ void open_account_settings(
             return;
         }
 
-        const auto profileResult = backendRuntime->client()->currentProfile(backendRuntime->sessionId());
+        tundraux::frontend::BackendFacade facade(*backendRuntime);
+        const auto profileResult = facade.refreshProfile();
         if (!profileResult.ok) {
+            if (profileResult.errorCode == "SessionExpired") {
+                syncCurrentUserToGuest(currentUser, auditSink);
+            }
             colorcout(
                 "red",
                 backendErrorMessage(
@@ -699,7 +705,7 @@ void open_account_settings(
             return;
         }
 
-        state.original = shellUserFromBackendProfile(profileResult.value);
+        state.original = tundraux::frontend::toLegacyUser(profileResult.value);
         state.passwordHint = state.original.password_hint;
         state.sourceLabel = "backend current profile";
         currentUser = state.original;

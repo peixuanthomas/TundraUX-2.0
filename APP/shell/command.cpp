@@ -13,6 +13,7 @@
 #include <TundraTUI/input.hpp>
 
 #include "backend_facade.hpp"
+#include "user_conversion_compat.hpp"
 #include "backend_runtime.hpp"
 #include "color.hpp"
 #include "commandHandlers.hpp"
@@ -50,13 +51,7 @@ namespace {
 class LegacyAuditSink : public tundraux::frontend::FrontendAuditSink {
 public:
     void setCurrentUser(const tundraux::frontend::ShellUser& user) override {
-        tundraux::audit::setCurrentUser(USER{
-            user.type,
-            user.name,
-            "",
-            user.passwordHint,
-            user.failedCount
-        });
+        tundraux::audit::setCurrentUser(tundraux::frontend::toLegacyUser(user));
     }
 
     tundraux::frontend::FacadeResult logEvent(
@@ -105,16 +100,6 @@ USER guestShellUser() {
     };
 }
 
-USER shellUserFromBackend(const tundraux::frontend::FrontendUser& user) {
-    return {
-        user.type,
-        user.name,
-        "",
-        "",
-        0
-    };
-}
-
 void setAuditCurrentUser(
     tundraux::frontend::FrontendAuditSink* auditSink,
     const USER& currentUser
@@ -122,12 +107,7 @@ void setAuditCurrentUser(
     if (auditSink == nullptr) {
         return;
     }
-    auditSink->setCurrentUser({
-        currentUser.type,
-        currentUser.name,
-        "",
-        currentUser.count
-    });
+    auditSink->setCurrentUser(tundraux::frontend::toShellUser(currentUser));
 }
 
 void logAuditEvent(
@@ -146,58 +126,37 @@ void logAuditEvent(
 bool syncSystemCommandUserFromBackend(
     USER& currentUser,
     tundraux::frontend::BackendRuntime& backendRuntime,
+    tundraux::frontend::BackendFacade* facade,
     tundraux::frontend::FrontendAuditSink* auditSink,
     std::string& denyMessage
 ) {
-    auto* client = backendRuntime.client();
-    if (client == nullptr) {
+    (void)backendRuntime;
+    if (facade == nullptr) {
         currentUser = guestShellUser();
         setAuditCurrentUser(auditSink, currentUser);
         denyMessage = "Backend unavailable.";
         return false;
     }
 
-    if (backendRuntime.sessionId().empty()) {
-        const auto guestSession = client->startGuestSession();
-        if (!guestSession.ok) {
-            currentUser = guestShellUser();
-            setAuditCurrentUser(auditSink, currentUser);
-            denyMessage = guestSession.errorCode == "TransportError"
-                ? "Backend unavailable."
-                : "Backend session unavailable.";
-            return false;
-        }
-        backendRuntime.setSessionId(guestSession.value.sessionId);
-        currentUser = shellUserFromBackend(guestSession.value.user);
-        setAuditCurrentUser(auditSink, currentUser);
-    }
-
-    const auto profileResult = client->currentProfile(backendRuntime.sessionId());
+    const auto profileResult = facade->refreshProfile();
     if (profileResult.ok) {
-        currentUser = shellUserFromBackend(profileResult.value);
+        currentUser = tundraux::frontend::toLegacyUser(profileResult.value);
         setAuditCurrentUser(auditSink, currentUser);
         denyMessage = "Access Denied.";
         return canRunSystemCommand(currentUser);
     }
 
-    if (profileResult.errorCode == "SessionExpired") {
-        const auto guestSession = client->startGuestSession();
-        if (guestSession.ok) {
-            backendRuntime.setSessionId(guestSession.value.sessionId);
-            currentUser = shellUserFromBackend(guestSession.value.user);
-        } else {
-            currentUser = guestShellUser();
-        }
-        setAuditCurrentUser(auditSink, currentUser);
-        denyMessage = "Backend session expired.";
-        return false;
-    }
-
     currentUser = guestShellUser();
     setAuditCurrentUser(auditSink, currentUser);
-    denyMessage = profileResult.errorCode == "PermissionDenied"
-        ? "Access Denied."
-        : "Unable to verify backend identity.";
+    if (profileResult.errorCode == "SessionExpired") {
+        denyMessage = "Backend session expired.";
+    } else if (profileResult.errorCode == "TransportError") {
+        denyMessage = "Backend unavailable.";
+    } else if (profileResult.errorCode == "PermissionDenied") {
+        denyMessage = "Access Denied.";
+    } else {
+        denyMessage = profileResult.message.empty() ? "Unable to verify backend identity." : profileResult.message;
+    }
     return false;
 }
 
@@ -291,7 +250,12 @@ void task_main(tundraux::frontend::BackendRuntime* backendRuntime) {
         if (input.length() > 1 && input[0] == '/') {
             if (usesBackendRuntime(backendRuntime)) {
                 std::string denyMessage;
-                if (!syncSystemCommandUserFromBackend(currentUser, *backendRuntime, auditSink, denyMessage)) {
+                if (!syncSystemCommandUserFromBackend(
+                        currentUser,
+                        *backendRuntime,
+                        backendFacade.get(),
+                        auditSink,
+                        denyMessage)) {
                     logAuditEvent(auditSink, currentUser, "shell", "system denied backend");
                     colorcout("red", denyMessage + "\n");
                     continue;

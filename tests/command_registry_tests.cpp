@@ -7,11 +7,30 @@
 #include <string>
 #include <vector>
 
-bool tundraux::frontend::BackendRuntime::legacyDirect() const {
-    return false;
+bool g_backendRuntimeLegacyDirect = false;
+bool g_createfileBackendMode = false;
+bool g_deletefileBackendMode = false;
+bool g_structfileBackendMode = false;
+bool g_forceloginBackendMode = false;
+
+void resetDebugCommandModeFlags() {
+    g_createfileBackendMode = false;
+    g_deletefileBackendMode = false;
+    g_structfileBackendMode = false;
+    g_forceloginBackendMode = false;
 }
 
 namespace tundraux::frontend {
+class BackendProcessTransport {
+};
+
+BackendRuntime::BackendRuntime() {}
+BackendRuntime::~BackendRuntime() {}
+
+bool BackendRuntime::legacyDirect() const {
+    return g_backendRuntimeLegacyDirect;
+}
+
 class FrontendAuditSink;
 }
 
@@ -34,12 +53,24 @@ void handleExportCommand(const std::string&, USER&, tundraux::frontend::BackendR
 void handleLicenseCommand(const std::string&) {}
 void handleDisplayTestCommand(const std::string&) {}
 void handleDebugEditorCommand(const std::string&) {}
-void handleDebugCreateFileCommand(const std::string&) {}
 void handleDebugHelloCommand(const std::string&) {}
-void handleDebugDeleteFileCommand(const std::string&) {}
-void handleDebugStructFileCommand(const std::string&) {}
 void handleDebugEnvCommand(const std::string&) {}
-void handleDebugForceLoginCommand(const std::string&, USER&) {}
+
+void handleDebugCreateFileCommand(const std::string&, bool backendMode) {
+    g_createfileBackendMode = backendMode;
+}
+
+void handleDebugDeleteFileCommand(const std::string&, bool backendMode) {
+    g_deletefileBackendMode = backendMode;
+}
+
+void handleDebugStructFileCommand(const std::string&, bool backendMode) {
+    g_structfileBackendMode = backendMode;
+}
+
+void handleDebugForceLoginCommand(const std::string&, USER&, bool backendMode) {
+    g_forceloginBackendMode = backendMode;
+}
 
 namespace {
 
@@ -233,6 +264,150 @@ bool commandKeyAuditMappingRoundTrip() {
     return true;
 }
 
+bool commandRegistryRoutesBackendModeToDebugCommands() {
+    USER user;
+    user.type = "debug";
+    user.name = "debugger";
+
+    struct LegacyModeGuard {
+        bool previousValue;
+
+        explicit LegacyModeGuard(bool nextValue)
+            : previousValue(g_backendRuntimeLegacyDirect) {
+            g_backendRuntimeLegacyDirect = nextValue;
+        }
+
+        ~LegacyModeGuard() {
+            g_backendRuntimeLegacyDirect = previousValue;
+        }
+    };
+
+    tundraux::frontend::BackendRuntime runtime;
+
+    {
+        LegacyModeGuard backendGuard(false);
+        resetDebugCommandModeFlags();
+
+        auto backendModeCommands = buildNewCommandRegistry(user, &runtime);
+        if (!tryExecuteRegisteredCommand("dbg:createfile", backendModeCommands, user, nullptr)) {
+            std::cerr << "dbg:createfile command was not found in backend-mode registry\n";
+            return false;
+        }
+        if (!g_createfileBackendMode) {
+            std::cerr << "expected dbg:createfile backend mode flag true\n";
+            return false;
+        }
+        if (!tryExecuteRegisteredCommand("dbg:deletefile", backendModeCommands, user, nullptr)) {
+            std::cerr << "dbg:deletefile command was not found in backend-mode registry\n";
+            return false;
+        }
+        if (!g_deletefileBackendMode) {
+            std::cerr << "expected dbg:deletefile backend mode flag true\n";
+            return false;
+        }
+        if (!tryExecuteRegisteredCommand("dbg:structfile", backendModeCommands, user, nullptr)) {
+            std::cerr << "dbg:structfile command was not found in backend-mode registry\n";
+            return false;
+        }
+        if (!g_structfileBackendMode) {
+            std::cerr << "expected dbg:structfile backend mode flag true\n";
+            return false;
+        }
+        if (!tryExecuteRegisteredCommand("dbg:forcelogin test_user", backendModeCommands, user, nullptr)) {
+            std::cerr << "dbg:forcelogin command was not found in backend-mode registry\n";
+            return false;
+        }
+        if (!g_forceloginBackendMode) {
+            std::cerr << "expected dbg:forcelogin backend mode flag true\n";
+            return false;
+        }
+    }
+
+    {
+        LegacyModeGuard legacyDirectGuard(true);
+        resetDebugCommandModeFlags();
+
+        auto legacyDirectCommands = buildNewCommandRegistry(user, &runtime);
+        if (!tryExecuteRegisteredCommand("dbg:createfile", legacyDirectCommands, user, nullptr)) {
+            std::cerr << "dbg:createfile command was not found in legacy-direct-mode registry\n";
+            return false;
+        }
+        if (g_createfileBackendMode) {
+            std::cerr << "expected dbg:createfile backend mode flag false for legacy-direct mode\n";
+            return false;
+        }
+        if (!tryExecuteRegisteredCommand("dbg:deletefile", legacyDirectCommands, user, nullptr)) {
+            std::cerr << "dbg:deletefile command was not found in legacy-direct-mode registry\n";
+            return false;
+        }
+        if (g_deletefileBackendMode) {
+            std::cerr << "expected dbg:deletefile backend mode flag false for legacy-direct mode\n";
+            return false;
+        }
+        if (!tryExecuteRegisteredCommand("dbg:structfile", legacyDirectCommands, user, nullptr)) {
+            std::cerr << "dbg:structfile command was not found in legacy-direct-mode registry\n";
+            return false;
+        }
+        if (g_structfileBackendMode) {
+            std::cerr << "expected dbg:structfile backend mode flag false for legacy-direct mode\n";
+            return false;
+        }
+        if (!tryExecuteRegisteredCommand("dbg:forcelogin test_user", legacyDirectCommands, user, nullptr)) {
+            std::cerr << "dbg:forcelogin command was not found in legacy-direct-mode registry\n";
+            return false;
+        }
+        if (g_forceloginBackendMode) {
+            std::cerr << "expected dbg:forcelogin backend mode flag false for legacy-direct mode\n";
+            return false;
+        }
+    }
+
+    {
+        LegacyModeGuard legacyNullGuard(false);
+        resetDebugCommandModeFlags();
+
+        auto legacyCommands = buildNewCommandRegistry(user, nullptr);
+        if (!tryExecuteRegisteredCommand("dbg:createfile", legacyCommands, user, nullptr)) {
+            std::cerr << "dbg:createfile command was not found in legacy-mode registry\n";
+            return false;
+        }
+        if (g_createfileBackendMode) {
+            std::cerr << "expected dbg:createfile backend mode flag false for legacy mode\n";
+            return false;
+        }
+
+        if (!tryExecuteRegisteredCommand("dbg:deletefile", legacyCommands, user, nullptr)) {
+            std::cerr << "dbg:deletefile command was not found in legacy-mode registry\n";
+            return false;
+        }
+        if (g_deletefileBackendMode) {
+            std::cerr << "expected dbg:deletefile backend mode flag false for legacy mode\n";
+            return false;
+        }
+
+        if (!tryExecuteRegisteredCommand("dbg:structfile", legacyCommands, user, nullptr)) {
+            std::cerr << "dbg:structfile command was not found in legacy-mode registry\n";
+            return false;
+        }
+        if (g_structfileBackendMode) {
+            std::cerr << "expected dbg:structfile backend mode flag false for legacy mode\n";
+            return false;
+        }
+
+        if (!tryExecuteRegisteredCommand("dbg:forcelogin test_user", legacyCommands, user, nullptr)) {
+            std::cerr << "dbg:forcelogin command was not found in legacy-mode registry\n";
+            return false;
+        }
+        if (g_forceloginBackendMode) {
+            std::cerr << "expected dbg:forcelogin backend mode flag false for legacy mode\n";
+            return false;
+        }
+
+        return true;
+    }
+
+}
+
 } // namespace
 
 int main() {
@@ -243,6 +418,9 @@ int main() {
         return 1;
     }
     if (!commandKeyAuditMappingRoundTrip()) {
+        return 1;
+    }
+    if (!commandRegistryRoutesBackendModeToDebugCommands()) {
         return 1;
     }
     return 0;

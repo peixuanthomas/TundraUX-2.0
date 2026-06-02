@@ -4,6 +4,7 @@
 #include "backend_facade.hpp"
 #include "backend_client.hpp"
 #include "backend_runtime.hpp"
+#include "user_conversion_compat.hpp"
 #include "TundraTUI/color.hpp"
 #include "TundraTUI/input.hpp"
 #include "TundraTUI/render_engine.hpp"
@@ -82,6 +83,7 @@ struct UserManagerState {
 };
 
 struct UserManagerBackend {
+    frontend::BackendRuntime& runtime;
     frontend::BackendClient& client;
     std::string& sessionId;
 };
@@ -121,10 +123,6 @@ std::string backendFailureMessage(const std::string& fallback, const std::string
     return fallback;
 }
 
-USER shellUserFromBackend(const frontend::FrontendUser& user) {
-    return USER{user.type, user.name, "", user.passwordHint, user.failedCount};
-}
-
 USER guestUser() {
     return USER{"guest", "", "", "", 0};
 }
@@ -136,12 +134,7 @@ void syncAuditUser(
 ) {
     currentUser = std::move(user);
     if (state.auditSink != nullptr) {
-        state.auditSink->setCurrentUser(frontend::ShellUser{
-            currentUser.type,
-            currentUser.name,
-            "",
-            currentUser.count
-        });
+        state.auditSink->setCurrentUser(frontend::toShellUser(currentUser));
     }
 }
 
@@ -154,12 +147,7 @@ void logAuditEvent(
     if (state.auditSink == nullptr) {
         return;
     }
-    state.auditSink->setCurrentUser(frontend::ShellUser{
-        currentUser.type,
-        currentUser.name,
-        "",
-        currentUser.count
-    });
+    state.auditSink->setCurrentUser(frontend::toShellUser(currentUser));
     state.auditSink->logEvent(category, detail);
 }
 
@@ -170,43 +158,37 @@ bool isTerminalBackendFailure(const std::string& errorCode) {
            errorCode == "InvalidResponse";
 }
 
-void startGuestSessionOrClear(UserManagerBackend& backend, UserManagerState& state, USER& currentUser) {
-    const auto guestSession = backend.client.startGuestSession();
-    if (guestSession.ok) {
-        backend.sessionId = guestSession.value.sessionId;
-        syncAuditUser(state, currentUser, shellUserFromBackend(guestSession.value.user));
-        return;
+bool syncCurrentUserFromBackend(
+    UserManagerBackend& backend,
+    USER& currentUser,
+    UserManagerState& state,
+    frontend::BackendFacade& facade,
+    std::string* errorCode
+) {
+    backend.runtime.setSessionId(backend.sessionId);
+    const auto profile = facade.refreshProfile();
+    backend.sessionId = backend.runtime.sessionId();
+    if (errorCode != nullptr) {
+        errorCode->clear();
     }
 
-    backend.sessionId.clear();
-    syncAuditUser(state, currentUser, guestUser());
-}
-
-void syncProfileOrGuest(UserManagerBackend& backend, USER& currentUser, UserManagerState& state) {
-    if (backend.sessionId.empty()) {
-        startGuestSessionOrClear(backend, state, currentUser);
-        return;
-    }
-
-    const auto profile = backend.client.currentProfile(backend.sessionId);
     if (profile.ok) {
-        syncAuditUser(state, currentUser, shellUserFromBackend(profile.value));
-        return;
+        syncAuditUser(state, currentUser, frontend::toLegacyUser(profile.value));
+        return true;
     }
 
-    if (profile.errorCode == "SessionExpired") {
-        startGuestSessionOrClear(backend, state, currentUser);
-        return;
+    if (errorCode != nullptr) {
+        *errorCode = profile.errorCode;
     }
-
-    backend.sessionId.clear();
     syncAuditUser(state, currentUser, guestUser());
+    return false;
 }
 
 bool handleTerminalBackendFailure(
     UserManagerBackend& backend,
     UserManagerState& state,
     USER& currentUser,
+    frontend::BackendFacade& facade,
     const std::string& errorCode,
     const std::string& fallback
 ) {
@@ -216,12 +198,9 @@ bool handleTerminalBackendFailure(
 
     state.message = backendFailureMessage(fallback, errorCode);
     state.forceExit = true;
-    if (errorCode == "PermissionDenied") {
-        syncProfileOrGuest(backend, currentUser, state);
-    } else if (errorCode == "SessionExpired") {
-        startGuestSessionOrClear(backend, state, currentUser);
+    if (errorCode == "PermissionDenied" || errorCode == "SessionExpired") {
+        syncCurrentUserFromBackend(backend, currentUser, state, facade, nullptr);
     } else {
-        backend.sessionId.clear();
         syncAuditUser(state, currentUser, guestUser());
     }
     return true;
@@ -249,21 +228,21 @@ bool refreshUsers(UserManagerBackend& backend, UserManagerState& state) {
     return true;
 }
 
-bool syncCurrentUserAfterMutation(UserManagerBackend& backend, USER& currentUser, UserManagerState& state) {
-    const auto profile = backend.client.currentProfile(backend.sessionId);
-    if (!profile.ok) {
-        if (profile.errorCode == "SessionExpired") {
-            startGuestSessionOrClear(backend, state, currentUser);
-        } else {
-            backend.sessionId.clear();
-            syncAuditUser(state, currentUser, guestUser());
-        }
-        state.message = backendFailureMessage("Your account lost management privileges. Returning to shell.", profile.errorCode);
+bool syncCurrentUserAfterMutation(
+    UserManagerBackend& backend,
+    USER& currentUser,
+    UserManagerState& state,
+    frontend::BackendFacade& facade
+) {
+    std::string syncError;
+    if (!syncCurrentUserFromBackend(backend, currentUser, state, facade, &syncError)) {
+        state.message = backendFailureMessage(
+            "Your account lost management privileges. Returning to shell.",
+            syncError.empty() ? "PermissionDenied" : syncError
+        );
         state.forceExit = true;
         return false;
     }
-
-    syncAuditUser(state, currentUser, shellUserFromBackend(profile.value));
     return true;
 }
 
@@ -666,7 +645,12 @@ bool buildFormUser(const UserForm& form, frontend::FrontendUser& user) {
     return true;
 }
 
-void saveForm(UserManagerState& state, UserManagerBackend& backend, USER& currentUser) {
+void saveForm(
+    UserManagerState& state,
+    UserManagerBackend& backend,
+    USER& currentUser,
+    frontend::BackendFacade& facade
+) {
     frontend::FrontendUser user;
     if (!buildFormUser(state.form, user)) {
         state.form.error = "Failed count must be a number.";
@@ -692,6 +676,7 @@ void saveForm(UserManagerState& state, UserManagerBackend& backend, USER& curren
                 backend,
                 state,
                 currentUser,
+                facade,
                 result.errorCode,
                 "Unable to save user.")) {
             state.formOpen = false;
@@ -712,12 +697,19 @@ void saveForm(UserManagerState& state, UserManagerBackend& backend, USER& curren
         "manage-users",
         std::string(state.form.editing ? "backend edit " : "backend create ") + user.name
     );
-    syncCurrentUserAfterMutation(backend, currentUser, state);
+    syncCurrentUserAfterMutation(backend, currentUser, state, facade);
     if (!state.forceExit) {
         if (refreshUsers(backend, state)) {
             selectUserByName(state, user.name);
         } else {
-            handleTerminalBackendFailure(backend, state, currentUser, state.lastBackendErrorCode, "Unable to list users.");
+            handleTerminalBackendFailure(
+                backend,
+                state,
+                currentUser,
+                facade,
+                state.lastBackendErrorCode,
+                "Unable to list users."
+            );
         }
     }
 }
@@ -736,7 +728,13 @@ void toggleType(UserForm& form) {
     form.type = toLowerCopy(form.type) == "admin" ? "user" : "admin";
 }
 
-void handleFormKey(UserManagerState& state, UserManagerBackend& backend, USER& currentUser, const KeyPress& key) {
+void handleFormKey(
+    UserManagerState& state,
+    UserManagerBackend& backend,
+    USER& currentUser,
+    frontend::BackendFacade& facade,
+    const KeyPress& key
+) {
     UserForm& form = state.form;
     form.error.clear();
 
@@ -780,7 +778,7 @@ void handleFormKey(UserManagerState& state, UserManagerBackend& backend, USER& c
             }
             break;
         case Key::Enter:
-            saveForm(state, backend, currentUser);
+            saveForm(state, backend, currentUser, facade);
             break;
         case Key::Character:
             if (form.field == 1) {
@@ -807,7 +805,12 @@ void handleFormKey(UserManagerState& state, UserManagerBackend& backend, USER& c
     }
 }
 
-void deleteSelected(UserManagerState& state, UserManagerBackend& backend, USER& currentUser) {
+void deleteSelected(
+    UserManagerState& state,
+    UserManagerBackend& backend,
+    USER& currentUser,
+    frontend::BackendFacade& facade
+) {
     const frontend::FrontendUser* user = selectedUser(state);
     if (user == nullptr) {
         state.message = "No user selected.";
@@ -822,6 +825,7 @@ void deleteSelected(UserManagerState& state, UserManagerBackend& backend, USER& 
                 backend,
                 state,
                 currentUser,
+                facade,
                 result.errorCode,
                 "Unable to delete user.")) {
             state.confirmDelete = false;
@@ -834,18 +838,30 @@ void deleteSelected(UserManagerState& state, UserManagerBackend& backend, USER& 
 
     state.message = "User deleted: " + name;
     logAuditEvent(state, currentUser, "manage-users", "backend delete " + name);
-    syncCurrentUserAfterMutation(backend, currentUser, state);
+    syncCurrentUserAfterMutation(backend, currentUser, state, facade);
     if (!state.forceExit) {
         if (refreshUsers(backend, state)) {
             clampCursor(state);
         } else {
-            handleTerminalBackendFailure(backend, state, currentUser, state.lastBackendErrorCode, "Unable to list users.");
+            handleTerminalBackendFailure(
+                backend,
+                state,
+                currentUser,
+                facade,
+                state.lastBackendErrorCode,
+                "Unable to list users."
+            );
         }
     }
     state.confirmDelete = false;
 }
 
-void disableSelected(UserManagerState& state, UserManagerBackend& backend, USER& currentUser) {
+void disableSelected(
+    UserManagerState& state,
+    UserManagerBackend& backend,
+    USER& currentUser,
+    frontend::BackendFacade& facade
+) {
     const frontend::FrontendUser* user = selectedUser(state);
     if (user == nullptr) {
         state.message = "No user selected.";
@@ -859,6 +875,7 @@ void disableSelected(UserManagerState& state, UserManagerBackend& backend, USER&
                 backend,
                 state,
                 currentUser,
+                facade,
                 result.errorCode,
                 "Unable to disable user.")) {
             return;
@@ -869,17 +886,29 @@ void disableSelected(UserManagerState& state, UserManagerBackend& backend, USER&
 
     state.message = "User disabled: " + name;
     logAuditEvent(state, currentUser, "manage-users", "backend disable " + name);
-    syncCurrentUserAfterMutation(backend, currentUser, state);
+    syncCurrentUserAfterMutation(backend, currentUser, state, facade);
     if (!state.forceExit) {
         if (refreshUsers(backend, state)) {
             selectUserByName(state, name);
         } else {
-            handleTerminalBackendFailure(backend, state, currentUser, state.lastBackendErrorCode, "Unable to list users.");
+            handleTerminalBackendFailure(
+                backend,
+                state,
+                currentUser,
+                facade,
+                state.lastBackendErrorCode,
+                "Unable to list users."
+            );
         }
     }
 }
 
-void resetSelected(UserManagerState& state, UserManagerBackend& backend, USER& currentUser) {
+void resetSelected(
+    UserManagerState& state,
+    UserManagerBackend& backend,
+    USER& currentUser,
+    frontend::BackendFacade& facade
+) {
     const frontend::FrontendUser* user = selectedUser(state);
     if (user == nullptr) {
         state.message = "No user selected.";
@@ -893,6 +922,7 @@ void resetSelected(UserManagerState& state, UserManagerBackend& backend, USER& c
                 backend,
                 state,
                 currentUser,
+                facade,
                 result.errorCode,
                 "Unable to reset count.")) {
             return;
@@ -903,17 +933,30 @@ void resetSelected(UserManagerState& state, UserManagerBackend& backend, USER& c
 
     state.message = "Login count reset: " + name;
     logAuditEvent(state, currentUser, "manage-users", "backend reset " + name);
-    syncCurrentUserAfterMutation(backend, currentUser, state);
+    syncCurrentUserAfterMutation(backend, currentUser, state, facade);
     if (!state.forceExit) {
         if (refreshUsers(backend, state)) {
             selectUserByName(state, name);
         } else {
-            handleTerminalBackendFailure(backend, state, currentUser, state.lastBackendErrorCode, "Unable to list users.");
+            handleTerminalBackendFailure(
+                backend,
+                state,
+                currentUser,
+                facade,
+                state.lastBackendErrorCode,
+                "Unable to list users."
+            );
         }
     }
 }
 
-bool handleMainKey(UserManagerState& state, UserManagerBackend& backend, USER& currentUser, const KeyPress& key) {
+bool handleMainKey(
+    UserManagerState& state,
+    UserManagerBackend& backend,
+    USER& currentUser,
+    frontend::BackendFacade& facade,
+    const KeyPress& key
+) {
     if (state.showHelp) {
         if (key.key == Key::Escape || key.key == Key::Enter ||
             (key.key == Key::Character &&
@@ -925,7 +968,7 @@ bool handleMainKey(UserManagerState& state, UserManagerBackend& backend, USER& c
     }
 
     if (state.formOpen) {
-        handleFormKey(state, backend, currentUser, key);
+        handleFormKey(state, backend, currentUser, facade, key);
         return !state.forceExit;
     }
 
@@ -938,7 +981,7 @@ bool handleMainKey(UserManagerState& state, UserManagerBackend& backend, USER& c
         }
         if (key.key == Key::Enter ||
             (key.key == Key::Character && (key.character == 'y' || key.character == 'Y'))) {
-            deleteSelected(state, backend, currentUser);
+            deleteSelected(state, backend, currentUser, facade);
             return !state.forceExit;
         }
         return !state.forceExit;
@@ -1011,11 +1054,11 @@ bool handleMainKey(UserManagerState& state, UserManagerBackend& backend, USER& c
                     break;
                 case 'r':
                 case 'R':
-                    resetSelected(state, backend, currentUser);
+                    resetSelected(state, backend, currentUser, facade);
                     break;
                 case 'x':
                 case 'X':
-                    disableSelected(state, backend, currentUser);
+                    disableSelected(state, backend, currentUser, facade);
                     break;
                 default:
                     state.message = std::string("Unknown key: ") + key.character;
@@ -1051,28 +1094,31 @@ void manage_users(
         backendRuntime->client() == nullptr || backendRuntime->sessionId().empty()) {
         renderBackendUnavailable("User management requires an active backend session.");
         if (auditSink != nullptr) {
-            auditSink->setCurrentUser(frontend::ShellUser{currentUser.type, currentUser.name, "", currentUser.count});
+            auditSink->setCurrentUser(frontend::toShellUser(currentUser));
         }
         return;
     }
 
     std::string sessionId = backendRuntime->sessionId();
-    UserManagerBackend backend{*backendRuntime->client(), sessionId};
+    UserManagerBackend backend{*backendRuntime, *backendRuntime->client(), sessionId};
+    frontend::BackendFacade facade(*backendRuntime);
     ConsoleScreenGuard screenGuard;
     UserManagerState state;
     state.auditSink = auditSink;
     if (!refreshUsers(backend, state)) {
-        handleTerminalBackendFailure(backend, state, currentUser, state.lastBackendErrorCode, "Unable to list users.");
+        handleTerminalBackendFailure(
+            backend,
+            state,
+            currentUser,
+            facade,
+            state.lastBackendErrorCode,
+            "Unable to list users."
+        );
     }
     if (state.forceExit) {
         backendRuntime->setSessionId(sessionId);
         if (state.auditSink != nullptr) {
-            state.auditSink->setCurrentUser(frontend::ShellUser{
-                currentUser.type,
-                currentUser.name,
-                "",
-                currentUser.count
-            });
+            state.auditSink->setCurrentUser(frontend::toShellUser(currentUser));
         }
         return;
     }
@@ -1093,16 +1139,11 @@ void manage_users(
             renderMain(state);
         }
 
-        running = handleMainKey(state, backend, currentUser, readKey());
+        running = handleMainKey(state, backend, currentUser, facade, readKey());
     }
 
     backendRuntime->setSessionId(sessionId);
     if (state.auditSink != nullptr) {
-        state.auditSink->setCurrentUser(frontend::ShellUser{
-            currentUser.type,
-            currentUser.name,
-            "",
-            currentUser.count
-        });
+        state.auditSink->setCurrentUser(frontend::toShellUser(currentUser));
     }
 }
