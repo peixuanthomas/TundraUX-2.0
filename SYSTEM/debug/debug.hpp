@@ -13,7 +13,6 @@ void handleLicenseCommand(const std::string& input);
 void handleDisplayTestCommand(const std::string& input);
 
 // Debug-only utilities (not exposed in help)
-void handleDebugEditorCommand(const std::string& input);
 void handleDebugCreateFileCommand(const std::string& input);
 void handleDebugHelloCommand(const std::string& input);
 void handleDebugDeleteFileCommand(const std::string& input);

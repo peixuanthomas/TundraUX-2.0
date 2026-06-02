@@ -217,8 +217,8 @@ set(TUNDRAUX_APP_SOURCES
     APP/backend_client/backend_process.cpp
     APP/backend_client/backend_runtime.cpp
     APP/editor/editor.cpp
-    APP/editor/editor_portable.cpp
     APP/editor/editor_win.cpp
+    APP/editor/tux_editor.cpp
     APP/explorer/explorer_clipboard.cpp
     APP/explorer/explorer_backend.cpp
     APP/explorer/explorer.cpp
@@ -234,8 +234,6 @@ set(TUNDRAUX_APP_SOURCES
     APP/explorer/explorer_render.cpp
     APP/explorer/explorer_search.cpp
     APP/explorer/explorer_text.cpp
-    APP/file_manager/TUXfile.cpp
-    APP/file_manager/tux_backend.cpp
     APP/shell/command.cpp
     APP/shell/commandHandlers.cpp
     APP/shell/commandReg.cpp
@@ -269,7 +267,6 @@ target_include_directories(${PROJECT_NAME}
         ${PROJECT_SOURCE_DIR}/APP/backend_client
         ${PROJECT_SOURCE_DIR}/APP/editor
         ${PROJECT_SOURCE_DIR}/APP/explorer
-        ${PROJECT_SOURCE_DIR}/APP/file_manager
         ${PROJECT_SOURCE_DIR}/APP/shell
         ${PROJECT_SOURCE_DIR}/USER/account
         ${PROJECT_SOURCE_DIR}/USER/udata
@@ -361,8 +358,8 @@ add_executable(explorer_permissions_tests
 target_include_directories(explorer_permissions_tests
     PRIVATE
         ${PROJECT_SOURCE_DIR}/APP/backend_client
+        ${PROJECT_SOURCE_DIR}/APP/editor
         ${PROJECT_SOURCE_DIR}/APP/explorer
-        ${PROJECT_SOURCE_DIR}/APP/file_manager
         ${PROJECT_SOURCE_DIR}/BACKEND/core
 )
 
@@ -398,7 +395,6 @@ target_include_directories(explorer_clipboard_tests
         ${PROJECT_SOURCE_DIR}/APP/backend_client
         ${PROJECT_SOURCE_DIR}/APP/editor
         ${PROJECT_SOURCE_DIR}/APP/explorer
-        ${PROJECT_SOURCE_DIR}/APP/file_manager
         ${PROJECT_SOURCE_DIR}/BACKEND/core
         ${PROJECT_SOURCE_DIR}/SYSTEM/audit
         ${PROJECT_SOURCE_DIR}/SYSTEM/console
@@ -418,6 +414,57 @@ target_compile_features(explorer_clipboard_tests
 )
 
 add_test(NAME explorer_clipboard_tests COMMAND explorer_clipboard_tests)
+
+add_executable(explorer_open_tests
+    tests/explorer_open_tests.cpp
+    APP/explorer/explorer_directory.cpp
+    APP/explorer/explorer_navigation.cpp
+    APP/explorer/explorer_open.cpp
+    APP/explorer/explorer_text.cpp
+)
+
+target_include_directories(explorer_open_tests
+    PRIVATE
+        ${PROJECT_SOURCE_DIR}/APP/backend_client
+        ${PROJECT_SOURCE_DIR}/APP/editor
+        ${PROJECT_SOURCE_DIR}/APP/explorer
+        ${PROJECT_SOURCE_DIR}/BACKEND/core
+        ${PROJECT_SOURCE_DIR}/SYSTEM/audit
+        ${PROJECT_SOURCE_DIR}/USER/udata
+)
+
+target_link_libraries(explorer_open_tests
+    PRIVATE
+        TundraTUI::TundraTUI
+        tundraux_backend_core
+)
+
+target_compile_features(explorer_open_tests
+    PRIVATE
+        cxx_std_17
+)
+
+add_test(NAME explorer_open_tests COMMAND explorer_open_tests)
+
+add_executable(command_registry_tests
+    tests/command_registry_tests.cpp
+    APP/shell/commandRegistry.cpp
+)
+
+target_include_directories(command_registry_tests
+    PRIVATE
+        ${PROJECT_SOURCE_DIR}/APP/backend_client
+        ${PROJECT_SOURCE_DIR}/APP/shell
+        ${PROJECT_SOURCE_DIR}/SYSTEM/debug
+        ${PROJECT_SOURCE_DIR}/USER/udata
+)
+
+target_compile_features(command_registry_tests
+    PRIVATE
+        cxx_std_17
+)
+
+add_test(NAME command_registry_tests COMMAND command_registry_tests)
 
 add_executable(tundratui_footer_hint_tests
     tests/tundratui_footer_hint_tests.cpp
@@ -459,31 +506,6 @@ target_compile_features(frontend_backend_client_tests
 )
 
 add_test(NAME frontend_backend_client_tests COMMAND frontend_backend_client_tests)
-
-add_executable(tux_frontend_command_tests
-    tests/tux_frontend_command_tests.cpp
-    APP/file_manager/tux_backend.cpp
-    APP/backend_client/backend_client.cpp
-)
-
-target_include_directories(tux_frontend_command_tests
-    PRIVATE
-        ${PROJECT_SOURCE_DIR}/APP/file_manager
-        ${PROJECT_SOURCE_DIR}/APP/backend_client
-        ${PROJECT_SOURCE_DIR}/BACKEND/core
-)
-
-target_link_libraries(tux_frontend_command_tests
-    PRIVATE
-        tundraux_backend_core
-)
-
-target_compile_features(tux_frontend_command_tests
-    PRIVATE
-        cxx_std_17
-)
-
-add_test(NAME tux_frontend_command_tests COMMAND tux_frontend_command_tests)
 
 if(TUNDRAUX_DEBUG_STARTUP)
     target_compile_definitions(${PROJECT_NAME}

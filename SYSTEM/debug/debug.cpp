@@ -1,7 +1,6 @@
 #include "debug.hpp"
 #include "build_info.hpp"
 #include "color.hpp"
-#include "editor.hpp"
 #include "hello.hpp"
 #include <string>
 #include "crypto.hpp"
@@ -65,32 +64,23 @@ void struct_file() {
         return;
     }
 
-    if (version == 21) {
-        in.read(reinterpret_cast<char*>(&strictValue), sizeof(strictValue));
-        in.read(reinterpret_cast<char*>(&userCount), sizeof(userCount));
-        if (!in) {
-            colorcout("red", "Error: Failed to read header\n");
-            return;
-        }
-        if (strictValue != 0 && strictValue != 1) {
-            colorcout("red", "Error: Invalid strict flag in user_data.dat header\n");
-            return;
-        }
-        colorcout("white", "2.1 (marker=21)\n");
-        colorcout("white", "strict=" + std::to_string(static_cast<int>(strictValue)) + "\n");
-        colorcout("white", std::to_string(userCount) + "\n");
-    } else if (version == 2) {
-        in.read(reinterpret_cast<char*>(&userCount), sizeof(userCount));
-        if (!in) {
-            colorcout("red", "Error: Failed to read header\n");
-            return;
-        }
-        colorcout("white", std::to_string(version) + "\n");
-        colorcout("white", std::to_string(userCount) + "\n");
-    } else {
+    if (version != 21) {
         colorcout("red", "Error: Unsupported user_data.dat version in struct_file\n");
         return;
     }
+    in.read(reinterpret_cast<char*>(&strictValue), sizeof(strictValue));
+    in.read(reinterpret_cast<char*>(&userCount), sizeof(userCount));
+    if (!in) {
+        colorcout("red", "Error: Failed to read header\n");
+        return;
+    }
+    if (strictValue != 0 && strictValue != 1) {
+        colorcout("red", "Error: Invalid strict flag in user_data.dat header\n");
+        return;
+    }
+    colorcout("white", "2.1 (marker=21)\n");
+    colorcout("white", "strict=" + std::to_string(static_cast<int>(strictValue)) + "\n");
+    colorcout("white", std::to_string(userCount) + "\n");
 
     if (userCount > MAX_USER_COUNT) {
         colorcout("red", "Error: User count exceeds maximum supported value\n");
@@ -161,23 +151,6 @@ void handleDisplayTestCommand(const std::string& input) {
         return;
     }
     display_test(colorName);
-}
-
-void handleDebugEditorCommand(const std::string& input) {
-    std::istringstream iss(input);
-    std::string commandToken, backend;
-    iss >> commandToken >> backend;
-    if (backend.empty()) {
-        colorcout("cyan", "Editor backend: " + get_editor_backend_name() + "\n");
-        colorcout("white", "Available backends: " + describe_editor_backend_options() + "\n");
-        return;
-    }
-    if (!set_editor_backend_by_name(backend)) {
-        colorcout("red", "Unknown or unavailable backend: " + backend + "\n");
-        colorcout("white", "Available backends: " + describe_editor_backend_options() + "\n");
-        return;
-    }
-    colorcout("green", "Editor backend set to: " + get_editor_backend_name() + "\n");
 }
 
 void handleDebugCreateFileCommand(const std::string&) {

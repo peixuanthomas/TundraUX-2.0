@@ -93,28 +93,6 @@ std::vector<RegisteredCommand> buildNewCommandRegistry(
             false
         },
         {
-            "importdata",
-            "importdata",
-            "Import user data from old versions",
-            {},
-            [backendRuntime](const std::string& input) {
-                handleImportDataCommand(input, backendRuntime);
-            },
-            "admin,debug",
-            false
-        },
-        {
-            "TUXfile",
-            "TUXfile",
-            "Open TUX File Manager (Terminal style)",
-            {"tuxfile"},
-            [&currentUser, backendRuntime](const std::string& input) {
-                handleTuxFileCommand(input, currentUser, backendRuntime);
-            },
-            "user,admin,debug",
-            false
-        },
-        {
             "time",
             "time",
             "Display current system time and timestamp",
@@ -195,16 +173,6 @@ std::vector<RegisteredCommand> buildNewCommandRegistry(
             {},
             [](const std::string&) {},
             "debug",
-            true
-        },
-        {
-            "dbg:editor",
-            "dbg:editor [backend]",
-            "Inspect or change editor backend",
-            {},
-            handleDebugEditorCommand,
-            "debug",
-            true,
             true
         },
         {

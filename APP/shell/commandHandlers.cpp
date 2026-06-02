@@ -20,7 +20,6 @@
 #include "color.hpp"
 #include "editor.hpp"
 #include "manageusers.hpp"
-#include "TUXfile.hpp"
 #include "explorer.hpp"
 
 #ifndef WIN32_LEAN_AND_MEAN
@@ -427,17 +426,6 @@ void handleExitCommand(const std::string&) {
     exit(0);
 }
 
-void handleImportDataCommand(
-    const std::string&,
-    tundraux::frontend::BackendRuntime* backendRuntime
-) {
-    if (usesBackend(backendRuntime)) {
-        colorcout("red", "Import data is disabled in backend mode until it is served by backend RPC.\n");
-        return;
-    }
-    ReadOldFile();
-}
-
 void handleTimeCommand(const std::string&) {
     auto now = std::chrono::system_clock::now();
     std::time_t tt = std::chrono::system_clock::to_time_t(now);
@@ -553,14 +541,6 @@ void handleListUserCommand(
     listUser();
 }
 
-void handleTuxFileCommand(
-    const std::string&,
-    USER& currentUser,
-    tundraux::frontend::BackendRuntime* backendRuntime
-) {
-    file_editor(currentUser.name, currentUser.type, backendRuntime);
-}
-
 void handleInfoCommand(const std::string&) {
     colorcout("cyan", "TundraUX 2.0 Build: " + std::string(tundraux::build_info::timestamp()) + "\n");
 }
@@ -597,7 +577,7 @@ void handleEditCommand(
     });
     if (lowerFilename.size() >= 4 &&
         lowerFilename.substr(lowerFilename.size() - 4) == ".tux") {
-        colorcout("yellow", "Use TUXfile to open .TUX files.\n");
+        colorcout("yellow", "Use explorer to open .TUX files.\n");
         return;
     }
     if (lowerFilename.size() >= 5 &&

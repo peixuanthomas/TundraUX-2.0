@@ -1,9 +1,9 @@
 #include "explorer_permissions.hpp"
 
-#include "TUXfile.hpp"
 #include "explorer_directory.hpp"
 #include "explorer_style.hpp"
 #include "explorer_text.hpp"
+#include "tux_editor.hpp"
 
 namespace tundraux::explorer {
 

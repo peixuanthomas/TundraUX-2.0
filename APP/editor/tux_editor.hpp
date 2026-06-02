@@ -2,15 +2,6 @@
 
 #include <string>
 
-namespace tundraux::frontend {
-class BackendRuntime;
-}
-
-void file_editor(
-    const std::string& currentUsername,
-    const std::string& currentUsertype,
-    tundraux::frontend::BackendRuntime* backendRuntime = nullptr
-);
 int open_tux_file_in_editor(
     const std::string& tuxPath,
     const std::string& displayName,

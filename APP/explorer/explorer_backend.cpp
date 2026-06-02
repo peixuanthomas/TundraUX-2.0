@@ -80,6 +80,30 @@ ExplorerBackendResult<std::vector<FileEntry>> BackendClientExplorerBackend::sear
     return fromEntryClientResult(client_.searchFiles(sessionId_, root, query));
 }
 
+ExplorerBackendResult<std::string> BackendClientExplorerBackend::readFile(const std::string& path) {
+    return fromClientResult(client_.readFile(sessionId_, path));
+}
+
+ExplorerBackendResult<bool> BackendClientExplorerBackend::writeFile(
+    const std::string& path,
+    const std::string& content
+) {
+    return fromClientResult(client_.writeFile(sessionId_, path, content));
+}
+
+ExplorerBackendResult<tundraux::frontend::FrontendTuxContent> BackendClientExplorerBackend::readTux(
+    const std::string& path
+) {
+    return fromClientResult(client_.readTux(sessionId_, path));
+}
+
+ExplorerBackendResult<bool> BackendClientExplorerBackend::writeTux(
+    const std::string& path,
+    const std::string& content
+) {
+    return fromClientResult(client_.writeTux(sessionId_, path, content));
+}
+
 std::string explorerRelativePath(const fs::path& root, const fs::path& path) {
     std::error_code error;
     const fs::path relative = fs::relative(path, root, error);

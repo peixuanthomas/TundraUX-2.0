@@ -14,17 +14,10 @@
 #include <windows.h>
 #endif
 
-//Old modules just for reading old files.
-//ATTENTION: These modules should not be used in new code.
-
-static bool readEncryptedString(std::ifstream& in, std::string& data);
-static void read_info();
-
 namespace {
 constexpr size_t MAX_USER_COUNT = 10000;
 constexpr size_t MAX_USER_STRING_LENGTH = 1024 * 1024;
 constexpr std::uintmax_t MAX_USER_DATA_FILE_SIZE = 64 * 1024 * 1024;
-constexpr int USER_DATA_VERSION_2_0 = 2;
 constexpr int USER_DATA_VERSION_2_1 = 21;
 
 bool readExact(std::ifstream& file, void* data, std::streamsize size, const std::string& label) {
@@ -139,103 +132,6 @@ std::string encryptDecrypt(const std::string& input) {
         output[i] ^= key;  // XOR operation
     }
     return output;
-}
-static bool readEncryptedString(std::ifstream& in, std::string& data) {
-    size_t len;
-    in.read(reinterpret_cast<char*>(&len), sizeof(len));
-    if (!in) return false;
-    if (len > MAX_USER_STRING_LENGTH) {
-        colorcout("red", "Error: Legacy user string exceeds maximum length.\n");
-        return false;
-    }
-    std::vector<char> buffer;
-    try {
-        buffer.resize(len);
-    } catch (const std::exception&) {
-        colorcout("red", "Error: Unable to allocate memory for legacy user string.\n");
-        return false;
-    }
-    in.read(buffer.data(), len);
-    if (!in) return false;
-    data = encryptDecrypt(std::string(buffer.data(), len));
-    return true;
-}
-struct OLD_USER {
-    std::string name;
-    std::string password;
-    std::string passwordtip;
-    std::string activationCode;
-    int count;
-};
-static OLD_USER currentUser;
-static void read_info() {
-    std::ifstream in("user_data", std::ios::binary);
-    if (!in) {
-        colorcout("red", "Error: User data file not found or unreadable.\n");
-        currentUser = {};
-        return;
-    }
-    std::string oldName = currentUser.name;
-    if (!readEncryptedString(in, currentUser.name)) {
-        currentUser = {};
-        return;
-    }
-    if (!readEncryptedString(in, currentUser.password)) {
-        currentUser = {};
-        return;
-    }
-    if (!readEncryptedString(in, currentUser.passwordtip)) {
-        currentUser = {};
-        return;
-    }
-    if (!readEncryptedString(in, currentUser.activationCode)) {
-        currentUser = {};
-        return;
-    }
-    int encryptedCount;
-    in.read(reinterpret_cast<char*>(&encryptedCount), sizeof(encryptedCount));
-    if (!in) {
-        currentUser = {};
-        return;
-    }
-    currentUser.count = encryptedCount ^ 0xAA55AA55;
-}
-//End of old modules.
-void ReadOldFile() {
-    read_info();
-    if (currentUser.name.empty()) {
-        colorcout("red", "No valid username found.\n");
-        return;
-    }
-    if(currentUser.password.empty()) {
-        colorcout("red", "No valid password found.\n");
-        return;
-    }
-    if(currentUser.count > 7 || currentUser.count < 0) {
-        colorcout("red", "Found invalid user, process terminated.\n");
-        return;
-    }
-    colorcout("white", "Please confirm the imported user details:\n\n");
-    colorcout("white", "Username: " + currentUser.name + "\n");
-    colorcout("white", "Password: " + currentUser.password + "\n");
-    colorcout("white", "Password Hint: " + (currentUser.passwordtip.empty() ? "(none)" : currentUser.passwordtip) + "\n\n");
-    if(!getYN("Are these details correct?")) {
-        colorcout("white", "User data import cancelled.\n");
-        return;
-    }
-    DataManager dataManager("user_data.dat");
-    USER newUser;
-    newUser.type = "admin";
-    newUser.name = currentUser.name;
-    newUser.password = currentUser.password;
-    newUser.password_hint = currentUser.passwordtip;
-    newUser.count = currentUser.count;
-    if(dataManager.AddUser(newUser)) {
-        colorcout("green", "User data imported successfully!\n");
-        if (getYN("Delete old user data file?")) std::remove("user_data");
-    } else {
-        colorcout("red", "User already exists.\n");
-    }
 }
 
 /*
@@ -380,28 +276,20 @@ void DataManager::LoadUsersFromFile() {
         return;
     }
 
-    bool loadedStrictMode = false;
     size_t userCount = 0;
-    if (version == USER_DATA_VERSION_2_0) {
-        loadedStrictMode = false;
-        if (!readExact(inFile, &userCount, sizeof(userCount), "user count")) {
-            return;
-        }
-    } else if (version == USER_DATA_VERSION_2_1) {
-        std::uint8_t strictValue = 0;
-        if (!readExact(inFile, &strictValue, sizeof(strictValue), "strict mode value")) {
-            return;
-        }
-        if (strictValue != 0 && strictValue != 1) {
-            colorcout("red", "Error: Invalid strict mode value in user data file.\n");
-            return;
-        }
-        loadedStrictMode = (strictValue == 1);
-        if (!readExact(inFile, &userCount, sizeof(userCount), "user count")) {
-            return;
-        }
-    } else {
+    if (version != USER_DATA_VERSION_2_1) {
         colorcout("red", "Error: Unsupported user data file version.\n");
+        return;
+    }
+    std::uint8_t strictValue = 0;
+    if (!readExact(inFile, &strictValue, sizeof(strictValue), "strict mode value")) {
+        return;
+    }
+    if (strictValue != 0 && strictValue != 1) {
+        colorcout("red", "Error: Invalid strict mode value in user data file.\n");
+        return;
+    }
+    if (!readExact(inFile, &userCount, sizeof(userCount), "user count")) {
         return;
     }
 
@@ -438,7 +326,7 @@ void DataManager::LoadUsersFromFile() {
         return;
     }
 
-    strictMode_ = loadedStrictMode;
+    strictMode_ = (strictValue == 1);
     userDataList = std::move(tempUserDataList);
 }
 

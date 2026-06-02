@@ -25,6 +25,10 @@ public:
     virtual ExplorerBackendResult<bool> copyPath(const std::string& from, const std::string& to, bool overwrite) = 0;
     virtual ExplorerBackendResult<bool> movePath(const std::string& from, const std::string& to, bool overwrite) = 0;
     virtual ExplorerBackendResult<std::vector<FileEntry>> search(const std::string& root, const std::string& query) = 0;
+    virtual ExplorerBackendResult<std::string> readFile(const std::string& path) = 0;
+    virtual ExplorerBackendResult<bool> writeFile(const std::string& path, const std::string& content) = 0;
+    virtual ExplorerBackendResult<tundraux::frontend::FrontendTuxContent> readTux(const std::string& path) = 0;
+    virtual ExplorerBackendResult<bool> writeTux(const std::string& path, const std::string& content) = 0;
 };
 
 class BackendClientExplorerBackend final : public ExplorerBackend {
@@ -37,6 +41,10 @@ public:
     ExplorerBackendResult<bool> copyPath(const std::string& from, const std::string& to, bool overwrite) override;
     ExplorerBackendResult<bool> movePath(const std::string& from, const std::string& to, bool overwrite) override;
     ExplorerBackendResult<std::vector<FileEntry>> search(const std::string& root, const std::string& query) override;
+    ExplorerBackendResult<std::string> readFile(const std::string& path) override;
+    ExplorerBackendResult<bool> writeFile(const std::string& path, const std::string& content) override;
+    ExplorerBackendResult<tundraux::frontend::FrontendTuxContent> readTux(const std::string& path) override;
+    ExplorerBackendResult<bool> writeTux(const std::string& path, const std::string& content) override;
 
 private:
     tundraux::frontend::BackendClient& client_;

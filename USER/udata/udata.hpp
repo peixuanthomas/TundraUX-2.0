@@ -32,5 +32,4 @@ class DataManager {
         void LoadUsersFromFile();
         bool SaveUsersToFile();
 };
-void ReadOldFile();
 void listUser();

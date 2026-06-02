@@ -68,6 +68,34 @@ public:
     ) override {
         return {true, {}, "", ""};
     }
+
+    tundraux::explorer::ExplorerBackendResult<std::string> readFile(const std::string& path) override {
+        calls.push_back("readFile:" + path);
+        return {true, "content", "", ""};
+    }
+
+    tundraux::explorer::ExplorerBackendResult<bool> writeFile(
+        const std::string& path,
+        const std::string& content
+    ) override {
+        calls.push_back("writeFile:" + path + ":" + content);
+        return {true, true, "", ""};
+    }
+
+    tundraux::explorer::ExplorerBackendResult<tundraux::frontend::FrontendTuxContent> readTux(
+        const std::string& path
+    ) override {
+        calls.push_back("readTux:" + path);
+        return {true, {"content", "alice", "alice"}, "", ""};
+    }
+
+    tundraux::explorer::ExplorerBackendResult<bool> writeTux(
+        const std::string& path,
+        const std::string& content
+    ) override {
+        calls.push_back("writeTux:" + path + ":" + content);
+        return {true, true, "", ""};
+    }
 };
 
 bool writerCalled = false;

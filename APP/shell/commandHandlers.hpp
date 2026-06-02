@@ -14,10 +14,6 @@ void handleLoginCommand(
     tundraux::frontend::BackendRuntime* backendRuntime = nullptr
 );
 void handleExitCommand(const std::string& input);
-void handleImportDataCommand(
-    const std::string& input,
-    tundraux::frontend::BackendRuntime* backendRuntime = nullptr
-);
 void handleTimeCommand(const std::string& input);
 void handleModifyCommand(
     const std::string& input,
@@ -33,11 +29,6 @@ void handleLogoutCommand(
 );
 void handleListUserCommand(
     const std::string& input,
-    tundraux::frontend::BackendRuntime* backendRuntime = nullptr
-);
-void handleTuxFileCommand(
-    const std::string& input,
-    USER& currentUser,
     tundraux::frontend::BackendRuntime* backendRuntime = nullptr
 );
 void handleInfoCommand(const std::string& input);

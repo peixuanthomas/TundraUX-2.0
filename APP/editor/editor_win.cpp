@@ -1609,7 +1609,9 @@ int run_editor_windows(const std::string& filepath, const std::string& displayNa
 #include "editor_win.hpp"
 
 int run_editor_windows(const std::string& filepath, const std::string& displayName) {
-    return run_editor_portable(filepath, displayName);
+    (void)filepath;
+    (void)displayName;
+    return 1;
 }
 
 #endif

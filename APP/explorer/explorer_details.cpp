@@ -1,9 +1,9 @@
 #include "explorer_details.hpp"
 
-#include "TUXfile.hpp"
 #include "explorer_directory.hpp"
 #include "explorer_permissions.hpp"
 #include "explorer_text.hpp"
+#include "tux_editor.hpp"
 
 #include <algorithm>
 #include <filesystem>
