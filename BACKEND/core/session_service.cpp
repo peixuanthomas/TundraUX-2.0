@@ -11,8 +11,6 @@
 namespace tundraux::backend {
 namespace {
 
-constexpr const char* kAuthenticationFailedMessage = "Authentication failed.";
-
 std::string randomSessionId() {
     static thread_local std::mt19937_64 generator([] {
         std::random_device device;
@@ -78,7 +76,10 @@ ServiceResult<SessionInfo> SessionService::login(
         return user.name == username;
     });
     if (found == users.end()) {
-        return ServiceResult<SessionInfo>::failure(ErrorCode::AuthenticationFailed, kAuthenticationFailedMessage);
+        return ServiceResult<SessionInfo>::failure(
+            ErrorCode::AuthenticationFailed,
+            "User not found: " + username + "."
+        );
     }
     if (found->failedCount > 7) {
         return ServiceResult<SessionInfo>::failure(ErrorCode::PermissionDenied, "User disabled due to too many failed attempts.");
@@ -93,7 +94,10 @@ ServiceResult<SessionInfo> SessionService::login(
         } catch (const std::exception&) {
             return ServiceResult<SessionInfo>::failure(ErrorCode::StorageError, "Unable to update user data.");
         }
-        return ServiceResult<SessionInfo>::failure(ErrorCode::AuthenticationFailed, kAuthenticationFailedMessage);
+        return ServiceResult<SessionInfo>::failure(
+            ErrorCode::AuthenticationFailed,
+            "Incorrect password for user " + username + "."
+        );
     }
 
     BackendUser updated = *found;

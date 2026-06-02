@@ -270,13 +270,13 @@ int main() {
     const auto badLogin = sessions.login(guest.sessionId, "alice", "bad");
     if (!expect(!badLogin.ok, "bad login should fail")) return 1;
     if (!expect(badLogin.error.code == ErrorCode::AuthenticationFailed, "bad login error mismatch")) return 1;
-    if (!expect(badLogin.error.message == "Authentication failed.", "bad login message mismatch")) return 1;
+    if (!expect(badLogin.error.message == "Incorrect password for user alice.", "bad login message mismatch")) return 1;
     if (!expect(store.users[0].failedCount == 1, "failed login should increment count")) return 1;
 
     const auto unknownLogin = sessions.login(guest.sessionId, "missing", "bad");
     if (!expect(!unknownLogin.ok, "unknown login should fail")) return 1;
     if (!expect(unknownLogin.error.code == badLogin.error.code, "unknown login code should match bad password")) return 1;
-    if (!expect(unknownLogin.error.message == badLogin.error.message, "unknown login message should match bad password")) return 1;
+    if (!expect(unknownLogin.error.message == "User not found: missing.", "unknown login message mismatch")) return 1;
 
     const auto lockedLogin = sessions.login(guest.sessionId, "locked", "Secret3");
     if (!expect(!lockedLogin.ok, "locked login should fail")) return 1;

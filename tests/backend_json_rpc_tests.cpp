@@ -8,6 +8,7 @@
 #include "user_service.hpp"
 #include "user_store.hpp"
 
+#include <algorithm>
 #include <cmath>
 #include <iostream>
 #include <limits>
@@ -317,6 +318,26 @@ bool runDispatcherTest() {
     if (!expect(guestResult.at("user").asObject().at("type").asString() == "guest", "guest user type mismatch")) return false;
     if (!expect(guestResult.at("user").asObject().at("name").asString().empty(), "guest user name should be empty")) return false;
 
+    const std::string badLoginResponse = dispatcher.handleLine(
+        R"({"id":"1bad","method":"session.login","params":{"sessionId":")" + sessionId +
+        R"(","username":"alice","password":"bad"}})"
+    );
+    const auto badLogin = parseJson(badLoginResponse);
+    if (!expect(badLogin.ok, "bad login response should parse: " + badLoginResponse)) return false;
+    const auto& badLoginError = badLogin.value.asObject().at("error").asObject();
+    if (!expect(badLoginError.at("code").asString() == "AuthenticationFailed", "bad login code mismatch")) return false;
+    if (!expect(badLoginError.at("message").asString() == "Incorrect password for user alice.", "bad login message mismatch")) return false;
+
+    const std::string missingLoginResponse = dispatcher.handleLine(
+        R"({"id":"1missing","method":"session.login","params":{"sessionId":")" + sessionId +
+        R"(","username":"missing","password":"bad"}})"
+    );
+    const auto missingLogin = parseJson(missingLoginResponse);
+    if (!expect(missingLogin.ok, "missing login response should parse: " + missingLoginResponse)) return false;
+    const auto& missingLoginError = missingLogin.value.asObject().at("error").asObject();
+    if (!expect(missingLoginError.at("code").asString() == "AuthenticationFailed", "missing login code mismatch")) return false;
+    if (!expect(missingLoginError.at("message").asString() == "User not found: missing.", "missing login message mismatch")) return false;
+
     const std::string forgedStartSessionResponse = dispatcher.handleLine(
         R"({"id":"1a","method":"session.startSession","params":{"user":{"name":"forged","type":"admin"}}})"
     );
@@ -485,6 +506,87 @@ bool runDispatcherTest() {
     if (!expect(invalidObject.at("error").asObject().at("code").asString() == "InvalidRequest", "invalid request code mismatch")) return false;
 
     return true;
+}
+
+bool runDispatcherUserMutationTest() {
+    using tundraux::backend::JsonRpcDispatcher;
+    using tundraux::backend::parseJson;
+    using tundraux::backend::SessionService;
+    using tundraux::backend::UserService;
+
+    InMemoryUserStore store;
+    SessionService sessions(store);
+    UserService users(store, sessions);
+    JsonRpcDispatcher dispatcher(sessions, users);
+
+    const std::string guestResponse = dispatcher.handleLine(R"({"id":"1","method":"session.startGuestSession","params":{}})");
+    const auto guest = parseJson(guestResponse);
+    if (!expect(guest.ok, "user mutation guest response should parse: " + guestResponse)) return false;
+    const std::string sessionId = guest.value.asObject().at("result").asObject().at("sessionId").asString();
+
+    const std::string loginResponse = dispatcher.handleLine(
+        R"({"id":"2","method":"session.login","params":{"sessionId":")" + sessionId +
+        R"(","username":"alice","password":"Secret1"}})"
+    );
+    if (!expectNoErrorResponse(loginResponse, "2", "user mutation login")) return false;
+
+    const std::string createResponse = dispatcher.handleLine(
+        R"({"id":"3","method":"user.createUser","params":{"sessionId":")" + sessionId +
+        R"(","user":{"name":"carol","type":"user","password":"Secret3","passwordHint":"team lead","failedCount":2}}})"
+    );
+    if (!expectNoErrorResponse(createResponse, "3", "user mutation create")) return false;
+    auto carol = std::find_if(store.users.begin(), store.users.end(), [](const auto& user) {
+        return user.name == "carol";
+    });
+    if (!expect(carol != store.users.end(), "created user should be stored")) return false;
+    if (!expect(carol->type == "user", "created user type mismatch")) return false;
+    if (!expect(carol->password == "Secret3", "created user password mismatch")) return false;
+    if (!expect(carol->passwordHint == "team lead", "created user hint mismatch")) return false;
+    if (!expect(carol->failedCount == 2, "created user failed count mismatch")) return false;
+
+    const std::string updateResponse = dispatcher.handleLine(
+        R"({"id":"4","method":"user.updateUser","params":{"sessionId":")" + sessionId +
+        R"(","originalName":"carol","passwordProvided":false,"user":{"name":"carol","type":"admin","passwordHint":"ops","failedCount":4}}})"
+    );
+    if (!expectNoErrorResponse(updateResponse, "4", "user mutation update")) return false;
+    carol = std::find_if(store.users.begin(), store.users.end(), [](const auto& user) {
+        return user.name == "carol";
+    });
+    if (!expect(carol != store.users.end(), "updated user should remain stored")) return false;
+    if (!expect(carol->type == "admin", "updated user type mismatch")) return false;
+    if (!expect(carol->password == "Secret3", "update without password should preserve password")) return false;
+    if (!expect(carol->passwordHint == "ops", "updated user hint mismatch")) return false;
+    if (!expect(carol->failedCount == 4, "updated user failed count mismatch")) return false;
+
+    const std::string resetResponse = dispatcher.handleLine(
+        R"({"id":"5","method":"user.resetFailedCount","params":{"sessionId":")" + sessionId +
+        R"(","name":"carol"}})"
+    );
+    if (!expectNoErrorResponse(resetResponse, "5", "user mutation reset")) return false;
+    carol = std::find_if(store.users.begin(), store.users.end(), [](const auto& user) {
+        return user.name == "carol";
+    });
+    if (!expect(carol != store.users.end() && carol->failedCount == 0, "reset should clear failed count")) return false;
+
+    const std::string disableResponse = dispatcher.handleLine(
+        R"({"id":"6","method":"user.disableUser","params":{"sessionId":")" + sessionId +
+        R"(","name":"carol"}})"
+    );
+    if (!expectNoErrorResponse(disableResponse, "6", "user mutation disable")) return false;
+    carol = std::find_if(store.users.begin(), store.users.end(), [](const auto& user) {
+        return user.name == "carol";
+    });
+    if (!expect(carol != store.users.end() && carol->failedCount == 8, "disable should lock user")) return false;
+
+    const std::string deleteResponse = dispatcher.handleLine(
+        R"({"id":"7","method":"user.deleteUser","params":{"sessionId":")" + sessionId +
+        R"(","name":"carol"}})"
+    );
+    if (!expectNoErrorResponse(deleteResponse, "7", "user mutation delete")) return false;
+    carol = std::find_if(store.users.begin(), store.users.end(), [](const auto& user) {
+        return user.name == "carol";
+    });
+    return expect(carol == store.users.end(), "deleted user should be removed");
 }
 
 bool runDispatcherFileMutationTest() {
@@ -741,6 +843,7 @@ int main() {
     if (!expect(wrongTypeThrew, "wrong-type accessor should throw")) return 1;
 
     if (!expect(runDispatcherTest(), "json rpc dispatcher behavior failed")) return 1;
+    if (!expect(runDispatcherUserMutationTest(), "json rpc user mutation behavior failed")) return 1;
     if (!expect(runDispatcherFileMutationTest(), "json rpc file mutation behavior failed")) return 1;
     if (!expect(runDispatcherTuxMethodsTest(), "json rpc tux behavior failed")) return 1;
     if (!expect(runDispatcherWithoutFileServiceTest(), "json rpc dispatcher without file service behavior failed")) return 1;

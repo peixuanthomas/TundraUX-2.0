@@ -2,4 +2,8 @@
 
 #include "udata.hpp"
 
-void manage_users(USER& currentUser);
+namespace tundraux::frontend {
+class BackendRuntime;
+}
+
+void manage_users(USER& currentUser, tundraux::frontend::BackendRuntime* backendRuntime);

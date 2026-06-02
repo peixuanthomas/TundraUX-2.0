@@ -390,6 +390,18 @@ bool runLoginTest() {
         expect(result.value.user.type == "admin", "login user type mismatch");
 }
 
+bool runLoginErrorMessageTest() {
+    FakeTransport transport;
+    transport.nextResponse = R"({"id":"1","error":{"code":"AuthenticationFailed","message":"Incorrect password for user alice."}})";
+    tundraux::frontend::BackendClient client(transport);
+
+    const auto result = client.login("guest-1", "alice", "bad");
+
+    return expect(!result.ok, "login error should fail") &&
+        expect(result.errorCode == "AuthenticationFailed", "login error code mismatch") &&
+        expect(result.message == "Incorrect password for user alice.", "login error message mismatch");
+}
+
 bool runLogoutTest() {
     FakeTransport transport;
     transport.nextResponse = R"({"id":"1","result":{"ok":true}})";
@@ -465,6 +477,102 @@ bool runUpdateOwnAccountWithoutOptionalFieldsTest() {
         expect(params.at("sessionId").asString() == "session-1", "update own account optional fields sessionId param mismatch") &&
         expect(params.find("password") == params.end(), "update own account should omit password field") &&
         expect(params.find("passwordHint") == params.end(), "update own account should omit passwordHint field");
+}
+
+bool runUserManagementMutationMethodsTest() {
+    FakeTransport transport;
+    transport.nextResponse = R"({"id":"1","result":{"ok":true}})";
+    tundraux::frontend::BackendClient client(transport);
+    tundraux::frontend::FrontendUser user{"carol", "admin", "team lead", 2};
+
+    const auto createResult = client.createUser("session-1", user, "Secret3");
+    tundraux::backend::JsonValue parsedCreate;
+    const auto* createRequest = parseRequestObject(transport, "create managed user", parsedCreate);
+    if (createRequest == nullptr) {
+        return false;
+    }
+    const auto& createParams = createRequest->at("params").asObject();
+    const auto& createUser = createParams.at("user").asObject();
+    if (!expect(createResult.ok && createResult.value, "create managed user should succeed") ||
+        !expect(createRequest->at("method").asString() == "user.createUser", "create managed user method mismatch") ||
+        !expect(createParams.at("sessionId").asString() == "session-1", "create managed user sessionId mismatch") ||
+        !expect(createUser.at("name").asString() == "carol", "create managed user name mismatch") ||
+        !expect(createUser.at("type").asString() == "admin", "create managed user type mismatch") ||
+        !expect(createUser.at("password").asString() == "Secret3", "create managed user password mismatch") ||
+        !expect(createUser.at("passwordHint").asString() == "team lead", "create managed user hint mismatch") ||
+        !expect(createUser.at("failedCount").asNumber() == 2.0, "create managed user failed count mismatch")) {
+        return false;
+    }
+
+    transport.nextResponse = R"({"id":"2","result":{"ok":true}})";
+    user.type = "user";
+    user.failedCount = 0;
+    const auto updateResult = client.updateUser("session-1", "carol", user, false, "");
+    tundraux::backend::JsonValue parsedUpdate;
+    const auto* updateRequest = parseRequestObject(transport, "update managed user", parsedUpdate);
+    if (updateRequest == nullptr) {
+        return false;
+    }
+    const auto& updateParams = updateRequest->at("params").asObject();
+    const auto& updateUser = updateParams.at("user").asObject();
+    if (!expect(updateResult.ok && updateResult.value, "update managed user should succeed") ||
+        !expect(updateRequest->at("method").asString() == "user.updateUser", "update managed user method mismatch") ||
+        !expect(updateParams.at("originalName").asString() == "carol", "update managed user original name mismatch") ||
+        !expect(!updateParams.at("passwordProvided").asBoolean(), "update managed user passwordProvided mismatch") ||
+        !expect(updateUser.find("password") == updateUser.end(), "update managed user should omit password when unchanged")) {
+        return false;
+    }
+
+    transport.nextResponse = R"({"id":"3","result":{"ok":true}})";
+    const auto resetResult = client.resetFailedCount("session-1", "carol");
+    if (!expect(resetResult.ok && resetResult.value, "reset managed user should succeed") ||
+        !expectRequestMethod(transport, "user.resetFailedCount", "reset managed user")) {
+        return false;
+    }
+
+    transport.nextResponse = R"({"id":"4","result":{"ok":true}})";
+    const auto disableResult = client.disableUser("session-1", "carol");
+    if (!expect(disableResult.ok && disableResult.value, "disable managed user should succeed") ||
+        !expectRequestMethod(transport, "user.disableUser", "disable managed user")) {
+        return false;
+    }
+
+    transport.nextResponse = R"({"id":"5","result":{"ok":true}})";
+    const auto deleteResult = client.deleteUser("session-1", "carol");
+    return expect(deleteResult.ok && deleteResult.value, "delete managed user should succeed") &&
+        expectRequestMethod(transport, "user.deleteUser", "delete managed user");
+}
+
+bool runStrictModeMethodsTest() {
+    FakeTransport transport;
+    transport.nextResponse = R"({"id":"1","result":{"enabled":true}})";
+    tundraux::frontend::BackendClient client(transport);
+
+    const auto getResult = client.getStrictMode("session-1");
+    tundraux::backend::JsonValue parsedGet;
+    const auto* getRequest = parseRequestObject(transport, "get strict mode", parsedGet);
+    if (getRequest == nullptr) {
+        return false;
+    }
+    const auto& getParams = getRequest->at("params").asObject();
+    if (!expect(getResult.ok && getResult.value, "get strict mode should succeed") ||
+        !expect(getRequest->at("method").asString() == "user.getStrictMode", "get strict mode method mismatch") ||
+        !expect(getParams.at("sessionId").asString() == "session-1", "get strict mode sessionId mismatch")) {
+        return false;
+    }
+
+    transport.nextResponse = R"({"id":"2","result":{"ok":true}})";
+    const auto setResult = client.setStrictMode("session-1", false);
+    tundraux::backend::JsonValue parsedSet;
+    const auto* setRequest = parseRequestObject(transport, "set strict mode", parsedSet);
+    if (setRequest == nullptr) {
+        return false;
+    }
+    const auto& setParams = setRequest->at("params").asObject();
+    return expect(setResult.ok && setResult.value, "set strict mode should succeed") &&
+        expect(setRequest->at("method").asString() == "user.setStrictMode", "set strict mode method mismatch") &&
+        expect(setParams.at("sessionId").asString() == "session-1", "set strict mode sessionId mismatch") &&
+        expect(!setParams.at("enabled").asBoolean(), "set strict mode enabled mismatch");
 }
 
 bool runRuntimeLegacyDirectTest(const std::string& selfPath) {
@@ -673,10 +781,13 @@ int main(int argc, char* argv[]) {
     if (!runListDirectoryFractionalSizeTest()) return 1;
     if (!runListDirectoryNegativeSizeTest()) return 1;
     if (!runLoginTest()) return 1;
+    if (!runLoginErrorMessageTest()) return 1;
     if (!runLogoutTest()) return 1;
     if (!runCurrentProfileTest()) return 1;
     if (!runUpdateOwnAccountTest()) return 1;
     if (!runUpdateOwnAccountWithoutOptionalFieldsTest()) return 1;
+    if (!runUserManagementMutationMethodsTest()) return 1;
+    if (!runStrictModeMethodsTest()) return 1;
     if (!runRuntimeLegacyDirectTest(argv[0])) return 1;
     if (!runRuntimeMissingBackendPathTest()) return 1;
     if (!runProcessResponseLineTooLongTest(argv[0])) return 1;

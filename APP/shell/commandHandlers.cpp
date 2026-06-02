@@ -242,10 +242,14 @@ USER shellUserFromBackend(const tundraux::frontend::FrontendUser& user) {
 
 std::string backendFailureMessage(
     const std::string& fallback,
-    const std::string& errorCode
+    const std::string& errorCode,
+    const std::string& backendMessage = ""
 ) {
     if (errorCode == "AuthenticationFailed") {
-        return "Login failed.";
+        return backendMessage.empty() ? "Login failed." : backendMessage;
+    }
+    if (errorCode == "StorageError") {
+        return backendMessage.empty() ? fallback : backendMessage;
     }
     if (errorCode == "TransportError") {
         return "Backend unavailable.";
@@ -367,7 +371,10 @@ void handleLoginCommand(
         const auto result = backendRuntime->client()->login(backendRuntime->sessionId(), username, password);
         if (!result.ok) {
             tundraux::audit::logEvent("login", "backend failure " + result.errorCode);
-            colorcout("red", backendFailureMessage("Unable to complete backend login.", result.errorCode) + "\n");
+            colorcout(
+                "red",
+                backendFailureMessage("Unable to complete backend login.", result.errorCode, result.message) + "\n"
+            );
             return;
         }
 
@@ -550,11 +557,11 @@ void handleManageUsersCommand(
     USER& currentUser,
     tundraux::frontend::BackendRuntime* backendRuntime
 ) {
-    if (usesBackend(backendRuntime)) {
-        colorcout("red", "User management is disabled in backend mode until it is served by backend RPC.\n");
+    if (!usesBackend(backendRuntime)) {
+        colorcout("red", "User management requires backend mode.\n");
         return;
     }
-    manage_users(currentUser);
+    manage_users(currentUser, backendRuntime);
 }
 
 void handleEditCommand(

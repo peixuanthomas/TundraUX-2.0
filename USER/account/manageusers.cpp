@@ -1,6 +1,8 @@
 // Attention: Windows only code.
 #include "manageusers.hpp"
 
+#include "backend_client.hpp"
+#include "backend_runtime.hpp"
 #include "TundraTUI/color.hpp"
 #include "TundraTUI/input.hpp"
 #include "TundraTUI/render_engine.hpp"
@@ -8,14 +10,12 @@
 #include "TundraTUI/style.hpp"
 #include "TundraTUI/text.hpp"
 #include "audit_log.hpp"
-#include "udata.hpp"
 
 #include <algorithm>
 #include <cctype>
-#include <fstream>
 #include <iostream>
-#include <sstream>
 #include <string>
+#include <utility>
 #include <vector>
 
 namespace {
@@ -46,17 +46,12 @@ using tundra_tui::kTitleStyle;
 using tundra_tui::kUserStyle;
 using tundra_tui::kWarningStyle;
 
+namespace frontend = tundraux::frontend;
+
 struct DetailLine {
     std::string label;
     std::string value;
     bool section = false;
-};
-
-struct PasswordStatus {
-    bool hasMinLength = false;
-    bool hasUpper = false;
-    bool hasLower = false;
-    bool hasDigit = false;
 };
 
 struct UserForm {
@@ -72,16 +67,22 @@ struct UserForm {
 };
 
 struct UserManagerState {
+    std::vector<frontend::FrontendUser> users;
     std::size_t cursor = 0;
     std::size_t scroll = 0;
     bool showHelp = false;
-    bool showPassword = false;
     bool formOpen = false;
     bool confirmDelete = false;
     bool forceExit = false;
     UserForm form;
     std::string pendingDeleteName;
     std::string message = "Ready";
+    std::string lastBackendErrorCode;
+};
+
+struct UserManagerBackend {
+    frontend::BackendClient& client;
+    std::string& sessionId;
 };
 
 std::string trimCopy(std::string value) {
@@ -100,36 +101,185 @@ std::string toLowerCopy(std::string value) {
     return value;
 }
 
-bool hasWhitespace(const std::string& value) {
-    return std::any_of(value.begin(), value.end(), [](unsigned char ch) {
-        return std::isspace(ch) != 0;
-    });
+std::string backendFailureMessage(const std::string& fallback, const std::string& errorCode) {
+    if (errorCode == "TransportError") {
+        return "Backend unavailable.";
+    }
+    if (errorCode == "InvalidResponse") {
+        return "Invalid backend response.";
+    }
+    if (errorCode == "SessionExpired") {
+        return "Backend session expired.";
+    }
+    if (errorCode == "PermissionDenied") {
+        return "Access Denied.";
+    }
+    if (errorCode == "NotFound") {
+        return "User not found.";
+    }
+    return fallback;
 }
 
-PasswordStatus getPasswordStatus(const std::string& password) {
-    PasswordStatus status;
-    status.hasMinLength = password.length() >= 6;
-    for (char c : password) {
-        if (std::isupper(static_cast<unsigned char>(c))) {
-            status.hasUpper = true;
-        } else if (std::islower(static_cast<unsigned char>(c))) {
-            status.hasLower = true;
-        } else if (std::isdigit(static_cast<unsigned char>(c))) {
-            status.hasDigit = true;
+USER shellUserFromBackend(const frontend::FrontendUser& user) {
+    return USER{user.type, user.name, "", user.passwordHint, user.failedCount};
+}
+
+USER guestUser() {
+    return USER{"guest", "", "", "", 0};
+}
+
+void syncAuditUser(USER& currentUser, USER user) {
+    currentUser = std::move(user);
+    tundraux::audit::setCurrentUser(currentUser);
+}
+
+bool isTerminalBackendFailure(const std::string& errorCode) {
+    return errorCode == "PermissionDenied" ||
+           errorCode == "SessionExpired" ||
+           errorCode == "TransportError" ||
+           errorCode == "InvalidResponse";
+}
+
+void startGuestSessionOrClear(UserManagerBackend& backend, USER& currentUser) {
+    const auto guestSession = backend.client.startGuestSession();
+    if (guestSession.ok) {
+        backend.sessionId = guestSession.value.sessionId;
+        syncAuditUser(currentUser, shellUserFromBackend(guestSession.value.user));
+        return;
+    }
+
+    backend.sessionId.clear();
+    syncAuditUser(currentUser, guestUser());
+}
+
+void syncProfileOrGuest(UserManagerBackend& backend, USER& currentUser) {
+    if (backend.sessionId.empty()) {
+        startGuestSessionOrClear(backend, currentUser);
+        return;
+    }
+
+    const auto profile = backend.client.currentProfile(backend.sessionId);
+    if (profile.ok) {
+        syncAuditUser(currentUser, shellUserFromBackend(profile.value));
+        return;
+    }
+
+    if (profile.errorCode == "SessionExpired") {
+        startGuestSessionOrClear(backend, currentUser);
+        return;
+    }
+
+    backend.sessionId.clear();
+    syncAuditUser(currentUser, guestUser());
+}
+
+bool handleTerminalBackendFailure(
+    UserManagerBackend& backend,
+    UserManagerState& state,
+    USER& currentUser,
+    const std::string& errorCode,
+    const std::string& fallback
+) {
+    if (!isTerminalBackendFailure(errorCode)) {
+        return false;
+    }
+
+    state.message = backendFailureMessage(fallback, errorCode);
+    state.forceExit = true;
+    if (errorCode == "PermissionDenied") {
+        syncProfileOrGuest(backend, currentUser);
+    } else if (errorCode == "SessionExpired") {
+        startGuestSessionOrClear(backend, currentUser);
+    } else {
+        backend.sessionId.clear();
+        syncAuditUser(currentUser, guestUser());
+    }
+    return true;
+}
+
+bool refreshUsers(UserManagerBackend& backend, UserManagerState& state) {
+    const auto result = backend.client.listUsers(backend.sessionId);
+    if (!result.ok) {
+        state.users.clear();
+        state.cursor = 0;
+        state.scroll = 0;
+        state.lastBackendErrorCode = result.errorCode;
+        state.message = backendFailureMessage("Unable to list users.", result.errorCode);
+        return false;
+    }
+
+    state.lastBackendErrorCode.clear();
+    state.users = result.value;
+    if (state.users.empty()) {
+        state.cursor = 0;
+        state.scroll = 0;
+    } else if (state.cursor >= state.users.size()) {
+        state.cursor = state.users.size() - 1;
+    }
+    return true;
+}
+
+bool syncCurrentUserAfterMutation(UserManagerBackend& backend, USER& currentUser, UserManagerState& state) {
+    const auto profile = backend.client.currentProfile(backend.sessionId);
+    if (!profile.ok) {
+        if (profile.errorCode == "SessionExpired") {
+            startGuestSessionOrClear(backend, currentUser);
+        } else {
+            backend.sessionId.clear();
+            syncAuditUser(currentUser, guestUser());
+        }
+        state.message = backendFailureMessage("Your account lost management privileges. Returning to shell.", profile.errorCode);
+        state.forceExit = true;
+        return false;
+    }
+
+    syncAuditUser(currentUser, shellUserFromBackend(profile.value));
+    return true;
+}
+
+std::size_t userCount(const UserManagerState& state) {
+    return state.users.size();
+}
+
+const frontend::FrontendUser* selectedUser(const UserManagerState& state) {
+    if (state.users.empty() || state.cursor >= state.users.size()) {
+        return nullptr;
+    }
+    return &state.users[state.cursor];
+}
+
+void clampCursor(UserManagerState& state) {
+    if (state.users.empty()) {
+        state.cursor = 0;
+        state.scroll = 0;
+        return;
+    }
+    if (state.cursor >= state.users.size()) {
+        state.cursor = state.users.size() - 1;
+    }
+}
+
+void selectUserByName(UserManagerState& state, const std::string& name) {
+    for (std::size_t i = 0; i < state.users.size(); ++i) {
+        if (state.users[i].name == name) {
+            state.cursor = i;
+            return;
         }
     }
-    return status;
+    clampCursor(state);
 }
 
-bool isValidPassword(const PasswordStatus& status) {
-    return status.hasMinLength && status.hasUpper && status.hasLower && status.hasDigit;
-}
-
-std::string maskText(const std::string& value) {
-    if (value.empty()) {
-        return "(empty)";
+void keepCursorVisible(UserManagerState& state, std::size_t rows) {
+    clampCursor(state);
+    if (rows == 0) {
+        state.scroll = 0;
+        return;
     }
-    return std::string(value.size(), '*');
+    if (state.cursor < state.scroll) {
+        state.scroll = state.cursor;
+    } else if (state.cursor >= state.scroll + rows) {
+        state.scroll = state.cursor - rows + 1;
+    }
 }
 
 std::string headerCell(const std::string& text, std::size_t width) {
@@ -151,17 +301,21 @@ const char* statusStyle(const std::string& value) {
     const std::string normalized = toLowerCopy(value);
     if (normalized.find("locked") != std::string::npos ||
         normalized.find("error") != std::string::npos ||
-        normalized.find("denied") != std::string::npos) {
+        normalized.find("denied") != std::string::npos ||
+        normalized.find("expired") != std::string::npos ||
+        normalized.find("unavailable") != std::string::npos) {
         return kWarningStyle;
     }
     if (normalized.find("active") != std::string::npos ||
         normalized.find("saved") != std::string::npos ||
         normalized.find("created") != std::string::npos ||
         normalized.find("updated") != std::string::npos ||
-        normalized.find("deleted") != std::string::npos) {
+        normalized.find("deleted") != std::string::npos ||
+        normalized.find("reset") != std::string::npos ||
+        normalized.find("disabled") != std::string::npos) {
         return kCopyStyle;
     }
-    if (normalized == "(none)" || normalized == "(empty)") {
+    if (normalized == "(none)" || normalized == "(empty)" || normalized == "(hidden)") {
         return kHintStyle;
     }
     return kHelpTextStyle;
@@ -179,137 +333,14 @@ std::string detailLineText(const DetailLine& line, std::size_t width) {
            colorText(fitText(line.value, valueWidth), statusStyle(line.value));
 }
 
-std::size_t userCount(const DataManager& dataManager) {
-    return dataManager.GetAllUsers().size();
-}
-
-const USER* selectedUser(const DataManager& dataManager, const UserManagerState& state) {
-    const auto& users = dataManager.GetAllUsers();
-    if (users.empty() || state.cursor >= users.size()) {
-        return nullptr;
-    }
-    return &users[state.cursor];
-}
-
-std::size_t activeAdminCount(const DataManager& dataManager, const std::string& excludingName = "") {
-    std::size_t count = 0;
-    for (const auto& user : dataManager.GetAllUsers()) {
-        if (user.name == excludingName) {
-            continue;
-        }
-        if (toLowerCopy(user.type) == "admin" && user.count <= 7) {
-            ++count;
-        }
-    }
-    return count;
-}
-
-bool isOnlyActiveAdmin(const DataManager& dataManager, const USER& user) {
-    return toLowerCopy(user.type) == "admin" &&
-           user.count <= 7 &&
-           activeAdminCount(dataManager, user.name) == 0;
-}
-
-bool nameExists(const DataManager& dataManager, const std::string& name, const std::string& exceptName = "") {
-    for (const auto& user : dataManager.GetAllUsers()) {
-        if (user.name == name && user.name != exceptName) {
-            return true;
-        }
-    }
-    return false;
-}
-
-bool isDebugType(const std::string& type) {
-    return toLowerCopy(type) == "debug";
-}
-
-bool isAdminOrDebugType(const std::string& type) {
-    const std::string normalized = toLowerCopy(type);
-    return normalized == "admin" || normalized == "debug";
-}
-
-bool syncCurrentUserAfterMutation(USER& currentUser, std::string& message) {
-    if (isDebugType(currentUser.type)) {
-        tundraux::audit::setCurrentUser(currentUser);
-        return true;
-    }
-
-    const std::string lookupName = currentUser.name;
-    bool found = false;
-    USER refreshed = {"guest", "", "", "", 0};
-
-    if (!lookupName.empty()) {
-        try {
-            DataManager refreshedData("user_data.dat");
-            const auto& users = refreshedData.GetAllUsers();
-            const auto it = std::find_if(users.begin(), users.end(), [&](const USER& user) {
-                return user.name == lookupName;
-            });
-            if (it != users.end()) {
-                refreshed = *it;
-                found = true;
-            }
-        } catch (...) {
-            found = false;
-        }
-    }
-
-    if (!found || refreshed.count > 7 || !isAdminOrDebugType(refreshed.type)) {
-        currentUser = {"guest", "", "", "", 0};
-        tundraux::audit::setCurrentUser(currentUser);
-        message = "Your account lost management privileges. Returning to shell.";
-        return false;
-    }
-
-    currentUser = refreshed;
-    tundraux::audit::setCurrentUser(currentUser);
-    return true;
-}
-
-void clampCursor(UserManagerState& state, const DataManager& dataManager) {
-    const std::size_t count = userCount(dataManager);
-    if (count == 0) {
-        state.cursor = 0;
-        state.scroll = 0;
-        return;
-    }
-    if (state.cursor >= count) {
-        state.cursor = count - 1;
-    }
-}
-
-void selectUserByName(UserManagerState& state, const DataManager& dataManager, const std::string& name) {
-    const auto& users = dataManager.GetAllUsers();
-    for (std::size_t i = 0; i < users.size(); ++i) {
-        if (users[i].name == name) {
-            state.cursor = i;
-            return;
-        }
-    }
-    clampCursor(state, dataManager);
-}
-
-void keepCursorVisible(UserManagerState& state, const DataManager& dataManager, std::size_t rows) {
-    clampCursor(state, dataManager);
-    if (rows == 0) {
-        state.scroll = 0;
-        return;
-    }
-    if (state.cursor < state.scroll) {
-        state.scroll = state.cursor;
-    } else if (state.cursor >= state.scroll + rows) {
-        state.scroll = state.cursor - rows + 1;
-    }
-}
-
-std::string formatUserCell(const USER* user, bool selected, std::size_t width) {
+std::string formatUserCell(const frontend::FrontendUser* user, bool selected, std::size_t width) {
     if (user == nullptr) {
         return std::string(width, ' ');
     }
 
     const std::string marker = selected ? "> " : "  ";
     const std::string type = "[" + user->type + "]";
-    const std::string attempts = " " + std::to_string(user->count) + "/7";
+    const std::string attempts = " " + std::to_string(user->failedCount) + "/7";
     const std::string prefix = marker + type + " ";
     const std::size_t fixedWidth = prefix.size() + attempts.size();
 
@@ -322,10 +353,10 @@ std::string formatUserCell(const USER* user, bool selected, std::size_t width) {
            colorCellPart(type, typeStyle(user->type), selected) +
            colorCellPart(" ", kHelpTextStyle, selected) +
            colorCellPart(name, kHelpTextStyle, selected) +
-           colorCellPart(attempts, user->count > 7 ? kWarningStyle : kHintStyle, selected);
+           colorCellPart(attempts, user->failedCount > 7 ? kWarningStyle : kHintStyle, selected);
 }
 
-std::vector<DetailLine> buildDetailLines(const USER* user, bool showPassword) {
+std::vector<DetailLine> buildDetailLines(const frontend::FrontendUser* user) {
     if (user == nullptr) {
         return {
             {"No user selected", "", true},
@@ -337,10 +368,10 @@ std::vector<DetailLine> buildDetailLines(const USER* user, bool showPassword) {
         {"Account", "", true},
         {"Name", user->name, false},
         {"Type", user->type, false},
-        {"Password", showPassword ? user->password : maskText(user->password), false},
-        {"Password hint", user->password_hint.empty() ? "(none)" : user->password_hint, false},
-        {"Failed attempts", std::to_string(user->count), false},
-        {"Status", user->count > 7 ? "Locked" : "Active", false},
+        {"Password", "(hidden by backend)", false},
+        {"Password hint", user->passwordHint.empty() ? "(none)" : user->passwordHint, false},
+        {"Failed attempts", std::to_string(user->failedCount), false},
+        {"Status", user->failedCount > 7 ? "Locked" : "Active", false},
         {"Actions", "", true},
         {"Enter / e", "Edit selected user", false},
         {"r", "Reset failed attempts", false},
@@ -370,7 +401,6 @@ void renderHelp() {
     renderHelpBinding("d", "Delete the selected user after confirmation");
     renderHelpBinding("r", "Reset failed login attempts");
     renderHelpBinding("x", "Disable the selected user");
-    renderHelpBinding("p", "Show or hide the password in details");
     std::cout << "\n";
 
     std::cout << colorText("Form editing", kSectionStyle) << "\n";
@@ -394,11 +424,11 @@ std::string formFieldValue(const UserForm& form, std::size_t index) {
     }
 }
 
-std::string formFieldLabel(std::size_t index) {
+std::string formFieldLabel(const UserForm& form, std::size_t index) {
     switch (index) {
         case 0: return "Username";
         case 1: return "Type";
-        case 2: return "Password";
+        case 2: return form.editing ? "Password *" : "Password";
         case 3: return "Password hint";
         case 4: return "Failed count";
         default: return "";
@@ -408,10 +438,12 @@ std::string formFieldLabel(std::size_t index) {
 std::string formatFormLine(const UserForm& form, std::size_t index, std::size_t width) {
     const bool selected = form.field == index;
     const std::string marker = selected ? "> " : "  ";
-    const std::string label = fitText(formFieldLabel(index), 16);
+    const std::string label = fitText(formFieldLabel(form, index), 16);
     std::string value = formFieldValue(form, index);
     if (index == 1) {
         value += "  (Left/Right/Space)";
+    } else if (index == 2 && form.editing && value.empty()) {
+        value = "(leave unchanged)";
     }
 
     const std::string prefix = marker + label + " ";
@@ -429,7 +461,7 @@ void renderForm(const UserForm& form) {
 
     std::cout << "\x1b[0m\x1b[2J\x1b[H\x1b[?25l";
     std::cout << colorText(form.editing ? "Edit User" : "Add User", kTitleStyle)
-              << colorText(" - form", kHintStyle)
+              << colorText(" - backend form", kHintStyle)
               << "\n";
     std::cout << colorText(singleBorder(width), kBorderStyle) << "\n";
     std::cout << colorText("|", kBorderStyle)
@@ -460,12 +492,12 @@ void renderForm(const UserForm& form) {
                   << colorText(form.error, kWarningStyle);
     } else {
         std::cout << colorText("Status: ", kSectionStyle)
-                  << colorText("Fill the highlighted field directly.", kHelpTextStyle);
+                  << colorText(form.editing ? "* blank password keeps the backend value." : "Fill the highlighted field directly.", kHelpTextStyle);
     }
     std::cout << std::flush;
 }
 
-void renderMain(const DataManager& dataManager, const UserManagerState& state) {
+void renderMain(const UserManagerState& state) {
     const tundra_tui::Size size = terminalSize();
     const std::size_t width = std::max<int>(size.width, 90);
     const std::size_t height = std::max<int>(size.height, 18);
@@ -473,14 +505,14 @@ void renderMain(const DataManager& dataManager, const UserManagerState& state) {
     const std::size_t usableWidth = width > 3 ? width - 3 : width;
     const std::size_t usersWidth = std::max<std::size_t>(30, usableWidth * 40 / 100);
     const std::size_t detailsWidth = usableWidth - usersWidth;
-    const auto details = buildDetailLines(selectedUser(dataManager, state), state.showPassword);
+    const auto details = buildDetailLines(selectedUser(state));
 
     std::cout << "\x1b[0m\x1b[2J\x1b[H\x1b[?25l";
     std::cout << colorText("TundraUX User Management", kTitleStyle)
               << colorText(" - ", kHintStyle)
-              << colorText(std::to_string(userCount(dataManager)) + " users", kPathStyle)
+              << colorText(std::to_string(userCount(state)) + " users", kPathStyle)
               << "\n";
-    std::cout << colorText("user_data.dat", kPathStyle) << "\n";
+    std::cout << colorText("backend RPC", kPathStyle) << "\n";
     std::cout << colorText(splitBorder(usersWidth, detailsWidth), kBorderStyle) << "\n";
     std::cout << colorText("|", kBorderStyle)
               << headerCell("Users", usersWidth)
@@ -490,10 +522,9 @@ void renderMain(const DataManager& dataManager, const UserManagerState& state) {
               << "\n";
     std::cout << colorText(splitBorder(usersWidth, detailsWidth), kBorderStyle) << "\n";
 
-    const auto& users = dataManager.GetAllUsers();
     for (std::size_t rowIndex = 0; rowIndex < rows; ++rowIndex) {
         const std::size_t userIndex = state.scroll + rowIndex;
-        const USER* user = userIndex < users.size() ? &users[userIndex] : nullptr;
+        const frontend::FrontendUser* user = userIndex < state.users.size() ? &state.users[userIndex] : nullptr;
         const std::string userText = formatUserCell(
             user,
             userIndex == state.cursor && user != nullptr,
@@ -534,8 +565,6 @@ void renderMain(const DataManager& dataManager, const UserManagerState& state) {
                   << colorText(" reset | ", kHintStyle)
                   << colorText("x", kKeyStyle)
                   << colorText(" disable | ", kHintStyle)
-                  << colorText("p", kKeyStyle)
-                  << colorText(state.showPassword ? " hide password | " : " show password | ", kHintStyle)
                   << colorText("h", kKeyStyle)
                   << colorText(" help | ", kHintStyle)
                   << colorText("q", kKeyStyle)
@@ -553,8 +582,8 @@ void moveUp(UserManagerState& state) {
     }
 }
 
-void moveDown(UserManagerState& state, const DataManager& dataManager) {
-    if (state.cursor + 1 < userCount(dataManager)) {
+void moveDown(UserManagerState& state) {
+    if (state.cursor + 1 < userCount(state)) {
         ++state.cursor;
     }
 }
@@ -565,15 +594,15 @@ void beginAdd(UserManagerState& state) {
     state.confirmDelete = false;
 }
 
-void beginEdit(UserManagerState& state, const USER& user) {
+void beginEdit(UserManagerState& state, const frontend::FrontendUser& user) {
     state.form = UserForm{};
     state.form.editing = true;
     state.form.originalName = user.name;
     state.form.name = user.name;
     state.form.type = user.type;
-    state.form.password = user.password;
-    state.form.passwordHint = user.password_hint;
-    state.form.count = std::to_string(user.count);
+    state.form.password.clear();
+    state.form.passwordHint = user.passwordHint;
+    state.form.count = std::to_string(user.failedCount);
     state.formOpen = true;
     state.confirmDelete = false;
 }
@@ -597,97 +626,64 @@ bool parseCount(const std::string& value, int& parsed) {
     return true;
 }
 
-std::string validateForm(const UserForm& form, const DataManager& dataManager, USER& user) {
+bool buildFormUser(const UserForm& form, frontend::FrontendUser& user) {
     user.name = trimCopy(form.name);
     user.type = toLowerCopy(trimCopy(form.type));
-    user.password = form.password;
-    user.password_hint = trimCopy(form.passwordHint);
-
-    if (user.name.empty()) {
-        return "Username cannot be empty.";
+    user.passwordHint = trimCopy(form.passwordHint);
+    if (!parseCount(form.count, user.failedCount)) {
+        return false;
     }
-    if (user.name == "null") {
-        return "\"null\" is reserved for setup.";
-    }
-    if (hasWhitespace(user.name)) {
-        return "Username cannot contain spaces.";
-    }
-    if (nameExists(dataManager, user.name, form.editing ? form.originalName : "")) {
-        return "Username already exists.";
-    }
-    if (user.type == "debug") {
-        return "Debug users cannot be created here.";
-    }
-    if (user.type != "admin" && user.type != "user") {
-        return "Type must be admin or user.";
-    }
-    if (form.editing && form.originalName != user.name &&
-        nameExists(dataManager, user.name, form.originalName)) {
-        return "Renamed user conflicts with an existing account.";
-    }
-    if (user.password.empty()) {
-        return "Password cannot be empty.";
-    }
-    if (!isValidPassword(getPasswordStatus(user.password))) {
-        return "Password must be 6+ chars with uppercase, lowercase, and number.";
-    }
-    if (!user.password_hint.empty() && user.password_hint == user.password) {
-        return "Password hint cannot equal the password.";
-    }
-
-    if (!parseCount(form.count, user.count)) {
-        return "Failed count must be a number.";
-    }
-    if (user.count < 0 || user.count > 8) {
-        return "Failed count must be between 0 and 8.";
-    }
-
-    if (form.editing) {
-        const auto* oldUser = static_cast<const USER*>(nullptr);
-        for (const auto& existing : dataManager.GetAllUsers()) {
-            if (existing.name == form.originalName) {
-                oldUser = &existing;
-                break;
-            }
-        }
-        if (oldUser != nullptr &&
-            toLowerCopy(oldUser->type) == "admin" &&
-            oldUser->count <= 7 &&
-            (user.type != "admin" || user.count > 7) &&
-            activeAdminCount(dataManager, oldUser->name) == 0) {
-            return "At least one active admin user is required.";
-        }
-    }
-
-    return "";
+    return true;
 }
 
-void saveForm(UserManagerState& state, DataManager& dataManager, USER& currentUser) {
-    USER user;
-    const std::string error = validateForm(state.form, dataManager, user);
-    if (!error.empty()) {
-        state.form.error = error;
+void saveForm(UserManagerState& state, UserManagerBackend& backend, USER& currentUser) {
+    frontend::FrontendUser user;
+    if (!buildFormUser(state.form, user)) {
+        state.form.error = "Failed count must be a number.";
         return;
     }
 
-    bool ok = false;
+    frontend::ClientResult<bool> result;
     if (state.form.editing) {
-        ok = dataManager.UpdateUser(state.form.originalName, user);
-        state.message = ok ? "User updated: " + user.name : "Failed to update user.";
+        const bool passwordProvided = !state.form.password.empty();
+        result = backend.client.updateUser(
+            backend.sessionId,
+            state.form.originalName,
+            user,
+            passwordProvided,
+            state.form.password
+        );
     } else {
-        ok = dataManager.AddUser(user);
-        state.message = ok ? "User created: " + user.name : "Failed to create user.";
+        result = backend.client.createUser(backend.sessionId, user, state.form.password);
     }
 
-    if (ok) {
-        state.formOpen = false;
-        selectUserByName(state, dataManager, user.name);
-        tundraux::audit::logEvent("manage-users", std::string(state.form.editing ? "edit " : "create ") + user.name);
-        if (!syncCurrentUserAfterMutation(currentUser, state.message)) {
-            state.forceExit = true;
+    if (!result.ok || !result.value) {
+        if (!result.ok && handleTerminalBackendFailure(
+                backend,
+                state,
+                currentUser,
+                result.errorCode,
+                "Unable to save user.")) {
+            state.formOpen = false;
+            return;
         }
-    } else {
-        state.form.error = state.message;
+        state.form.error = result.ok ? "Backend rejected the user operation." : result.message;
+        if (state.form.error.empty()) {
+            state.form.error = backendFailureMessage("Unable to save user.", result.errorCode);
+        }
+        return;
+    }
+
+    state.formOpen = false;
+    state.message = state.form.editing ? "User updated: " + user.name : "User created: " + user.name;
+    tundraux::audit::logEvent("manage-users", std::string(state.form.editing ? "backend edit " : "backend create ") + user.name);
+    syncCurrentUserAfterMutation(backend, currentUser, state);
+    if (!state.forceExit) {
+        if (refreshUsers(backend, state)) {
+            selectUserByName(state, user.name);
+        } else {
+            handleTerminalBackendFailure(backend, state, currentUser, state.lastBackendErrorCode, "Unable to list users.");
+        }
     }
 }
 
@@ -705,7 +701,7 @@ void toggleType(UserForm& form) {
     form.type = toLowerCopy(form.type) == "admin" ? "user" : "admin";
 }
 
-void handleFormKey(UserManagerState& state, DataManager& dataManager, USER& currentUser, const KeyPress& key) {
+void handleFormKey(UserManagerState& state, UserManagerBackend& backend, USER& currentUser, const KeyPress& key) {
     UserForm& form = state.form;
     form.error.clear();
 
@@ -749,7 +745,7 @@ void handleFormKey(UserManagerState& state, DataManager& dataManager, USER& curr
             }
             break;
         case Key::Enter:
-            saveForm(state, dataManager, currentUser);
+            saveForm(state, backend, currentUser);
             break;
         case Key::Character:
             if (form.field == 1) {
@@ -776,83 +772,113 @@ void handleFormKey(UserManagerState& state, DataManager& dataManager, USER& curr
     }
 }
 
-void deleteSelected(UserManagerState& state, DataManager& dataManager, USER& currentUser) {
-    const USER* user = selectedUser(dataManager, state);
+void deleteSelected(UserManagerState& state, UserManagerBackend& backend, USER& currentUser) {
+    const frontend::FrontendUser* user = selectedUser(state);
     if (user == nullptr) {
         state.message = "No user selected.";
-        state.confirmDelete = false;
-        return;
-    }
-
-    if (isOnlyActiveAdmin(dataManager, *user)) {
-        state.message = "At least one active admin user is required.";
         state.confirmDelete = false;
         return;
     }
 
     const std::string name = user->name;
-    if (dataManager.RemoveUser(name)) {
-        state.message = "User deleted: " + name;
-        clampCursor(state, dataManager);
-        tundraux::audit::logEvent("manage-users", "delete " + name);
-        if (!syncCurrentUserAfterMutation(currentUser, state.message)) {
-            state.forceExit = true;
+    const auto result = backend.client.deleteUser(backend.sessionId, name);
+    if (!result.ok || !result.value) {
+        if (!result.ok && handleTerminalBackendFailure(
+                backend,
+                state,
+                currentUser,
+                result.errorCode,
+                "Unable to delete user.")) {
+            state.confirmDelete = false;
+            return;
         }
-    } else {
-        state.message = "Failed to delete user.";
+        state.message = result.ok ? "Failed to delete user." : backendFailureMessage(result.message, result.errorCode);
+        state.confirmDelete = false;
+        return;
+    }
+
+    state.message = "User deleted: " + name;
+    tundraux::audit::logEvent("manage-users", "backend delete " + name);
+    syncCurrentUserAfterMutation(backend, currentUser, state);
+    if (!state.forceExit) {
+        if (refreshUsers(backend, state)) {
+            clampCursor(state);
+        } else {
+            handleTerminalBackendFailure(backend, state, currentUser, state.lastBackendErrorCode, "Unable to list users.");
+        }
     }
     state.confirmDelete = false;
 }
 
-void disableSelected(UserManagerState& state, DataManager& dataManager, USER& currentUser) {
-    const USER* user = selectedUser(dataManager, state);
-    if (user == nullptr) {
-        state.message = "No user selected.";
-        return;
-    }
-    if (isOnlyActiveAdmin(dataManager, *user)) {
-        state.message = "At least one active admin user is required.";
-        return;
-    }
-
-    USER updated = *user;
-    updated.count = 8;
-    const std::string name = updated.name;
-    if (dataManager.UpdateUser(name, updated)) {
-        state.message = "User disabled: " + name;
-        selectUserByName(state, dataManager, name);
-        tundraux::audit::logEvent("manage-users", "disable " + name);
-        if (!syncCurrentUserAfterMutation(currentUser, state.message)) {
-            state.forceExit = true;
-        }
-    } else {
-        state.message = "Failed to disable user.";
-    }
-}
-
-void resetSelected(UserManagerState& state, DataManager& dataManager, USER& currentUser) {
-    const USER* user = selectedUser(dataManager, state);
+void disableSelected(UserManagerState& state, UserManagerBackend& backend, USER& currentUser) {
+    const frontend::FrontendUser* user = selectedUser(state);
     if (user == nullptr) {
         state.message = "No user selected.";
         return;
     }
 
-    USER updated = *user;
-    updated.count = 0;
-    const std::string name = updated.name;
-    if (dataManager.UpdateUser(name, updated)) {
-        state.message = "Login count reset: " + name;
-        tundraux::audit::logEvent("manage-users", "reset " + name);
-        if (!syncCurrentUserAfterMutation(currentUser, state.message)) {
-            state.forceExit = true;
+    const std::string name = user->name;
+    const auto result = backend.client.disableUser(backend.sessionId, name);
+    if (!result.ok || !result.value) {
+        if (!result.ok && handleTerminalBackendFailure(
+                backend,
+                state,
+                currentUser,
+                result.errorCode,
+                "Unable to disable user.")) {
+            return;
         }
-    } else {
-        state.message = "Failed to reset count.";
+        state.message = result.ok ? "Failed to disable user." : backendFailureMessage(result.message, result.errorCode);
+        return;
     }
-    selectUserByName(state, dataManager, name);
+
+    state.message = "User disabled: " + name;
+    tundraux::audit::logEvent("manage-users", "backend disable " + name);
+    syncCurrentUserAfterMutation(backend, currentUser, state);
+    if (!state.forceExit) {
+        if (refreshUsers(backend, state)) {
+            selectUserByName(state, name);
+        } else {
+            handleTerminalBackendFailure(backend, state, currentUser, state.lastBackendErrorCode, "Unable to list users.");
+        }
+    }
 }
 
-bool handleMainKey(UserManagerState& state, DataManager& dataManager, USER& currentUser, const KeyPress& key) {
+void resetSelected(UserManagerState& state, UserManagerBackend& backend, USER& currentUser) {
+    const frontend::FrontendUser* user = selectedUser(state);
+    if (user == nullptr) {
+        state.message = "No user selected.";
+        return;
+    }
+
+    const std::string name = user->name;
+    const auto result = backend.client.resetFailedCount(backend.sessionId, name);
+    if (!result.ok || !result.value) {
+        if (!result.ok && handleTerminalBackendFailure(
+                backend,
+                state,
+                currentUser,
+                result.errorCode,
+                "Unable to reset count.")) {
+            return;
+        }
+        state.message = result.ok ? "Failed to reset count." : backendFailureMessage(result.message, result.errorCode);
+        return;
+    }
+
+    state.message = "Login count reset: " + name;
+    tundraux::audit::logEvent("manage-users", "backend reset " + name);
+    syncCurrentUserAfterMutation(backend, currentUser, state);
+    if (!state.forceExit) {
+        if (refreshUsers(backend, state)) {
+            selectUserByName(state, name);
+        } else {
+            handleTerminalBackendFailure(backend, state, currentUser, state.lastBackendErrorCode, "Unable to list users.");
+        }
+    }
+}
+
+bool handleMainKey(UserManagerState& state, UserManagerBackend& backend, USER& currentUser, const KeyPress& key) {
     if (state.showHelp) {
         if (key.key == Key::Escape || key.key == Key::Enter ||
             (key.key == Key::Character &&
@@ -864,7 +890,7 @@ bool handleMainKey(UserManagerState& state, DataManager& dataManager, USER& curr
     }
 
     if (state.formOpen) {
-        handleFormKey(state, dataManager, currentUser, key);
+        handleFormKey(state, backend, currentUser, key);
         return !state.forceExit;
     }
 
@@ -877,7 +903,7 @@ bool handleMainKey(UserManagerState& state, DataManager& dataManager, USER& curr
         }
         if (key.key == Key::Enter ||
             (key.key == Key::Character && (key.character == 'y' || key.character == 'Y'))) {
-            deleteSelected(state, dataManager, currentUser);
+            deleteSelected(state, backend, currentUser);
             return !state.forceExit;
         }
         return !state.forceExit;
@@ -890,16 +916,16 @@ bool handleMainKey(UserManagerState& state, DataManager& dataManager, USER& curr
             moveUp(state);
             break;
         case Key::Down:
-            moveDown(state, dataManager);
+            moveDown(state);
             break;
         case Key::Home:
             state.cursor = 0;
             break;
         case Key::End:
-            state.cursor = userCount(dataManager) == 0 ? 0 : userCount(dataManager) - 1;
+            state.cursor = userCount(state) == 0 ? 0 : userCount(state) - 1;
             break;
         case Key::Enter:
-            if (const USER* user = selectedUser(dataManager, state)) {
+            if (const frontend::FrontendUser* user = selectedUser(state)) {
                 beginEdit(state, *user);
             } else {
                 state.message = "No user selected.";
@@ -911,7 +937,7 @@ bool handleMainKey(UserManagerState& state, DataManager& dataManager, USER& curr
                 case 'Q':
                     return false;
                 case 'j':
-                    moveDown(state, dataManager);
+                    moveDown(state);
                     break;
                 case 'k':
                     moveUp(state);
@@ -920,7 +946,7 @@ bool handleMainKey(UserManagerState& state, DataManager& dataManager, USER& curr
                     state.cursor = 0;
                     break;
                 case 'G':
-                    state.cursor = userCount(dataManager) == 0 ? 0 : userCount(dataManager) - 1;
+                    state.cursor = userCount(state) == 0 ? 0 : userCount(state) - 1;
                     break;
                 case 'h':
                 case 'H':
@@ -932,7 +958,7 @@ bool handleMainKey(UserManagerState& state, DataManager& dataManager, USER& curr
                     break;
                 case 'e':
                 case 'E':
-                    if (const USER* user = selectedUser(dataManager, state)) {
+                    if (const frontend::FrontendUser* user = selectedUser(state)) {
                         beginEdit(state, *user);
                     } else {
                         state.message = "No user selected.";
@@ -940,7 +966,7 @@ bool handleMainKey(UserManagerState& state, DataManager& dataManager, USER& curr
                     break;
                 case 'd':
                 case 'D':
-                    if (const USER* user = selectedUser(dataManager, state)) {
+                    if (const frontend::FrontendUser* user = selectedUser(state)) {
                         state.pendingDeleteName = user->name;
                         state.confirmDelete = true;
                         state.message = "Confirm delete.";
@@ -950,16 +976,11 @@ bool handleMainKey(UserManagerState& state, DataManager& dataManager, USER& curr
                     break;
                 case 'r':
                 case 'R':
-                    resetSelected(state, dataManager, currentUser);
+                    resetSelected(state, backend, currentUser);
                     break;
                 case 'x':
                 case 'X':
-                    disableSelected(state, dataManager, currentUser);
-                    break;
-                case 'p':
-                case 'P':
-                    state.showPassword = !state.showPassword;
-                    state.message = state.showPassword ? "Password visible." : "Password hidden.";
+                    disableSelected(state, backend, currentUser);
                     break;
                 default:
                     state.message = std::string("Unknown key: ") + key.character;
@@ -978,22 +999,34 @@ bool handleMainKey(UserManagerState& state, DataManager& dataManager, USER& curr
     return !state.forceExit;
 }
 
+void renderBackendUnavailable(const std::string& message) {
+    tundra_tui::colorcout("red", message + "\n");
+}
+
 } // namespace
 
-void manage_users(USER& currentUser) {
+void manage_users(USER& currentUser, frontend::BackendRuntime* backendRuntime) {
     tundra_tui::set_title("User Management");
 
-    std::ifstream check("user_data.dat");
-    if (!check.good()) {
-        tundra_tui::colorcout("red", "Error: user_data.dat not found.\n");
+    if (backendRuntime == nullptr || backendRuntime->legacyDirect() ||
+        backendRuntime->client() == nullptr || backendRuntime->sessionId().empty()) {
+        renderBackendUnavailable("User management requires an active backend session.");
         tundraux::audit::setCurrentUser(currentUser);
         return;
     }
-    check.close();
 
-    DataManager dataManager("user_data.dat");
+    std::string sessionId = backendRuntime->sessionId();
+    UserManagerBackend backend{*backendRuntime->client(), sessionId};
     ConsoleScreenGuard screenGuard;
     UserManagerState state;
+    if (!refreshUsers(backend, state)) {
+        handleTerminalBackendFailure(backend, state, currentUser, state.lastBackendErrorCode, "Unable to list users.");
+    }
+    if (state.forceExit) {
+        backendRuntime->setSessionId(sessionId);
+        tundraux::audit::setCurrentUser(currentUser);
+        return;
+    }
 
     bool running = true;
     while (running) {
@@ -1001,18 +1034,19 @@ void manage_users(USER& currentUser) {
         const std::size_t rows = std::max<int>(size.height, 18) > 8
             ? static_cast<std::size_t>(std::max<int>(size.height, 18) - 8)
             : 10;
-        keepCursorVisible(state, dataManager, rows);
+        keepCursorVisible(state, rows);
 
         if (state.showHelp) {
             renderHelp();
         } else if (state.formOpen) {
             renderForm(state.form);
         } else {
-            renderMain(dataManager, state);
+            renderMain(state);
         }
 
-        running = handleMainKey(state, dataManager, currentUser, readKey());
+        running = handleMainKey(state, backend, currentUser, readKey());
     }
 
+    backendRuntime->setSessionId(sessionId);
     tundraux::audit::setCurrentUser(currentUser);
 }
