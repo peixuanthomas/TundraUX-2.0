@@ -1,7 +1,7 @@
 #include "backend_client.hpp"
 #include "backend_process.hpp"
 #include "backend_runtime.hpp"
-#include "json.hpp"
+#include "protocol_json.hpp"
 
 #include <algorithm>
 #include <cstdint>
@@ -36,27 +36,27 @@ bool expect(bool condition, const std::string& message) {
     return true;
 }
 
-const tundraux::backend::JsonValue::Object* parseRequestObject(
+const tundraux::protocol::JsonValue::Object* parseRequestObject(
     const FakeTransport& transport,
     const std::string& label,
-    tundraux::backend::JsonValue& parsedValue
+    tundraux::protocol::JsonValue& parsedValue
 ) {
     if (!expect(!transport.requests.empty(), label + " should send request")) {
         return nullptr;
     }
-    const auto parsed = tundraux::backend::parseJson(transport.requests.back());
+    const auto parsed = tundraux::protocol::parseJson(transport.requests.back());
     if (!expect(parsed.ok, label + " request should parse")) {
         return nullptr;
     }
     parsedValue = parsed.value;
-    if (!expect(parsedValue.type() == tundraux::backend::JsonValue::Type::Object, label + " request should be object")) {
+    if (!expect(parsedValue.type() == tundraux::protocol::JsonValue::Type::Object, label + " request should be object")) {
         return nullptr;
     }
     return &parsedValue.asObject();
 }
 
 bool expectRequestMethod(const FakeTransport& transport, const std::string& method, const std::string& label) {
-    tundraux::backend::JsonValue parsed;
+    tundraux::protocol::JsonValue parsed;
     const auto* object = parseRequestObject(transport, label, parsed);
     if (object == nullptr) {
         return false;
@@ -182,7 +182,7 @@ bool runWriteFileTest() {
 
     const auto result = client.writeFile("session-1", "docs/note.txt", "updated");
 
-    tundraux::backend::JsonValue parsed;
+    tundraux::protocol::JsonValue parsed;
     const auto* request = parseRequestObject(transport, "write file", parsed);
     if (request == nullptr) {
         return false;
@@ -420,7 +420,7 @@ bool runCurrentProfileTest() {
     tundraux::frontend::BackendClient client(transport);
 
     const auto result = client.currentProfile("session-1");
-    tundraux::backend::JsonValue parsed;
+    tundraux::protocol::JsonValue parsed;
     const auto* request = parseRequestObject(transport, "current profile", parsed);
     if (request == nullptr) {
         return false;
@@ -443,7 +443,7 @@ bool runUpdateOwnAccountTest() {
 
     const auto result = client.updateOwnAccount("session-1", true, "Secret2", true, "new hint");
 
-    tundraux::backend::JsonValue parsed;
+    tundraux::protocol::JsonValue parsed;
     const auto* request = parseRequestObject(transport, "update own account", parsed);
     if (request == nullptr) {
         return false;
@@ -466,7 +466,7 @@ bool runUpdateOwnAccountWithoutOptionalFieldsTest() {
 
     const auto result = client.updateOwnAccount("session-1", false, "ignored", false, "ignored");
 
-    tundraux::backend::JsonValue parsed;
+    tundraux::protocol::JsonValue parsed;
     const auto* request = parseRequestObject(transport, "update own account optional fields", parsed);
     if (request == nullptr) {
         return false;
@@ -486,7 +486,7 @@ bool runUserManagementMutationMethodsTest() {
     tundraux::frontend::FrontendUser user{"carol", "admin", "team lead", 2};
 
     const auto createResult = client.createUser("session-1", user, "Secret3");
-    tundraux::backend::JsonValue parsedCreate;
+    tundraux::protocol::JsonValue parsedCreate;
     const auto* createRequest = parseRequestObject(transport, "create managed user", parsedCreate);
     if (createRequest == nullptr) {
         return false;
@@ -508,7 +508,7 @@ bool runUserManagementMutationMethodsTest() {
     user.type = "user";
     user.failedCount = 0;
     const auto updateResult = client.updateUser("session-1", "carol", user, false, "");
-    tundraux::backend::JsonValue parsedUpdate;
+    tundraux::protocol::JsonValue parsedUpdate;
     const auto* updateRequest = parseRequestObject(transport, "update managed user", parsedUpdate);
     if (updateRequest == nullptr) {
         return false;
@@ -549,7 +549,7 @@ bool runStrictModeMethodsTest() {
     tundraux::frontend::BackendClient client(transport);
 
     const auto getResult = client.getStrictMode("session-1");
-    tundraux::backend::JsonValue parsedGet;
+    tundraux::protocol::JsonValue parsedGet;
     const auto* getRequest = parseRequestObject(transport, "get strict mode", parsedGet);
     if (getRequest == nullptr) {
         return false;
@@ -563,7 +563,7 @@ bool runStrictModeMethodsTest() {
 
     transport.nextResponse = R"({"id":"2","result":{"ok":true}})";
     const auto setResult = client.setStrictMode("session-1", false);
-    tundraux::backend::JsonValue parsedSet;
+    tundraux::protocol::JsonValue parsedSet;
     const auto* setRequest = parseRequestObject(transport, "set strict mode", parsedSet);
     if (setRequest == nullptr) {
         return false;
@@ -573,6 +573,83 @@ bool runStrictModeMethodsTest() {
         expect(setRequest->at("method").asString() == "user.setStrictMode", "set strict mode method mismatch") &&
         expect(setParams.at("sessionId").asString() == "session-1", "set strict mode sessionId mismatch") &&
         expect(!setParams.at("enabled").asBoolean(), "set strict mode enabled mismatch");
+}
+
+bool runAuditLogEventRequestTest() {
+    FakeTransport transport;
+    transport.nextResponse = R"({"id":"1","result":{"ok":true}})";
+    tundraux::frontend::BackendClient client(transport);
+
+    const auto result = client.logAuditEvent("session-1", "shell", "input attempt");
+    tundraux::protocol::JsonValue parsed;
+    const auto* request = parseRequestObject(transport, "audit log event", parsed);
+    if (request == nullptr) {
+        return false;
+    }
+    const auto& params = request->at("params").asObject();
+    return expect(result.ok && result.value, "log audit event should succeed") &&
+        expect(request->at("method").asString() == "audit.logEvent", "audit log event method mismatch") &&
+        expect(params.at("sessionId").asString() == "session-1", "audit log event sessionId mismatch") &&
+        expect(params.at("category").asString() == "shell", "audit log event category mismatch") &&
+        expect(params.at("detail").asString() == "input attempt", "audit log event detail mismatch");
+}
+
+bool runAuditKeyPressRequestTest() {
+    FakeTransport transport;
+    transport.nextResponse = R"({"id":"1","result":{"ok":true}})";
+    tundraux::frontend::BackendClient client(transport);
+
+    const auto result = client.logAuditKeyPress("session-1", "x", true);
+    tundraux::protocol::JsonValue parsed;
+    const auto* request = parseRequestObject(transport, "audit key press", parsed);
+    if (request == nullptr) {
+        return false;
+    }
+    const auto& params = request->at("params").asObject();
+    return expect(result.ok && result.value, "log audit key press should succeed") &&
+        expect(request->at("method").asString() == "audit.logKeyPress", "audit key press method mismatch") &&
+        expect(params.at("sessionId").asString() == "session-1", "audit key press sessionId mismatch") &&
+        expect(params.at("key").asString() == "x", "audit key press key mismatch") &&
+        expect(params.at("sensitive").asBoolean(), "audit key press sensitive mismatch");
+}
+
+bool runReadTlogRequestTest() {
+    FakeTransport transport;
+    transport.nextResponse = R"({"id":"1","result":{"lines":["one","two","three"]}})";
+    tundraux::frontend::BackendClient client(transport);
+
+    const auto result = client.readTlog("session-1", "audit.tlog");
+    tundraux::protocol::JsonValue parsed;
+    const auto* request = parseRequestObject(transport, "read tlog", parsed);
+    if (request == nullptr) {
+        return false;
+    }
+    const auto& params = request->at("params").asObject();
+    return expect(result.ok, "read tlog should succeed") &&
+        expect(result.value.size() == 3, "read tlog lines count mismatch") &&
+        expect(result.value[0] == "one", "read tlog line mismatch") &&
+        expect(request->at("method").asString() == "audit.readTlog", "read tlog method mismatch") &&
+        expect(params.at("sessionId").asString() == "session-1", "read tlog sessionId mismatch") &&
+        expect(params.at("path").asString() == "audit.tlog", "read tlog path mismatch");
+}
+
+bool runExportTlogRequestTest() {
+    FakeTransport transport;
+    transport.nextResponse = R"({"id":"1","result":{"content":"plain"}})";
+    tundraux::frontend::BackendClient client(transport);
+
+    const auto result = client.exportTlog("session-1", "audit.tlog");
+    tundraux::protocol::JsonValue parsed;
+    const auto* request = parseRequestObject(transport, "export tlog", parsed);
+    if (request == nullptr) {
+        return false;
+    }
+    const auto& params = request->at("params").asObject();
+    return expect(result.ok, "export tlog should succeed") &&
+        expect(result.value == "plain", "export tlog content mismatch") &&
+        expect(request->at("method").asString() == "audit.exportTlog", "export tlog method mismatch") &&
+        expect(params.at("sessionId").asString() == "session-1", "export tlog sessionId mismatch") &&
+        expect(params.at("path").asString() == "audit.tlog", "export tlog path mismatch");
 }
 
 bool runRuntimeLegacyDirectTest(const std::string& selfPath) {
@@ -715,9 +792,9 @@ int runFakeBackendMode(int argc, char* argv[], const std::string& mode) {
                 break;
             }
         }
-        const auto parsed = tundraux::backend::parseJson(request);
+        const auto parsed = tundraux::protocol::parseJson(request);
         bool valid = parsed.ok &&
-            parsed.value.type() == tundraux::backend::JsonValue::Type::Object;
+            parsed.value.type() == tundraux::protocol::JsonValue::Type::Object;
         std::string method;
         std::string token;
         if (valid) {
@@ -725,15 +802,15 @@ int runFakeBackendMode(int argc, char* argv[], const std::string& mode) {
             const auto methodIt = object.find("method");
             const auto paramsIt = object.find("params");
             valid = methodIt != object.end() &&
-                methodIt->second.type() == tundraux::backend::JsonValue::Type::String &&
+                methodIt->second.type() == tundraux::protocol::JsonValue::Type::String &&
                 paramsIt != object.end() &&
-                paramsIt->second.type() == tundraux::backend::JsonValue::Type::Object;
+                paramsIt->second.type() == tundraux::protocol::JsonValue::Type::Object;
             if (valid) {
                 method = methodIt->second.asString();
                 const auto& params = paramsIt->second.asObject();
                 const auto tokenIt = params.find("token");
                 valid = tokenIt != params.end() &&
-                    tokenIt->second.type() == tundraux::backend::JsonValue::Type::String;
+                    tokenIt->second.type() == tundraux::protocol::JsonValue::Type::String;
                 if (valid) {
                     token = tokenIt->second.asString();
                 }
@@ -788,6 +865,10 @@ int main(int argc, char* argv[]) {
     if (!runUpdateOwnAccountWithoutOptionalFieldsTest()) return 1;
     if (!runUserManagementMutationMethodsTest()) return 1;
     if (!runStrictModeMethodsTest()) return 1;
+    if (!runAuditLogEventRequestTest()) return 1;
+    if (!runAuditKeyPressRequestTest()) return 1;
+    if (!runReadTlogRequestTest()) return 1;
+    if (!runExportTlogRequestTest()) return 1;
     if (!runRuntimeLegacyDirectTest(argv[0])) return 1;
     if (!runRuntimeMissingBackendPathTest()) return 1;
     if (!runProcessResponseLineTooLongTest(argv[0])) return 1;
@@ -795,3 +876,4 @@ int main(int argc, char* argv[]) {
     if (!runRuntimeDebugStartupUsesDebugSessionTest(argv[0])) return 1;
     return 0;
 }
+

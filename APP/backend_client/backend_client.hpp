@@ -81,6 +81,18 @@ public:
         bool passwordHintProvided,
         const std::string& passwordHint
     );
+    ClientResult<bool> logAuditEvent(
+        const std::string& sessionId,
+        const std::string& category,
+        const std::string& detail
+    );
+    ClientResult<bool> logAuditKeyPress(
+        const std::string& sessionId,
+        const std::string& key,
+        bool sensitive
+    );
+    ClientResult<std::vector<std::string>> readTlog(const std::string& sessionId, const std::string& path);
+    ClientResult<std::string> exportTlog(const std::string& sessionId, const std::string& path);
     ClientResult<bool> getStrictMode(const std::string& sessionId);
     ClientResult<bool> setStrictMode(const std::string& sessionId, bool enabled);
     ClientResult<std::vector<FrontendFileEntry>> listDirectory(

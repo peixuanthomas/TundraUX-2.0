@@ -151,6 +151,25 @@ std::vector<FrontendFileEntry> parseEntriesResult(const JsonValue& result) {
     return parsedEntries;
 }
 
+std::vector<std::string> parseLinesResult(const JsonValue& result) {
+    if (result.type() != JsonValue::Type::Object) {
+        throw std::logic_error("expected lines result object");
+    }
+    const auto& linesValue = requiredObjectField(result.asObject(), "lines");
+    if (linesValue.type() != JsonValue::Type::Array) {
+        throw std::logic_error("expected lines array");
+    }
+
+    std::vector<std::string> lines;
+    for (const auto& line : linesValue.asArray()) {
+        if (line.type() != JsonValue::Type::String) {
+            throw std::logic_error("expected lines array entry string");
+        }
+        lines.push_back(line.asString());
+    }
+    return lines;
+}
+
 bool parseOkResult(const JsonValue& result) {
     if (result.type() != JsonValue::Type::Object) {
         throw std::logic_error("expected ok result object");
@@ -342,6 +361,40 @@ ClientResult<bool> BackendClient::logout(const std::string& sessionId) {
     );
 }
 
+ClientResult<bool> BackendClient::logAuditEvent(
+    const std::string& sessionId,
+    const std::string& category,
+    const std::string& detail
+) {
+    JsonValue::Object params = paramsWithSession(sessionId);
+    params.emplace("category", JsonValue::string(category));
+    params.emplace("detail", JsonValue::string(detail));
+    return sendRequest<bool>(
+        transport_,
+        nextRequestId(),
+        "audit.logEvent",
+        std::move(params),
+        [](const JsonValue& result) { return parseOkResult(result); }
+    );
+}
+
+ClientResult<bool> BackendClient::logAuditKeyPress(
+    const std::string& sessionId,
+    const std::string& key,
+    bool sensitive
+) {
+    JsonValue::Object params = paramsWithSession(sessionId);
+    params.emplace("key", JsonValue::string(key));
+    params.emplace("sensitive", JsonValue::boolean(sensitive));
+    return sendRequest<bool>(
+        transport_,
+        nextRequestId(),
+        "audit.logKeyPress",
+        std::move(params),
+        [](const JsonValue& result) { return parseOkResult(result); }
+    );
+}
+
 ClientResult<FrontendUser> BackendClient::whoami(const std::string& sessionId) {
     return sendRequest<FrontendUser>(
         transport_,
@@ -353,6 +406,34 @@ ClientResult<FrontendUser> BackendClient::whoami(const std::string& sessionId) {
                 throw std::logic_error("expected whoami result object");
             }
             return parseUser(requiredObjectField(result.asObject(), "user"));
+        }
+    );
+}
+
+ClientResult<std::vector<std::string>> BackendClient::readTlog(
+    const std::string& sessionId,
+    const std::string& path
+) {
+    return sendRequest<std::vector<std::string>>(
+        transport_,
+        nextRequestId(),
+        "audit.readTlog",
+        paramsWithPath(sessionId, path),
+        [](const JsonValue& result) { return parseLinesResult(result); }
+    );
+}
+
+ClientResult<std::string> BackendClient::exportTlog(const std::string& sessionId, const std::string& path) {
+    return sendRequest<std::string>(
+        transport_,
+        nextRequestId(),
+        "audit.exportTlog",
+        paramsWithPath(sessionId, path),
+        [](const JsonValue& result) {
+            if (result.type() != JsonValue::Type::Object) {
+                throw std::logic_error("expected export result object");
+            }
+            return requiredStringField(result.asObject(), "content");
         }
     );
 }

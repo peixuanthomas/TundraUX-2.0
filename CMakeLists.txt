@@ -289,6 +289,7 @@ set(TUNDRAUX_CORE_SOURCES
 set(TUNDRAUX_APP_SOURCES
     APP/account_settings/account_settings.cpp
     APP/backend_client/backend_client.cpp
+    APP/backend_client/backend_facade.cpp
     APP/backend_client/backend_process.cpp
     APP/backend_client/backend_runtime.cpp
     APP/editor/editor.cpp
@@ -601,12 +602,11 @@ add_executable(frontend_backend_client_tests
 target_include_directories(frontend_backend_client_tests
     PRIVATE
         ${PROJECT_SOURCE_DIR}/APP/backend_client
-        ${PROJECT_SOURCE_DIR}/BACKEND/core
+        ${PROJECT_SOURCE_DIR}/SHARED/protocol
 )
 
 target_link_libraries(frontend_backend_client_tests
     PRIVATE
-        tundraux_backend_core
         tundraux_protocol
 )
 
@@ -616,6 +616,32 @@ target_compile_features(frontend_backend_client_tests
 )
 
 add_test(NAME frontend_backend_client_tests COMMAND frontend_backend_client_tests)
+
+add_executable(frontend_backend_facade_tests
+    tests/frontend_backend_facade_tests.cpp
+    APP/backend_client/backend_facade.cpp
+    APP/backend_client/backend_client.cpp
+    APP/backend_client/backend_process.cpp
+    APP/backend_client/backend_runtime.cpp
+)
+
+target_include_directories(frontend_backend_facade_tests
+    PRIVATE
+        ${PROJECT_SOURCE_DIR}/APP/backend_client
+        ${PROJECT_SOURCE_DIR}/SHARED/protocol
+)
+
+target_link_libraries(frontend_backend_facade_tests
+    PRIVATE
+        tundraux_protocol
+)
+
+target_compile_features(frontend_backend_facade_tests
+    PRIVATE
+        cxx_std_17
+)
+
+add_test(NAME frontend_backend_facade_tests COMMAND frontend_backend_facade_tests)
 
 if(TUNDRAUX_DEBUG_STARTUP)
     target_compile_definitions(${PROJECT_NAME}
