@@ -78,9 +78,9 @@ void struct_file() {
         colorcout("red", "Error: Invalid strict flag in user_data.dat header\n");
         return;
     }
-    colorcout("white", "2.1 (marker=21)\n");
-    colorcout("white", "strict=" + std::to_string(static_cast<int>(strictValue)) + "\n");
-    colorcout("white", std::to_string(userCount) + "\n");
+    std::cout << version << '\n';
+    std::cout << static_cast<int>(strictValue) << '\n';
+    std::cout << userCount << '\n';
 
     if (userCount > MAX_USER_COUNT) {
         colorcout("red", "Error: User count exceeds maximum supported value\n");
@@ -100,11 +100,14 @@ void struct_file() {
             return;
         }
         const std::string pass = decrypt(encPass);
-        colorcout("white", type + "\n");
-        colorcout("white", name + "\n");
-        colorcout("white", pass + "\n");
-        colorcout("white", hint + "\n");
-        colorcout("white", std::to_string(count) + (i + 1 == userCount ? "" : "\n"));
+        std::cout << type << '\n';
+        std::cout << name << '\n';
+        std::cout << pass << '\n';
+        std::cout << hint << '\n';
+        std::cout << count;
+        if (i + 1 != userCount) {
+            std::cout << '\n';
+        }
     }
 }
 

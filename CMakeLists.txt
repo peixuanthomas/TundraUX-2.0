@@ -466,6 +466,39 @@ target_compile_features(command_registry_tests
 
 add_test(NAME command_registry_tests COMMAND command_registry_tests)
 
+add_executable(debug_structfile_tests
+    tests/debug_structfile_tests.cpp
+    SYSTEM/debug/debug.cpp
+    USER/udata/udata.cpp
+    SYSTEM/crypto/crypto.cpp
+    SYSTEM/build_info/build_info.cpp
+)
+
+target_include_directories(debug_structfile_tests
+    PRIVATE
+        ${PROJECT_SOURCE_DIR}/SYSTEM/build_info
+        ${PROJECT_SOURCE_DIR}/SYSTEM/console
+        ${PROJECT_SOURCE_DIR}/SYSTEM/crypto
+        ${PROJECT_SOURCE_DIR}/SYSTEM/debug
+        ${PROJECT_SOURCE_DIR}/CORE/startup
+        ${PROJECT_SOURCE_DIR}/USER/udata
+        ${CMAKE_CURRENT_BINARY_DIR}/generated
+)
+
+target_link_libraries(debug_structfile_tests
+    PRIVATE
+        TundraTUI::TundraTUI
+)
+
+target_compile_features(debug_structfile_tests
+    PRIVATE
+        cxx_std_17
+)
+
+add_dependencies(debug_structfile_tests tundraux_generate_build_info)
+
+add_test(NAME debug_structfile_tests COMMAND debug_structfile_tests)
+
 add_executable(tundratui_footer_hint_tests
     tests/tundratui_footer_hint_tests.cpp
 )
