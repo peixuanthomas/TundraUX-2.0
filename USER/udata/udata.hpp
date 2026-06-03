@@ -12,7 +12,6 @@ struct USER {
 };
 
 void createfile();
-std::string encryptDecrypt(const std::string& input);
 
 class DataManager {
     public:

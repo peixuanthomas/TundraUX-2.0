@@ -2,22 +2,22 @@
 
 #include <algorithm>
 #include <cctype>
-#include <cstdio>
-#include <cstdint>
-#include <fstream>
+#include <functional>
 #include <iostream>
 #include <string>
 #include <vector>
-#include <windows.h>
 
-#include "crypto.hpp"
+#include "backend_facade.hpp"
 #include "TundraTUI/color.hpp"
 #include "TundraTUI/input.hpp"
 #include "TundraTUI/render_engine.hpp"
 #include "TundraTUI/screen.hpp"
 #include "TundraTUI/style.hpp"
 #include "TundraTUI/text.hpp"
-#include "udata.hpp"
+
+#ifdef TUNDRAUX_LEGACY_DIRECT_SETUP
+#include "legacy_direct.hpp"
+#endif
 
 namespace {
 
@@ -167,7 +167,7 @@ std::string passwordRuleValue(bool passed) {
     return passed ? "OK" : "Missing";
 }
 
-std::vector<DetailLine> buildDetailLines(const SetupState& state, bool dataFileExists) {
+std::vector<DetailLine> buildDetailLines(const SetupState& state) {
     const PasswordStatus passwordStatus = getPasswordStatus(state.password);
     const std::string usernameError = validateUsername(state.username);
     const bool passwordValid = isValidPassword(passwordStatus);
@@ -191,9 +191,6 @@ std::vector<DetailLine> buildDetailLines(const SetupState& state, bool dataFileE
         {"Ready", usernameError.empty() && passwordValid && confirmMatches && hintValid ? "Ready" : "Incomplete", false}
     };
 
-    if (dataFileExists) {
-        lines.push_back({"Existing file", "Will replace user_data.dat", false});
-    }
     return lines;
 }
 
@@ -263,7 +260,7 @@ void renderHelp() {
     std::cout << tui::colorText("Press F1, q, Esc, or Enter to return.", tui::kHintStyle) << std::flush;
 }
 
-void renderSetup(const SetupState& state, bool dataFileExists) {
+void renderSetup(const SetupState& state) {
     const tui::Size size = tui::terminalSize();
     const std::size_t width = std::max<int>(size.width, 92);
     const std::size_t height = std::max<int>(size.height, 20);
@@ -271,14 +268,14 @@ void renderSetup(const SetupState& state, bool dataFileExists) {
     const std::size_t usableWidth = width > 3 ? width - 3 : width;
     const std::size_t formWidth = std::max<std::size_t>(38, usableWidth * 45 / 100);
     const std::size_t detailsWidth = usableWidth - formWidth;
-    const auto details = buildDetailLines(state, dataFileExists);
+    const auto details = buildDetailLines(state);
 
     std::cout << "\x1b[0m\x1b[2J\x1b[H\x1b[?25l";
     std::cout << tui::colorText("TundraUX First-Time Setup", tui::kTitleStyle)
               << tui::colorText(" - ", tui::kHintStyle)
               << tui::colorText("administrator account", tui::kPathStyle)
               << "\n";
-    std::cout << tui::colorText("user_data.dat", tui::kPathStyle) << "\n";
+    std::cout << tui::colorText("backend setup", tui::kPathStyle) << "\n";
     std::cout << tui::colorText(tui::splitBorder(formWidth, detailsWidth), tui::kBorderStyle) << "\n";
     std::cout << tui::colorText("|", tui::kBorderStyle)
               << headerCell("Setup Form", formWidth)
@@ -356,80 +353,12 @@ std::string validateSetup(const SetupState& state) {
     return "";
 }
 
-void writeString(std::ofstream& outFile, const std::string& value) {
-    const std::size_t length = value.size();
-    outFile.write(reinterpret_cast<const char*>(&length), sizeof(length));
-    outFile.write(value.data(), static_cast<std::streamsize>(length));
-}
-
-bool createAdminUser(const SetupState& state, std::string& error) {
-    const std::string finalFilename = "user_data.dat";
-    const std::string tempFilename = finalFilename + ".tmp";
-
-    std::ofstream outFile(tempFilename, std::ios::binary | std::ios::trunc);
-    if (!outFile) {
-        error = "Unable to create temporary user data file.";
-        return false;
-    }
-
-    const int version = 21;
-    const std::uint8_t strictValue = 0;
-    const std::size_t userCount = 1;
-    const int failedCount = 0;
-    outFile.write(reinterpret_cast<const char*>(&version), sizeof(version));
-    outFile.write(reinterpret_cast<const char*>(&strictValue), sizeof(strictValue));
-    outFile.write(reinterpret_cast<const char*>(&userCount), sizeof(userCount));
-    writeString(outFile, "admin");
-    writeString(outFile, trimCopy(state.username));
-    writeString(outFile, encrypt(state.password));
-    writeString(outFile, trimCopy(state.passwordHint));
-    outFile.write(reinterpret_cast<const char*>(&failedCount), sizeof(failedCount));
-
-    outFile.flush();
-    if (outFile.fail() || outFile.bad()) {
-        outFile.close();
-        std::remove(tempFilename.c_str());
-        error = "Failed to write temporary user data file.";
-        return false;
-    }
-
-    outFile.close();
-    if (outFile.fail() || outFile.bad()) {
-        std::remove(tempFilename.c_str());
-        error = "Failed to finalize temporary user data file.";
-        return false;
-    }
-
-    DataManager dataManager(tempFilename);
-    const auto& users = dataManager.GetAllUsers();
-    if (users.size() != 1 || users.front().name != trimCopy(state.username) ||
-        users.front().type != "admin") {
-        std::remove(tempFilename.c_str());
-        error = "Created user data did not verify.";
-        return false;
-    }
-    if (!MoveFileExA(
-            tempFilename.c_str(),
-            finalFilename.c_str(),
-            MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH)) {
-        std::remove(tempFilename.c_str());
-        error = "Failed to replace user_data.dat.";
-        return false;
-    }
-
-    return true;
-}
-
-void tryCreate(SetupState& state) {
-    const std::string validationError = validateSetup(state);
-    if (!validationError.empty()) {
-        state.message = validationError;
-        return;
-    }
-
-    std::string error;
-    if (!createAdminUser(state, error)) {
-        state.message = error;
+void applyCreateResult(SetupState& state, const tundraux::frontend::FacadeResult& result) {
+    if (!result.ok) {
+        if (result.errorCode == "PermissionDenied" && result.message == "Setup already initialized.") {
+            state.created = true;
+        }
+        state.message = result.message.empty() ? "Failed to create initial admin." : result.message;
         return;
     }
 
@@ -437,7 +366,29 @@ void tryCreate(SetupState& state) {
     state.message = "Admin user created. Press Enter to continue.";
 }
 
-void handleSetupKey(SetupState& state, const KeyPress& key) {
+void tryCreate(SetupState& state, const std::function<tundraux::frontend::FacadeResult(
+    const std::string&,
+    const std::string&,
+    const std::string&
+)>& createInitialAdmin) {
+    const std::string validationError = validateSetup(state);
+    if (!validationError.empty()) {
+        state.message = validationError;
+        return;
+    }
+
+    applyCreateResult(state, createInitialAdmin(
+        trimCopy(state.username),
+        state.password,
+        trimCopy(state.passwordHint)
+    ));
+}
+
+void handleSetupKey(SetupState& state, const KeyPress& key, const std::function<tundraux::frontend::FacadeResult(
+    const std::string&,
+    const std::string&,
+    const std::string&
+)>& createInitialAdmin) {
     if (state.showHelp) {
         if (key.key == Key::Escape || key.key == Key::Enter ||
             key.key == Key::F1 ||
@@ -484,7 +435,7 @@ void handleSetupKey(SetupState& state, const KeyPress& key) {
             activeField(state).clear();
             break;
         case Key::Enter:
-            tryCreate(state);
+            tryCreate(state, createInitialAdmin);
             break;
         case Key::Character:
             activeField(state).push_back(key.character);
@@ -509,17 +460,17 @@ void handleSetupKey(SetupState& state, const KeyPress& key) {
 } // namespace
 
 void hello() {
+#ifdef TUNDRAUX_LEGACY_DIRECT_SETUP
     set_title("TundraUX 2.0 init");
     ConsoleScreenGuard screenGuard;
 
     SetupState state;
-    const bool dataFileExists = static_cast<bool>(std::ifstream("user_data.dat"));
 
     while (true) {
         if (state.showHelp) {
             renderHelp();
         } else {
-            renderSetup(state, dataFileExists);
+            renderSetup(state);
         }
 
         const KeyPress key = readKey();
@@ -528,6 +479,49 @@ void hello() {
              (key.key == Key::Character && (key.character == 'q' || key.character == 'Q')))) {
             break;
         }
-        handleSetupKey(state, key);
+
+        handleSetupKey(state, key, [](const std::string& username, const std::string& password, const std::string& passwordHint) {
+            std::string message;
+            const bool ok = tundraux::legacy_direct::createInitialAdmin(username, password, passwordHint, message);
+            tundraux::frontend::FacadeResult result;
+            result.ok = ok;
+            result.message = message;
+            if (!ok && message == "Setup already initialized.") {
+                result.errorCode = "PermissionDenied";
+            }
+            return result;
+        });
+    }
+#else
+    tundra_tui::colorcout("red", "First-time setup requires backend mode.\n");
+#endif
+}
+
+void hello(tundraux::frontend::BackendFacade& facade) {
+    set_title("TundraUX 2.0 init");
+    ConsoleScreenGuard screenGuard;
+
+    SetupState state;
+
+    while (true) {
+        if (state.showHelp) {
+            renderHelp();
+        } else {
+            renderSetup(state);
+        }
+
+        const KeyPress key = readKey();
+        if (state.created &&
+            (key.key == Key::Enter || key.key == Key::Escape ||
+             (key.key == Key::Character && (key.character == 'q' || key.character == 'Q')))) {
+            break;
+        }
+        handleSetupKey(state, key, [&facade](
+            const std::string& username,
+            const std::string& password,
+            const std::string& passwordHint
+        ) {
+            return facade.createInitialAdmin(username, password, passwordHint);
+        });
     }
 }

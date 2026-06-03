@@ -54,3 +54,12 @@ std::string decrypt(const std::string& ciphertext) {
     }
     return plaintext;
 }
+
+std::string encryptDecrypt(const std::string& input) {
+    const char xorKey = 0x55;
+    std::string output = input;
+    for (char& ch : output) {
+        ch ^= xorKey;
+    }
+    return output;
+}

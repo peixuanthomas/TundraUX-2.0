@@ -29,6 +29,7 @@ public:
     virtual ExplorerBackendResult<bool> writeFile(const std::string& path, const std::string& content) = 0;
     virtual ExplorerBackendResult<::tundraux::frontend::FrontendTuxContent> readTux(const std::string& path) = 0;
     virtual ExplorerBackendResult<bool> writeTux(const std::string& path, const std::string& content) = 0;
+    virtual ExplorerBackendResult<std::vector<std::string>> readTlog(const std::string& path) = 0;
 };
 
 class BackendClientExplorerBackend final : public ExplorerBackend {
@@ -45,6 +46,7 @@ public:
     ExplorerBackendResult<bool> writeFile(const std::string& path, const std::string& content) override;
     ExplorerBackendResult<::tundraux::frontend::FrontendTuxContent> readTux(const std::string& path) override;
     ExplorerBackendResult<bool> writeTux(const std::string& path, const std::string& content) override;
+    ExplorerBackendResult<std::vector<std::string>> readTlog(const std::string& path) override;
 
 private:
     ::tundraux::frontend::BackendClient& client_;

@@ -101,6 +101,28 @@ bool writeUserDataFile(const std::filesystem::path& path) {
     return static_cast<bool>(file);
 }
 
+bool writePlaceholderUserDataFile(const std::filesystem::path& path) {
+    std::ofstream file(path, std::ios::binary | std::ios::trunc);
+    if (!file) {
+        return false;
+    }
+
+    const int version = 21;
+    const std::uint8_t strictMode = 0;
+    const std::size_t userCount = 1;
+    const int failedCount = 0;
+
+    file.write(reinterpret_cast<const char*>(&version), sizeof(version));
+    file.write(reinterpret_cast<const char*>(&strictMode), sizeof(strictMode));
+    file.write(reinterpret_cast<const char*>(&userCount), sizeof(userCount));
+    writeStoredString(file, "admin");
+    writeStoredString(file, "null");
+    writeStoredString(file, "null");
+    writeStoredString(file, "Default placeholder user, should not appear in normal usage.");
+    file.write(reinterpret_cast<const char*>(&failedCount), sizeof(failedCount));
+    return static_cast<bool>(file);
+}
+
 std::string startGuestSession(tundraux::backend::JsonRpcDispatcher& dispatcher) {
     const std::string response = dispatcher.handleLine(R"({"id":"1","method":"session.startGuestSession","params":{}})");
     const auto parsed = tundraux::backend::parseJson(response);
@@ -145,6 +167,99 @@ bool responseHasStorageErrorWithNoStdoutLeak(const std::filesystem::path& path, 
     }
     std::filesystem::remove_all(filesRoot);
     return true;
+}
+
+bool initialAddCreatesAdmin(const std::filesystem::path& path, const std::string& label) {
+    tundraux::backend::DataManagerUserStore store(path.string());
+    if (!store.isStoreEmpty()) {
+        std::cerr << label << " should start empty\n";
+        return false;
+    }
+
+    if (!store.addUser({"admin", "setup-admin", "Secret1", "primary", 0})) {
+        std::cerr << label << " initial add returned false\n";
+        return false;
+    }
+
+    const auto users = store.listUsers();
+    if (users.size() != 1 || users.front().name != "setup-admin" || users.front().type != "admin") {
+        std::cerr << label << " initial add user mismatch\n";
+        return false;
+    }
+    return true;
+}
+
+bool runInitialAdminAddAllowsEmptyStoreInProcessTest() {
+    const auto missingPath = uniqueTempPath("initial_missing_user_data").string() + ".dat";
+    ScopedPathCleanup missingCleanup({missingPath});
+    std::filesystem::remove(missingPath);
+    if (!initialAddCreatesAdmin(missingPath, "missing user data")) {
+        return false;
+    }
+    missingCleanup.cleanup();
+
+    const auto emptyPath = uniqueTempPath("initial_empty_user_data").string() + ".dat";
+    ScopedPathCleanup emptyCleanup({emptyPath});
+    {
+        std::ofstream file(emptyPath, std::ios::binary | std::ios::trunc);
+    }
+    if (!initialAddCreatesAdmin(emptyPath, "empty user data")) {
+        return false;
+    }
+
+    return true;
+}
+
+bool runInitialAdminReplacesPlaceholderOnlyStoreInProcessTest() {
+    const auto placeholderPath = uniqueTempPath("placeholder_user_data").string() + ".dat";
+    ScopedPathCleanup cleanup({placeholderPath});
+    if (!writePlaceholderUserDataFile(placeholderPath)) {
+        std::cerr << "placeholder setup failed to write user data\n";
+        return false;
+    }
+
+    tundraux::backend::DataManagerUserStore store(placeholderPath);
+    if (!store.isStoreEmpty()) {
+        std::cerr << "placeholder-only user data should be setup-empty\n";
+        return false;
+    }
+
+    tundraux::backend::SessionService sessions(store);
+    tundraux::backend::UserService users(store, sessions);
+    const auto result = users.createInitialAdmin("", "setup-admin", "Secret1", "primary");
+    if (!result.ok) {
+        std::cerr << "placeholder setup returned error: " << result.error.message << "\n";
+        return false;
+    }
+
+    const auto storedUsers = store.listUsers();
+    if (storedUsers.size() != 1 ||
+        storedUsers.front().name != "setup-admin" ||
+        storedUsers.front().type != "admin") {
+        std::cerr << "placeholder setup final user mismatch\n";
+        return false;
+    }
+
+    return true;
+}
+
+bool runMalformedStorageIsNotEmptyStoreTest() {
+    const auto malformedPath = uniqueTempPath("malformed_setup_user_data").string() + ".dat";
+    ScopedPathCleanup cleanup({malformedPath});
+    {
+        std::ofstream file(malformedPath, std::ios::binary | std::ios::trunc);
+        file << "not a user data file";
+    }
+
+    tundraux::backend::DataManagerUserStore store(malformedPath);
+    try {
+        (void)store.isStoreEmpty();
+    } catch (const std::exception&) {
+        return true;
+    }
+
+    std::cerr << "malformed non-empty user data should not be treated as setup-empty\n";
+    return false;
 }
 
 bool runInvalidStorageInProcessTests() {
@@ -1420,6 +1535,15 @@ int main(int argc, char* argv[]) {
     }
 
     if (!runGuestSessionSmokeTest()) {
+        return 1;
+    }
+    if (!runInitialAdminAddAllowsEmptyStoreInProcessTest()) {
+        return 1;
+    }
+    if (!runInitialAdminReplacesPlaceholderOnlyStoreInProcessTest()) {
+        return 1;
+    }
+    if (!runMalformedStorageIsNotEmptyStoreTest()) {
         return 1;
     }
     if (!runInvalidStorageInProcessTests()) {

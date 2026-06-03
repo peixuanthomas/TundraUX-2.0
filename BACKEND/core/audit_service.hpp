@@ -48,6 +48,7 @@ public:
 
 private:
     ServiceResult<BackendUser> resolveSessionUser(const std::string& sessionId) const;
+    ServiceResult<BackendUser> resolveAppendUser(const std::string& sessionId) const;
     ServiceResult<EmptyResult> appendRecord(const BackendUser& user, const AuditRecord& record);
     ServiceResult<AuditReadResult> readRecords(const std::filesystem::path& absolutePath) const;
     ServiceResult<std::filesystem::path> resolveLogPath(const std::string& path) const;

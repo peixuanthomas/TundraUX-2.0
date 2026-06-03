@@ -62,6 +62,10 @@ public:
     std::string readFileErrorCode;
     std::string readFileMessage;
     std::string readFileContent = "original";
+    bool readTlogOk = true;
+    std::string readTlogErrorCode;
+    std::string readTlogMessage;
+    std::vector<std::string> readTlogLines{"audit line one", "audit line two"};
 
     tundraux::explorer::ExplorerBackendResult<std::vector<tundraux::explorer::FileEntry>> listDirectory(
         const std::string& path
@@ -127,6 +131,13 @@ public:
     ) override {
         calls.push_back("writeTux:" + path + ":" + content);
         return {true, true, "", ""};
+    }
+
+    tundraux::explorer::ExplorerBackendResult<std::vector<std::string>> readTlog(
+        const std::string& path
+    ) override {
+        calls.push_back("readTlog:" + path);
+        return {readTlogOk, readTlogLines, readTlogErrorCode, readTlogMessage};
     }
 };
 
@@ -286,11 +297,38 @@ bool backendExternalOpenUsesBackendReadForPermissionBoundary() {
     return true;
 }
 
+bool backendTlogOpenDoesNotUseLocalBackendBlock() {
+    namespace fs = std::filesystem;
+
+    FakeExplorerBackend backend;
+    tundraux::explorer::ExplorerState state;
+    state.backend = &backend;
+    state.rootPath = fs::u8path("C:/root");
+    state.currentPath = state.rootPath;
+    state.username = "alice";
+    state.usertype = "admin";
+    state.entries.push_back({"audit.tlog", state.rootPath / "Logs" / "audit.tlog", false, false, 12});
+
+    tundraux::explorer::openSelected(state);
+
+    if (!containsCall(backend.calls, "readTlog:audit.tlog")) {
+        std::cerr << "backend tlog read was not called with audit-root-relative path\n";
+        return false;
+    }
+    if (state.message != "Opened audit log audit.tlog") {
+        std::cerr << "unexpected backend tlog open message: " << state.message << "\n";
+        return false;
+    }
+
+    return true;
+}
+
 int main() {
     if (!backendTuxOpenUsesBackendReadWrite()) return 1;
     if (!backendPlainFileOpenUsesBackendReadWrite()) return 1;
     if (!backendPlainFileReadDeniedDoesNotOpenOrWrite()) return 1;
     if (!backendPlainFileUnchangedDoesNotWrite()) return 1;
     if (!backendExternalOpenUsesBackendReadForPermissionBoundary()) return 1;
+    if (!backendTlogOpenDoesNotUseLocalBackendBlock()) return 1;
     return 0;
 }

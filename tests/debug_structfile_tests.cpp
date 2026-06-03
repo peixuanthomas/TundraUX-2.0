@@ -102,8 +102,26 @@ bool structFileOutputsRawHeaderFields() {
     return true;
 }
 
+bool structFileCommandIsDisabledInBackendMode() {
+    std::ostringstream captured;
+    auto* previousBuffer = std::cout.rdbuf(captured.rdbuf());
+    handleDebugStructFileCommand("dbg:structfile", true);
+    std::cout.rdbuf(previousBuffer);
+
+    const std::string output = captured.str();
+    if (output.find("dbg:structfile is unavailable in backend mode") == std::string::npos) {
+        std::cerr << "backend mode structfile message mismatch: " << output << "\n";
+        return false;
+    }
+    if (output.find("user_data.dat") != std::string::npos) {
+        std::cerr << "backend mode structfile should not inspect user_data.dat: " << output << "\n";
+        return false;
+    }
+    return true;
+}
+
 } // namespace
 
 int main() {
-    return structFileOutputsRawHeaderFields() ? 0 : 1;
+    return structFileOutputsRawHeaderFields() && structFileCommandIsDisabledInBackendMode() ? 0 : 1;
 }

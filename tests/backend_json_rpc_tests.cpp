@@ -38,6 +38,10 @@ public:
         return users;
     }
 
+    bool isStoreEmpty() const override {
+        return users.empty();
+    }
+
     bool addUser(const tundraux::backend::BackendUser& user) override {
         users.push_back(user);
         return true;
@@ -60,6 +64,43 @@ public:
                 return true;
             }
         }
+        return false;
+    }
+
+    bool getStrictMode() const override {
+        return strictMode;
+    }
+
+    bool setStrictMode(bool enabled) override {
+        strictMode = enabled;
+        return true;
+    }
+
+    bool strictMode = false;
+};
+
+class EmptyInMemoryUserStore final : public tundraux::backend::UserStore {
+public:
+    std::vector<tundraux::backend::BackendUser> users;
+
+    std::vector<tundraux::backend::BackendUser> listUsers() const override {
+        return users;
+    }
+
+    bool isStoreEmpty() const override {
+        return users.empty();
+    }
+
+    bool addUser(const tundraux::backend::BackendUser& user) override {
+        users.push_back(user);
+        return true;
+    }
+
+    bool updateUser(const std::string&, const tundraux::backend::BackendUser&) override {
+        return false;
+    }
+
+    bool removeUser(const std::string&) override {
         return false;
     }
 
@@ -822,6 +863,48 @@ bool runDispatcherWithoutFileServiceTest() {
     return true;
 }
 
+bool runDispatcherSetupCreateInitialAdminTest() {
+    using tundraux::backend::SessionService;
+    using tundraux::backend::UserService;
+    using tundraux::backend::JsonRpcDispatcher;
+    using tundraux::backend::parseJson;
+
+    EmptyInMemoryUserStore store;
+    SessionService sessions(store);
+    UserService users(store, sessions);
+    JsonRpcDispatcher dispatcher(sessions, users);
+
+    const std::string firstResponse = dispatcher.handleLine(R"({
+        "id":"1",
+        "method":"setup.createInitialAdmin",
+        "params":{"sessionId":"setup-session","username":"admin","password":"Secret1","passwordHint":"primary"}
+    })");
+
+    const auto first = parseJson(firstResponse);
+    if (!expect(first.ok, "setup.createInitialAdmin response should parse: " + firstResponse)) return false;
+    const auto& firstObject = first.value.asObject();
+    if (!expect(firstObject.at("id").asString() == "1", "setup.createInitialAdmin response id mismatch")) return false;
+    if (!expect(firstObject.find("error") == firstObject.end(), "setup.createInitialAdmin should return no error")) return false;
+    const auto& firstResult = firstObject.at("result").asObject();
+    if (!expect(firstResult.at("ok").asBoolean(), "setup.createInitialAdmin should return ok true")) return false;
+
+    const std::string secondResponse = dispatcher.handleLine(R"({
+        "id":"2",
+        "method":"setup.createInitialAdmin",
+        "params":{"sessionId":"setup-session","username":"second","password":"Secret2","passwordHint":"secondary"}
+    })");
+
+    const auto second = parseJson(secondResponse);
+    if (!expect(second.ok, "repeated setup.createInitialAdmin response should parse: " + secondResponse)) return false;
+    const auto& secondObject = second.value.asObject();
+    if (!expect(secondObject.at("id").asString() == "2", "repeated setup.createInitialAdmin response id mismatch")) return false;
+    const auto& secondError = secondObject.at("error").asObject();
+    if (!expect(secondError.at("code").asString() == "PermissionDenied", "setup already initialized should be PermissionDenied")) return false;
+    if (!expect(secondError.at("message").asString() == "Setup already initialized.", "setup already initialized message mismatch")) return false;
+
+    return true;
+}
+
 bool runDispatcherAuditMethodsTest() {
     using tundraux::backend::AuditService;
     using tundraux::backend::FileService;
@@ -852,6 +935,30 @@ bool runDispatcherAuditMethodsTest() {
     const auto guestSessionEntry = guestResultEntry->second.asObject().find("sessionId");
     if (!expect(guestSessionEntry != guestResultEntry->second.asObject().end(), "audit method guest should include sessionId")) return false;
     const std::string guestSessionId = guestSessionEntry->second.asString();
+
+    const std::string guestLogResponse = dispatcher.handleLine(
+        R"({"id":"1guest-log","method":"audit.logEvent","params":{"sessionId":")" + guestSessionId +
+        R"(","category":"login","detail":"backend attempt"}})"
+    );
+    if (!expectNoErrorResponse(guestLogResponse, "1guest-log", "guest audit.logEvent")) return false;
+
+    const std::string guestKeyResponse = dispatcher.handleLine(
+        R"({"id":"1guest-key","method":"audit.logKeyPress","params":{"sessionId":")" + guestSessionId +
+        R"(","key":"p","sensitive":true}})"
+    );
+    if (!expectNoErrorResponse(guestKeyResponse, "1guest-key", "guest audit.logKeyPress")) return false;
+
+    const std::string guestExportResponse = dispatcher.handleLine(
+        R"({"id":"1guest-export","method":"audit.exportTlog","params":{"sessionId":")" + guestSessionId +
+        R"(","path":"audit.tlog"}})"
+    );
+    const auto guestExport = parseJson(guestExportResponse);
+    if (!expect(guestExport.ok, "guest audit.exportTlog should parse: " + guestExportResponse)) return false;
+    if (!expect(guestExport.value.asObject().find("error") != guestExport.value.asObject().end(),
+            "guest should receive audit.exportTlog error")) return false;
+    if (!expect(
+            guestExport.value.asObject().at("error").asObject().at("code").asString() == "PermissionDenied",
+            "guest should be denied audit.exportTlog")) return false;
 
     const std::string loginResponse = dispatcher.handleLine(
         R"({"id":"2","method":"session.login","params":{"sessionId":")" + guestSessionId +
@@ -892,15 +999,20 @@ bool runDispatcherAuditMethodsTest() {
     const auto readLinesEntry = readResult.find("lines");
     if (!expect(readLinesEntry != readResult.end(), "audit.readTlog should include lines")) return false;
     const auto readLines = readLinesEntry->second.asArray();
-    if (!expect(readLines.size() == 2, "audit.readTlog should return two lines")) return false;
+    if (!expect(readLines.size() == 4, "audit.readTlog should return guest and admin audit lines")) return false;
     bool hasSanitized = false;
+    bool hasGuestLogin = false;
     for (const auto& entry : readLines) {
         if (entry.asString().find("Character [redacted]") != std::string::npos) {
             hasSanitized = true;
-            break;
+        }
+        if (entry.asString().find("type=guest") != std::string::npos &&
+            entry.asString().find("backend attempt") != std::string::npos) {
+            hasGuestLogin = true;
         }
     }
     if (!expect(hasSanitized, "audit.readTlog should redact sensitive key presses")) return false;
+    if (!expect(hasGuestLogin, "audit.readTlog should include pre-login guest audit event")) return false;
 
     const std::string exportResponse = dispatcher.handleLine(
         R"({"id":"6","method":"audit.exportTlog","params":{"sessionId":")" + adminSessionId +
@@ -1015,6 +1127,7 @@ int main() {
     if (!expect(runDispatcherFileMutationTest(), "json rpc file mutation behavior failed")) return 1;
     if (!expect(runDispatcherTuxMethodsTest(), "json rpc tux behavior failed")) return 1;
     if (!expect(runDispatcherWithoutFileServiceTest(), "json rpc dispatcher without file service behavior failed")) return 1;
+    if (!expect(runDispatcherSetupCreateInitialAdminTest(), "json rpc setup behavior failed")) return 1;
     if (!expect(runDispatcherAuditMethodsTest(), "json rpc audit methods behavior failed")) return 1;
 
     return 0;

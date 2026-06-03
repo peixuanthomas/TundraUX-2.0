@@ -41,6 +41,11 @@ public:
     FacadeResult logKeyPress(const std::string& key, bool sensitive);
     ClientResult<bool> getStrictMode();
     FacadeResult setStrictMode(bool enabled);
+    FacadeResult createInitialAdmin(
+        const std::string& username,
+        const std::string& password,
+        const std::string& passwordHint
+    );
     ClientResult<std::vector<std::string>> readTlog(const std::string& path);
     ClientResult<std::string> exportTlog(const std::string& path);
 

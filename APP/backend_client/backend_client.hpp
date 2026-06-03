@@ -59,6 +59,12 @@ public:
     ClientResult<FrontendUser> whoami(const std::string& sessionId);
     ClientResult<std::vector<FrontendUser>> listUsers(const std::string& sessionId);
     ClientResult<FrontendUser> currentProfile(const std::string& sessionId);
+    ClientResult<bool> createInitialAdmin(
+        const std::string& sessionId,
+        const std::string& username,
+        const std::string& password,
+        const std::string& passwordHint
+    );
     ClientResult<bool> createUser(
         const std::string& sessionId,
         const FrontendUser& user,

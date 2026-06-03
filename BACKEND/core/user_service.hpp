@@ -14,6 +14,12 @@ public:
 
     ServiceResult<std::vector<BackendUser>> listUsers(const std::string& sessionId) const;
     ServiceResult<BackendUser> currentProfile(const std::string& sessionId) const;
+    ServiceResult<EmptyResult> createInitialAdmin(
+        const std::string& sessionId,
+        const std::string& username,
+        const std::string& password,
+        const std::string& passwordHint
+    );
     ServiceResult<EmptyResult> createUser(const std::string& sessionId, const BackendUser& user);
     ServiceResult<EmptyResult> updateUser(
         const std::string& sessionId,

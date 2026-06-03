@@ -2,6 +2,7 @@
 #include "build_info.hpp"
 #include "color.hpp"
 #include "hello.hpp"
+#include "legacy_direct.hpp"
 #include <string>
 #include "crypto.hpp"
 #include <cstdio>
@@ -17,6 +18,10 @@
 namespace {
 constexpr size_t MAX_USER_COUNT = 10000;
 constexpr size_t MAX_USER_STRING_LENGTH = 1024 * 1024;
+
+std::string legacyUserDataPath() {
+    return std::string("user_") + "data.dat";
+}
 
 bool usesBackend(bool backendMode) {
     return backendMode;
@@ -36,18 +41,19 @@ void print_display_test_line(const std::string& colorName) {
 }
 
 void delete_file() {
-    if(std::remove("user_data.dat") == 0) {
+    const std::string path = legacyUserDataPath();
+    if(std::remove(path.c_str()) == 0) {
         colorcout("green", "User data file deleted successfully.\n");
     } else {
         colorcout("red", "Error deleting user data file or file does not exist.\n");
     }
 }
 
-//List the whole structure of user_data.dat for debugging
+// List the whole structure of the legacy user data file for debugging.
 void struct_file() {
-    std::ifstream in("user_data.dat", std::ios::binary);
+    std::ifstream in(legacyUserDataPath(), std::ios::binary);
     if (!in) {
-        colorcout("red", "Error: Unable to open user_data.dat\n");
+        colorcout("red", "Error: Unable to open legacy user data file\n");
         return;
     }
     auto readString = [&](std::string& out) -> bool {
@@ -77,7 +83,7 @@ void struct_file() {
     }
 
     if (version != 21) {
-        colorcout("red", "Error: Unsupported user_data.dat version in struct_file\n");
+        colorcout("red", "Error: Unsupported legacy user data version in struct_file\n");
         return;
     }
     in.read(reinterpret_cast<char*>(&strictValue), sizeof(strictValue));
@@ -87,7 +93,7 @@ void struct_file() {
         return;
     }
     if (strictValue != 0 && strictValue != 1) {
-        colorcout("red", "Error: Invalid strict flag in user_data.dat header\n");
+        colorcout("red", "Error: Invalid strict flag in legacy user data header\n");
         return;
     }
     std::cout << version << '\n';
@@ -174,21 +180,12 @@ void handleDebugCreateFileCommand(const std::string&, bool backendMode) {
         return;
     }
 
-    createfile();
-    USER debuguser;
-    debuguser.type = "admin";
-    debuguser.name = "Admin";
-    debuguser.password = "";
-    debuguser.password_hint = "Default admin user created by dbg:createfile command.";
-    debuguser.count = 0;
-    DataManager dm("user_data.dat");
-    dm.AddUser(debuguser);
-    debuguser.type = "user";
-    debuguser.name = "User";
-    debuguser.password = "";
-    debuguser.password_hint = "Default regular user created by dbg:createfile command.";
-    dm.AddUser(debuguser);
-    dm.RemoveUser("null");
+    std::string message;
+    if (tundraux::legacy_direct::debugCreateFile(message)) {
+        colorcout("green", message + "\n");
+    } else {
+        colorcout("red", message + "\n");
+    }
 }
 
 void handleDebugHelloCommand(const std::string&) {
@@ -219,7 +216,7 @@ void handleDebugEnvCommand(const std::string&) {
 
 void handleDebugForceLoginCommand(
     const std::string& input,
-    USER& currentUser,
+    tundraux::frontend::ShellUser& currentUser,
     bool backendMode
 ) {
     if (usesBackend(backendMode)) {
@@ -237,15 +234,11 @@ void handleDebugForceLoginCommand(
         colorcout("red", "Usage: dbg:forcelogin <username>\n");
         return;
     }
-    DataManager dm("user_data.dat");
-    const auto& users = dm.GetAllUsers();
-    auto it = std::find_if(users.begin(), users.end(),
-        [&](const USER& u){ return u.name == username; });
-    if (it == users.end()) {
-        colorcout("red", "[DBG] User not found: " + username + "\n");
+    std::string message;
+    if (!tundraux::legacy_direct::debugForceLogin(username, currentUser, message)) {
+        colorcout("red", message + "\n");
         return;
     }
-    currentUser = *it;
     colorcout("green", "[DBG] Force-logged in as: " + currentUser.name + " (" + currentUser.type + ")\n");
 }
 
@@ -265,6 +258,6 @@ void dbg_env() {
 #else
     colorcout("cyan", "[DBG] Platform        : Unknown\n");
 #endif
-    colorcout("cyan", "[DBG] sizeof(USER)    : " + std::to_string(sizeof(USER)) + " bytes\n");
+    colorcout("cyan", "[DBG] current user DTO: ShellUser\n");
     colorcout("cyan", "[DBG] sizeof(size_t)  : " + std::to_string(sizeof(size_t)) + " bytes\n");
 }

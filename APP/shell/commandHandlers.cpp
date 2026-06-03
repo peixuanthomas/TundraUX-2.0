@@ -15,13 +15,13 @@
 
 #include "account_settings.hpp"
 #include "backend_facade.hpp"
-#include "user_conversion_compat.hpp"
 #include "backend_runtime.hpp"
 #include "build_info.hpp"
 #include "color.hpp"
 #include "editor.hpp"
-#include "manageusers.hpp"
 #include "explorer.hpp"
+#include "legacy_direct.hpp"
+#include "manageusers.hpp"
 
 namespace tundraux::audit {
 bool exportTlogToPlaintext(
@@ -30,9 +30,7 @@ bool exportTlogToPlaintext(
     const std::string& currentUserType,
     std::string& message
 );
-void refreshStrictMode();
 }
-
 #ifndef WIN32_LEAN_AND_MEAN
 #define WIN32_LEAN_AND_MEAN
 #endif
@@ -227,22 +225,83 @@ std::string trimLeadingSpaces(std::string value) {
     return value;
 }
 
+std::string auditApiPathFromInput(const std::string& path) {
+    std::string normalized = fs::path(path).generic_u8string();
+    const std::string lowerPath = [&] {
+        std::string value = normalized;
+        std::transform(value.begin(), value.end(), value.begin(), [](unsigned char ch) {
+            return static_cast<char>(std::tolower(ch));
+        });
+        return value;
+    }();
+
+    constexpr const char* logsPrefix = "logs/";
+    if (lowerPath.rfind(logsPrefix, 0) == 0) {
+        normalized.erase(0, std::string(logsPrefix).size());
+    }
+    return normalized;
+}
+
+bool writeBackendExportedTlog(
+    const tundraux::frontend::BackendRuntime& backendRuntime,
+    const std::string& tlogPath,
+    const std::string& content,
+    std::string& message
+) {
+    message.clear();
+    if (backendRuntime.filesRoot().empty()) {
+        message = "Backend files root is unavailable.";
+        return false;
+    }
+
+    std::string stem = fs::path(tlogPath).stem().string();
+    if (stem.empty()) {
+        stem = "audit";
+    }
+
+    const fs::path outputDir = fs::u8path(backendRuntime.filesRoot()) / "exported_logs";
+    std::error_code dirError;
+    fs::create_directories(outputDir, dirError);
+    if (dirError) {
+        message = "Failed to create export directory.";
+        return false;
+    }
+
+    const fs::path outputPath = outputDir / (stem + ".log");
+    std::error_code existsError;
+    if (fs::exists(outputPath, existsError) && !existsError) {
+        message = "Export target already exists.";
+        return false;
+    }
+    if (existsError) {
+        message = "Failed to inspect export target.";
+        return false;
+    }
+    if (!writeWholeFile(outputPath, content)) {
+        message = "Failed to write export file.";
+        return false;
+    }
+
+    message = "Exported to " + outputPath.string();
+    return true;
+}
+
 bool usesBackend(tundraux::frontend::BackendRuntime* backendRuntime) {
     return backendRuntime != nullptr && !backendRuntime->legacyDirect();
 }
 
 void setAuditCurrentUser(
     tundraux::frontend::FrontendAuditSink* auditSink,
-    const USER& currentUser
+    const tundraux::frontend::ShellUser& currentUser
 ) {
     if (auditSink != nullptr) {
-        auditSink->setCurrentUser(tundraux::frontend::toShellUser(currentUser));
+        auditSink->setCurrentUser(currentUser);
     }
 }
 
 void logAuditEvent(
     tundraux::frontend::FrontendAuditSink* auditSink,
-    const USER& currentUser,
+    const tundraux::frontend::ShellUser& currentUser,
     const std::string& category,
     const std::string& detail
 ) {
@@ -253,8 +312,8 @@ void logAuditEvent(
     auditSink->logEvent(category, detail);
 }
 
-USER guestUser() {
-    return tundraux::frontend::toLegacyUser(tundraux::frontend::ShellUser{"guest", "", "", 0});
+tundraux::frontend::ShellUser guestUser() {
+    return tundraux::frontend::ShellUser{"guest", "", "", 0};
 }
 
 std::string backendFailureMessage(
@@ -304,7 +363,7 @@ bool ensureBackendSession(tundraux::frontend::BackendRuntime& backendRuntime) {
     return true;
 }
 
-void displayLocalWhoami(const USER& currentUser) {
+void displayLocalWhoami(const tundraux::frontend::ShellUser& currentUser) {
     if (currentUser.name.empty()) {
         colorcout("yellow", "No user is currently logged in.\n");
     } else {
@@ -313,7 +372,7 @@ void displayLocalWhoami(const USER& currentUser) {
 }
 
 void syncCurrentUserToGuest(
-    USER& currentUser,
+    tundraux::frontend::ShellUser& currentUser,
     tundraux::frontend::FrontendAuditSink* auditSink
 ) {
     currentUser = guestUser();
@@ -321,7 +380,7 @@ void syncCurrentUserToGuest(
 }
 
 bool syncCurrentUserFromBackend(
-    USER& currentUser,
+    tundraux::frontend::ShellUser& currentUser,
     tundraux::frontend::BackendRuntime& backendRuntime,
     tundraux::frontend::BackendFacade& facade,
     tundraux::frontend::FrontendAuditSink* auditSink
@@ -333,7 +392,7 @@ bool syncCurrentUserFromBackend(
 
     const auto profile = facade.refreshProfile();
     if (profile.ok) {
-        currentUser = tundraux::frontend::toLegacyUser(profile.value);
+        currentUser = profile.value;
         setAuditCurrentUser(auditSink, currentUser);
         return true;
     }
@@ -345,7 +404,7 @@ bool syncCurrentUserFromBackend(
 
 void handleLoginCommand(
     const std::string& input,
-    USER& currentUser,
+    tundraux::frontend::ShellUser& currentUser,
     tundraux::frontend::BackendRuntime* backendRuntime,
     tundraux::frontend::FrontendAuditSink* auditSink
 ) {
@@ -377,9 +436,7 @@ void handleLoginCommand(
         }
 
         backendRuntime->setSessionId(result.value.sessionId);
-        currentUser = tundraux::frontend::toLegacyUser(
-            tundraux::frontend::shellUserFromFrontendUser(result.value.user)
-        );
+        currentUser = tundraux::frontend::shellUserFromFrontendUser(result.value.user);
         setAuditCurrentUser(auditSink, currentUser);
         logAuditEvent(auditSink, currentUser, "login", "backend success");
         rollcout("green", "Welcome, " + currentUser.name + "!");
@@ -387,45 +444,34 @@ void handleLoginCommand(
     }
 
     logAuditEvent(auditSink, currentUser, "login", "attempt " + username);
-    DataManager dataManager("user_data.dat");
-    const auto &users = dataManager.GetAllUsers();
-    auto it = std::find_if(users.begin(), users.end(),
-                           [&](const USER &u)
-                           { return u.name == username; });
-
-    if (it == users.end())
-    {
-        logAuditEvent(auditSink, currentUser, "login", "not-found " + username);
-        colorcout("red", "User not found: " + username + "\n");
-        return;
-    }
-    // disable user when count > 7
-    if (it->count > 7)
-    {
-        logAuditEvent(auditSink, currentUser, "login", "locked " + username);
-        colorcout("red", "User disabled due to too many failed attempts.\n");
-        return;
-    }
     std::string password = getHiddenInput("Please enter password for user " + username + ": ", '*');
-    if (dataManager.ComparePassword(username, password))
-    {
-        USER updated = *it;
-        updated.count = 0; // reset fail count on success
-        dataManager.UpdateUser(username, updated);
-        currentUser = updated;
+    tundraux::legacy_direct::LoginResult legacyResult;
+    if (tundraux::legacy_direct::login(username, password, legacyResult)) {
+        currentUser = legacyResult.user;
         setAuditCurrentUser(auditSink, currentUser);
         logAuditEvent(auditSink, currentUser, "login", "success " + username);
         rollcout("green", "Welcome, " + currentUser.name + "!");
+        return;
     }
-    else
-    {
-        USER updated = *it;
-        updated.count += 1; // add fail count on failure
-        dataManager.UpdateUser(username, updated);
-        logAuditEvent(auditSink, currentUser, "login", "failure " + username + " count=" + std::to_string(updated.count));
-        colorcout("red", "Incorrect password for user " + username + ".\n");
-        colorcout("red", "Failed attempts: " + std::to_string(updated.count) + "\n");
-        colorcout("blue", "Password Hint: " + (it->password_hint.empty() ? "(none)" : it->password_hint) + "\n");
+
+    if (legacyResult.message == "User disabled due to too many failed attempts.") {
+        logAuditEvent(auditSink, currentUser, "login", "locked " + username);
+        colorcout("red", legacyResult.message + "\n");
+    } else if (legacyResult.message.rfind("User not found:", 0) == 0) {
+        logAuditEvent(auditSink, currentUser, "login", "not-found " + username);
+        colorcout("red", legacyResult.message + "\n");
+    } else {
+        logAuditEvent(
+            auditSink,
+            currentUser,
+            "login",
+            "failure " + username + " count=" + std::to_string(legacyResult.failedCount)
+        );
+        colorcout("red", legacyResult.message + "\n");
+        if (legacyResult.failedCount > 0) {
+            colorcout("red", "Failed attempts: " + std::to_string(legacyResult.failedCount) + "\n");
+        }
+        colorcout("blue", "Password Hint: " + (legacyResult.passwordHint.empty() ? "(none)" : legacyResult.passwordHint) + "\n");
     }
 }
 
@@ -447,7 +493,7 @@ void handleTimeCommand(const std::string&) {
 
 void handleModifyCommand(
     const std::string&,
-    USER& currentUser,
+    tundraux::frontend::ShellUser& currentUser,
     tundraux::frontend::BackendRuntime* backendRuntime,
     tundraux::frontend::FrontendAuditSink* auditSink
 ) {
@@ -467,7 +513,7 @@ void handleClearScreenCommand(const std::string&) {
 
 void handleLogoutCommand(
     const std::string&,
-    USER& currentUser,
+    tundraux::frontend::ShellUser& currentUser,
     tundraux::frontend::BackendRuntime* backendRuntime,
     tundraux::frontend::FrontendAuditSink* auditSink
 ) {
@@ -548,7 +594,20 @@ void handleListUserCommand(
         return;
     }
 
-    listUser();
+    std::vector<tundraux::frontend::ShellUser> legacyUsers;
+    std::string message;
+    if (!tundraux::legacy_direct::listUsers(legacyUsers, message)) {
+        colorcout("red", message + "\n");
+        return;
+    }
+    if (legacyUsers.empty()) {
+        colorcout("yellow", "No users found.\n");
+        return;
+    }
+    colorcout("cyan", "Current Users:\n");
+    for (const auto& user : legacyUsers) {
+        colorcout("white", "Username: " + user.name + " (" + user.type + ")\n");
+    }
 }
 
 void handleInfoCommand(const std::string&) {
@@ -557,7 +616,7 @@ void handleInfoCommand(const std::string&) {
 
 void handleManageUsersCommand(
     const std::string&,
-    USER& currentUser,
+    tundraux::frontend::ShellUser& currentUser,
     tundraux::frontend::BackendRuntime* backendRuntime,
     tundraux::frontend::FrontendAuditSink* auditSink
 ) {
@@ -570,7 +629,7 @@ void handleManageUsersCommand(
 
 void handleEditCommand(
     const std::string& input,
-    USER& currentUser,
+    tundraux::frontend::ShellUser& currentUser,
     tundraux::frontend::BackendRuntime* backendRuntime,
     tundraux::frontend::FrontendAuditSink* auditSink
 ) {
@@ -665,7 +724,7 @@ void handleEditCommand(
 
 void handleExplorerCommand(
     const std::string&,
-    USER& currentUser,
+    tundraux::frontend::ShellUser& currentUser,
     tundraux::frontend::BackendRuntime* backendRuntime,
     tundraux::frontend::FrontendAuditSink* auditSink
 ) {
@@ -675,7 +734,7 @@ void handleExplorerCommand(
 }
 
 void handleWhoamiCommand(
-    USER& currentUser,
+    tundraux::frontend::ShellUser& currentUser,
     tundraux::frontend::BackendRuntime* backendRuntime,
     tundraux::frontend::FrontendAuditSink* auditSink
 ) {
@@ -700,14 +759,14 @@ void handleWhoamiCommand(
         return;
     }
 
-    currentUser = tundraux::frontend::toLegacyUser(result.value);
+    currentUser = result.value;
     setAuditCurrentUser(auditSink, currentUser);
     displayLocalWhoami(currentUser);
 }
 
 void handleStrictCommand(
     const std::string& input,
-    USER& currentUser,
+    tundraux::frontend::ShellUser& currentUser,
     tundraux::frontend::BackendRuntime* backendRuntime,
     tundraux::frontend::FrontendAuditSink* auditSink
 ) {
@@ -769,9 +828,13 @@ void handleStrictCommand(
         return;
     }
 
-    DataManager dataManager("user_data.dat");
     if (action.empty() || action == "status") {
-        const bool strictModeEnabled = dataManager.GetStrictMode();
+        bool strictModeEnabled = false;
+        std::string message;
+        if (!tundraux::legacy_direct::getStrictMode(strictModeEnabled, message)) {
+            colorcout("red", message + "\n");
+            return;
+        }
         colorcout("white", "Strict mode: " + std::string(strictModeEnabled ? "on" : "off") + "\n");
         logAuditEvent(auditSink, currentUser, "strict", "status " + std::string(strictModeEnabled ? "on" : "off"));
         return;
@@ -783,12 +846,12 @@ void handleStrictCommand(
     }
 
     const bool enabled = action == "on";
-    if (!dataManager.SetStrictMode(enabled)) {
-        colorcout("red", "Failed to update strict mode.\n");
+    std::string message;
+    if (!tundraux::legacy_direct::setStrictMode(enabled, message)) {
+        colorcout("red", (message.empty() ? "Failed to update strict mode." : message) + "\n");
         return;
     }
 
-    tundraux::audit::refreshStrictMode();
     setAuditCurrentUser(auditSink, currentUser);
     logAuditEvent(auditSink, currentUser, "strict", enabled ? "enabled" : "disabled");
     colorcout("green", enabled ? "Strict mode enabled.\n" : "Strict mode disabled.\n");
@@ -796,7 +859,7 @@ void handleStrictCommand(
 
 void handleExportCommand(
     const std::string& input,
-    USER& currentUser,
+    tundraux::frontend::ShellUser& currentUser,
     tundraux::frontend::BackendRuntime* backendRuntime,
     tundraux::frontend::FrontendAuditSink* auditSink
 ) {
@@ -814,7 +877,22 @@ void handleExportCommand(
     }
 
     if (usesBackend(backendRuntime)) {
-        colorcout("red", "Export log is disabled in backend mode until it is served by backend RPC.\n");
+        tundraux::frontend::BackendFacade facade(*backendRuntime);
+        const std::string backendPath = auditApiPathFromInput(path);
+        const auto exported = facade.exportTlog(backendPath);
+        if (!exported.ok) {
+            colorcout("red", backendFailureMessage("Failed to export TLOG.", exported.errorCode, exported.message) + "\n");
+            return;
+        }
+
+        std::string message;
+        if (!writeBackendExportedTlog(*backendRuntime, backendPath, exported.value, message)) {
+            colorcout("red", message + "\n");
+            return;
+        }
+
+        logAuditEvent(auditSink, currentUser, "audit", "backend export " + backendPath);
+        colorcout("green", message + "\n");
         return;
     }
 

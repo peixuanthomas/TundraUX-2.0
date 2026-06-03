@@ -3,6 +3,7 @@
 #include "udata.hpp"
 
 #include <filesystem>
+#include <fstream>
 #include <iostream>
 #include <sstream>
 #include <stdexcept>
@@ -73,6 +74,10 @@ USER toLegacyUser(const BackendUser& user) {
     return legacyUser;
 }
 
+bool isPlaceholderOnlyStore(const std::vector<USER>& users) {
+    return users.size() == 1 && users.front().name == "null";
+}
+
 } // namespace
 
 DataManagerUserStore::DataManagerUserStore(std::string filename)
@@ -98,6 +103,24 @@ std::vector<BackendUser> DataManagerUserStore::listUsers() const {
     return out;
 }
 
+bool DataManagerUserStore::isStoreEmpty() const {
+    const StorageState storage = classifyStorage(filename_);
+    if (storage == StorageState::Missing || storage == StorageState::ExistingEmptyFile) {
+        return true;
+    }
+    if (storage == StorageState::Invalid) {
+        throw std::runtime_error("Unable to read user data.");
+    }
+
+    ScopedStdoutSilencer silenceStdout;
+    DataManager dataManager(filename_);
+    const auto& users = dataManager.GetAllUsers();
+    if (users.empty()) {
+        throw std::runtime_error("Unable to read user data.");
+    }
+    return isPlaceholderOnlyStore(users);
+}
+
 bool DataManagerUserStore::updateUser(const std::string& name, const BackendUser& user) {
     const StorageState storage = classifyStorage(filename_);
     if (storage == StorageState::Missing ||
@@ -116,18 +139,32 @@ bool DataManagerUserStore::updateUser(const std::string& name, const BackendUser
 
 bool DataManagerUserStore::addUser(const BackendUser& user) {
     const StorageState storage = classifyStorage(filename_);
-    if (storage == StorageState::Missing ||
-        storage == StorageState::Invalid ||
-        storage == StorageState::ExistingEmptyFile) {
+    if (storage == StorageState::Invalid) {
         throw std::runtime_error("Unable to read user data.");
+    }
+
+    if (storage == StorageState::Missing) {
+        std::ofstream createFile(filename_, std::ios::binary | std::ios::trunc);
+        if (!createFile) {
+            throw std::runtime_error("Unable to update user data.");
+        }
     }
 
     ScopedStdoutSilencer silenceStdout;
     DataManager dataManager(filename_);
-    if (storage == StorageState::ExistingNonEmptyFile && dataManager.GetAllUsers().empty()) {
+    const auto& users = dataManager.GetAllUsers();
+    if (storage == StorageState::ExistingNonEmptyFile && users.empty()) {
         throw std::runtime_error("Unable to read user data.");
     }
-    return dataManager.AddUser(toLegacyUser(user));
+    const bool placeholderOnly = isPlaceholderOnlyStore(users);
+    if (!dataManager.AddUser(toLegacyUser(user))) {
+        return false;
+    }
+    if (placeholderOnly && !dataManager.RemoveUser("null")) {
+        (void)dataManager.RemoveUser(user.name);
+        return false;
+    }
+    return true;
 }
 
 bool DataManagerUserStore::removeUser(const std::string& name) {

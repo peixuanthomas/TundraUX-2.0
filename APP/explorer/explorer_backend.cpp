@@ -104,6 +104,10 @@ ExplorerBackendResult<bool> BackendClientExplorerBackend::writeTux(
     return fromClientResult(client_.writeTux(sessionId_, path, content));
 }
 
+ExplorerBackendResult<std::vector<std::string>> BackendClientExplorerBackend::readTlog(const std::string& path) {
+    return fromClientResult(client_.readTlog(sessionId_, path));
+}
+
 std::string explorerRelativePath(const fs::path& root, const fs::path& path) {
     std::error_code error;
     const fs::path relative = fs::relative(path, root, error);

@@ -715,7 +715,6 @@ bool runRuntimeDefaultFilesRootIsExecutableDirectoryTest(const std::string& self
     tundraux::frontend::BackendRuntime runtime;
     tundraux::frontend::BackendRuntimeOptions options;
     options.backendStdioPath = selfPath;
-    options.userDataPath = "expect-executable-directory-root";
     std::string error;
 
     const bool initialized = runtime.initialize(options, error);
@@ -728,7 +727,6 @@ bool runRuntimeDebugStartupUsesDebugSessionTest(const std::string& selfPath) {
     tundraux::frontend::BackendRuntime runtime;
     tundraux::frontend::BackendRuntimeOptions options;
     options.backendStdioPath = selfPath;
-    options.userDataPath = "expect-debug-startup-session";
     options.startupUserType = "debug";
     options.startupUserName = "debug";
     std::string error;
@@ -837,6 +835,16 @@ int main(int argc, char* argv[]) {
     for (int i = 1; i + 1 < argc; ++i) {
         if (std::string(argv[i]) == "--user-data") {
             return runFakeBackendMode(argc, argv, argv[i + 1]);
+        }
+    }
+    for (int i = 1; i < argc; ++i) {
+        if (std::string(argv[i]) == "--debug-session-token") {
+            return runFakeBackendMode(argc, argv, "expect-debug-startup-session");
+        }
+    }
+    for (int i = 1; i < argc; ++i) {
+        if (std::string(argv[i]) == "--files-root") {
+            return runFakeBackendMode(argc, argv, "expect-executable-directory-root");
         }
     }
 

@@ -179,6 +179,27 @@ std::string tuxApiPathFromExplorerPath(const fs::path& rootPath, const fs::path&
     return path;
 }
 
+std::string auditApiPathFromExplorerPath(const fs::path& rootPath, const fs::path& tlogPath) {
+    std::string path = explorerRelativePath(rootPath, tlogPath);
+    constexpr const char* logsPrefix = "logs/";
+    const std::string lowerPath = toLowerCopy(path);
+    if (lowerPath.rfind(logsPrefix, 0) == 0) {
+        path.erase(0, std::string(logsPrefix).size());
+    }
+    return path;
+}
+
+std::string joinLines(const std::vector<std::string>& lines) {
+    std::string content;
+    for (std::size_t i = 0; i < lines.size(); ++i) {
+        content += lines[i];
+        if (i + 1 < lines.size()) {
+            content += '\n';
+        }
+    }
+    return content;
+}
+
 void openBackendTuxFile(ExplorerState& state, const FileEntry& selected) {
     const std::string backendPath = tuxApiPathFromExplorerPath(state.rootPath, selected.path);
     logAuditEvent(state, "explorer", "backend open " + backendPath);
@@ -221,6 +242,32 @@ void openBackendTuxFile(ExplorerState& state, const FileEntry& selected) {
 
     state.message = "Decrypted and edited " + selected.name;
     refresh(state);
+}
+
+void openBackendTlogFile(ExplorerState& state, const FileEntry& selected) {
+    const std::string backendPath = auditApiPathFromExplorerPath(state.rootPath, selected.path);
+    logAuditEvent(state, "explorer", "backend open " + backendPath);
+
+    const auto readResult = state.backend->readTlog(backendPath);
+    if (!readResult.ok) {
+        state.message = readResult.errorCode == "PermissionDenied"
+            ? redMessage("Access denied: only admin or debug can open audit logs.")
+            : redMessage(readResult.message.empty() ? "Failed to decrypt audit log." : readResult.message);
+        return;
+    }
+
+    ScopedEditorTempFile tempFile;
+    if (!tempFile.create(joinLines(readResult.value), ".log")) {
+        state.message = redMessage("Unable to prepare audit log view.");
+        return;
+    }
+
+    std::cout << "\x1b[?25h" << std::flush;
+    const int editorResult = run_editor(tempFile.path().string(), selected.name);
+    std::cout << "\x1b[?25l" << std::flush;
+    state.message = editorResult == 0
+        ? "Opened audit log " + selected.name
+        : "Editor exited with code " + std::to_string(editorResult);
 }
 
 void openBackendPlainFile(ExplorerState& state, const FileEntry& selected) {
@@ -366,7 +413,7 @@ void openSelected(ExplorerState& state) {
 
     if (extensionOf(selected.path) == ".tlog") {
         if (state.backend != nullptr) {
-            state.message = redMessage("Audit logs cannot be opened in backend mode.");
+            openBackendTlogFile(state, selected);
             return;
         }
         logAuditEvent(state, "explorer", "open " + selectedPath);

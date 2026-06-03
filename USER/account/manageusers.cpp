@@ -4,7 +4,6 @@
 #include "backend_facade.hpp"
 #include "backend_client.hpp"
 #include "backend_runtime.hpp"
-#include "user_conversion_compat.hpp"
 #include "TundraTUI/color.hpp"
 #include "TundraTUI/input.hpp"
 #include "TundraTUI/render_engine.hpp"
@@ -123,31 +122,30 @@ std::string backendFailureMessage(const std::string& fallback, const std::string
     return fallback;
 }
 
-USER guestUser() {
-    return USER{"guest", "", "", "", 0};
+frontend::ShellUser guestUser() {
+    return frontend::ShellUser{"guest", "", "", 0};
 }
 
 void syncAuditUser(
     UserManagerState& state,
-    USER& currentUser,
-    USER user
+    frontend::ShellUser& currentUser,
+    frontend::ShellUser user
 ) {
     currentUser = std::move(user);
     if (state.auditSink != nullptr) {
-        state.auditSink->setCurrentUser(frontend::toShellUser(currentUser));
+        state.auditSink->setCurrentUser(currentUser);
     }
 }
-
 void logAuditEvent(
     UserManagerState& state,
-    USER& currentUser,
+    frontend::ShellUser& currentUser,
     const std::string& category,
     const std::string& detail
 ) {
     if (state.auditSink == nullptr) {
         return;
     }
-    state.auditSink->setCurrentUser(frontend::toShellUser(currentUser));
+    state.auditSink->setCurrentUser(currentUser);
     state.auditSink->logEvent(category, detail);
 }
 
@@ -160,7 +158,7 @@ bool isTerminalBackendFailure(const std::string& errorCode) {
 
 bool syncCurrentUserFromBackend(
     UserManagerBackend& backend,
-    USER& currentUser,
+    frontend::ShellUser& currentUser,
     UserManagerState& state,
     frontend::BackendFacade& facade,
     std::string* errorCode
@@ -173,7 +171,7 @@ bool syncCurrentUserFromBackend(
     }
 
     if (profile.ok) {
-        syncAuditUser(state, currentUser, frontend::toLegacyUser(profile.value));
+        syncAuditUser(state, currentUser, profile.value);
         return true;
     }
 
@@ -187,7 +185,7 @@ bool syncCurrentUserFromBackend(
 bool handleTerminalBackendFailure(
     UserManagerBackend& backend,
     UserManagerState& state,
-    USER& currentUser,
+    frontend::ShellUser& currentUser,
     frontend::BackendFacade& facade,
     const std::string& errorCode,
     const std::string& fallback
@@ -230,7 +228,7 @@ bool refreshUsers(UserManagerBackend& backend, UserManagerState& state) {
 
 bool syncCurrentUserAfterMutation(
     UserManagerBackend& backend,
-    USER& currentUser,
+    frontend::ShellUser& currentUser,
     UserManagerState& state,
     frontend::BackendFacade& facade
 ) {
@@ -648,7 +646,7 @@ bool buildFormUser(const UserForm& form, frontend::FrontendUser& user) {
 void saveForm(
     UserManagerState& state,
     UserManagerBackend& backend,
-    USER& currentUser,
+    frontend::ShellUser& currentUser,
     frontend::BackendFacade& facade
 ) {
     frontend::FrontendUser user;
@@ -731,7 +729,7 @@ void toggleType(UserForm& form) {
 void handleFormKey(
     UserManagerState& state,
     UserManagerBackend& backend,
-    USER& currentUser,
+    frontend::ShellUser& currentUser,
     frontend::BackendFacade& facade,
     const KeyPress& key
 ) {
@@ -808,7 +806,7 @@ void handleFormKey(
 void deleteSelected(
     UserManagerState& state,
     UserManagerBackend& backend,
-    USER& currentUser,
+    frontend::ShellUser& currentUser,
     frontend::BackendFacade& facade
 ) {
     const frontend::FrontendUser* user = selectedUser(state);
@@ -859,7 +857,7 @@ void deleteSelected(
 void disableSelected(
     UserManagerState& state,
     UserManagerBackend& backend,
-    USER& currentUser,
+    frontend::ShellUser& currentUser,
     frontend::BackendFacade& facade
 ) {
     const frontend::FrontendUser* user = selectedUser(state);
@@ -906,7 +904,7 @@ void disableSelected(
 void resetSelected(
     UserManagerState& state,
     UserManagerBackend& backend,
-    USER& currentUser,
+    frontend::ShellUser& currentUser,
     frontend::BackendFacade& facade
 ) {
     const frontend::FrontendUser* user = selectedUser(state);
@@ -953,7 +951,7 @@ void resetSelected(
 bool handleMainKey(
     UserManagerState& state,
     UserManagerBackend& backend,
-    USER& currentUser,
+    frontend::ShellUser& currentUser,
     frontend::BackendFacade& facade,
     const KeyPress& key
 ) {
@@ -1084,17 +1082,17 @@ void renderBackendUnavailable(const std::string& message) {
 } // namespace
 
 void manage_users(
-    USER& currentUser,
+    frontend::ShellUser& currentUser,
     frontend::BackendRuntime* backendRuntime,
     tundraux::frontend::FrontendAuditSink* auditSink
 ) {
-    tundra_tui::set_title("User Management");
+    tundra_tui::set_title("User management");
 
     if (backendRuntime == nullptr || backendRuntime->legacyDirect() ||
         backendRuntime->client() == nullptr || backendRuntime->sessionId().empty()) {
         renderBackendUnavailable("User management requires an active backend session.");
         if (auditSink != nullptr) {
-            auditSink->setCurrentUser(frontend::toShellUser(currentUser));
+            auditSink->setCurrentUser(currentUser);
         }
         return;
     }
@@ -1118,7 +1116,7 @@ void manage_users(
     if (state.forceExit) {
         backendRuntime->setSessionId(sessionId);
         if (state.auditSink != nullptr) {
-            state.auditSink->setCurrentUser(frontend::toShellUser(currentUser));
+            state.auditSink->setCurrentUser(currentUser);
         }
         return;
     }
@@ -1144,6 +1142,6 @@ void manage_users(
 
     backendRuntime->setSessionId(sessionId);
     if (state.auditSink != nullptr) {
-        state.auditSink->setCurrentUser(frontend::toShellUser(currentUser));
+        state.auditSink->setCurrentUser(currentUser);
     }
 }

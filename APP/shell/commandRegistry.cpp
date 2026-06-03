@@ -5,7 +5,7 @@
 #include "debug.hpp"
 
 std::vector<RegisteredCommand> buildNewCommandRegistry(
-    USER& currentUser,
+    tundraux::frontend::ShellUser& currentUser,
     tundraux::frontend::BackendRuntime* backendRuntime,
     tundraux::frontend::FrontendAuditSink* auditSink
 ) {

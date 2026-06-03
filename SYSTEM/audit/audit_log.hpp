@@ -6,12 +6,19 @@
 #include <string>
 #include <vector>
 
-#include "udata.hpp"
+struct USER {
+    std::string type;
+    std::string name;
+    std::string password;
+    std::string password_hint;
+    int count;
+};
 
 namespace tundraux::audit {
 
 void initialize();
 void refreshStrictMode();
+void setStrictModeEnabled(bool enabled);
 void setCurrentUser(const USER& user);
 bool isStrictModeEnabled();
 std::filesystem::path startupLogPath();

@@ -267,6 +267,31 @@ bool runFacadeGetStrictModeSendsRequest() {
         expect(params.at("sessionId").asString() == "session-4", "get strict mode session mismatch");
 }
 
+bool runFacadeCreateInitialAdminSendsSetupRequest() {
+    FakeTransport transport;
+    transport.responses = {R"({"id":"1","result":{"ok":true}})"};
+
+    tundraux::frontend::BackendRuntime runtime;
+    configureFacadeRuntime(runtime, transport, "setup-session");
+    tundraux::frontend::BackendFacade facade(runtime);
+
+    const auto result = facade.createInitialAdmin("admin", "Secret1", "primary");
+    tundraux::protocol::JsonValue request;
+    const auto* requestObject = parseRequestObject(transport, 0, request);
+    if (requestObject == nullptr) {
+        return false;
+    }
+    const auto& params = requestObject->at("params").asObject();
+
+    return expect(result.ok, "create initial admin should succeed") &&
+        expect(result.errorCode.empty(), "create initial admin error code should be empty on success") &&
+        expect(requestObject->at("method").asString() == "setup.createInitialAdmin", "create initial admin method mismatch") &&
+        expect(params.at("sessionId").asString() == "setup-session", "create initial admin session mismatch") &&
+        expect(params.at("username").asString() == "admin", "create initial admin username mismatch") &&
+        expect(params.at("password").asString() == "Secret1", "create initial admin password mismatch") &&
+        expect(params.at("passwordHint").asString() == "primary", "create initial admin password hint mismatch");
+}
+
 bool runFacadeReadTlogSendsRequest() {
     FakeTransport transport;
     transport.responses = {R"({"id":"1","result":{"lines":["a","b","c"]}})"};
@@ -368,6 +393,9 @@ int main() {
         return 1;
     }
     if (!runFacadeGetStrictModeSendsRequest()) {
+        return 1;
+    }
+    if (!runFacadeCreateInitialAdminSendsSetupRequest()) {
         return 1;
     }
     if (!runFacadeReadTlogSendsRequest()) {

@@ -4,7 +4,7 @@
 #include <string>
 #include <vector>
 
-#include "udata.hpp"
+#include "backend_facade.hpp"
 
 namespace tundraux::frontend {
 class BackendRuntime;
@@ -26,13 +26,13 @@ struct RegisteredCommand {
 
 bool hasCommandPermission(const std::string& requiredUserType, const std::string& currentUserType);
 std::vector<RegisteredCommand> buildNewCommandRegistry(
-    USER& currentUser,
+    tundraux::frontend::ShellUser& currentUser,
     tundraux::frontend::BackendRuntime* backendRuntime = nullptr,
     tundraux::frontend::FrontendAuditSink* auditSink = nullptr
 );
 bool tryExecuteRegisteredCommand(
     const std::string& input,
     const std::vector<RegisteredCommand>& commands,
-    const USER& currentUser,
+    const tundraux::frontend::ShellUser& currentUser,
     tundraux::frontend::FrontendAuditSink* auditSink = nullptr
 );

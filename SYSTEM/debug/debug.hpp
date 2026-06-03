@@ -2,7 +2,7 @@
 
 #include <string>
 
-#include "udata.hpp"
+#include "backend_facade.hpp"
 
 void delete_file();
 void struct_file();
@@ -29,7 +29,7 @@ void handleDebugStructFileCommand(
 void handleDebugEnvCommand(const std::string& input);
 void handleDebugForceLoginCommand(
     const std::string& input,
-    USER& currentUser,
+    tundraux::frontend::ShellUser& currentUser,
     bool backendMode = false
 );
 void dbg_env();

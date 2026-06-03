@@ -12,6 +12,7 @@
 #include <sstream>
 #include <system_error>
 
+#include "crypto.hpp"
 #include "editor.hpp"
 
 namespace tundraux::audit {
@@ -313,12 +314,12 @@ void initialize() {
 }
 
 void refreshStrictMode() {
-    try {
-        DataManager dataManager("user_data.dat");
-        g_strictModeEnabled = dataManager.GetStrictMode();
-    } catch (...) {
-        g_strictModeEnabled = false;
-    }
+    // Strict mode is supplied by the backend service or legacy-direct adapter.
+    // Do not reset an already-synchronized value during lazy audit initialization.
+}
+
+void setStrictModeEnabled(bool enabled) {
+    g_strictModeEnabled = enabled;
 }
 
 void setCurrentUser(const USER& user) {

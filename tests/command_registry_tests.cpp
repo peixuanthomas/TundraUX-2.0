@@ -34,22 +34,22 @@ bool BackendRuntime::legacyDirect() const {
 class FrontendAuditSink;
 }
 
-void handleLoginCommand(const std::string&, USER&, tundraux::frontend::BackendRuntime*, tundraux::frontend::FrontendAuditSink*) {}
+void handleLoginCommand(const std::string&, tundraux::frontend::ShellUser&, tundraux::frontend::BackendRuntime*, tundraux::frontend::FrontendAuditSink*) {}
 void handleExitCommand(const std::string&) {}
 void handleImportDataCommand(const std::string&, tundraux::frontend::BackendRuntime*) {}
 void handleTimeCommand(const std::string&) {}
-void handleModifyCommand(const std::string&, USER&, tundraux::frontend::BackendRuntime*, tundraux::frontend::FrontendAuditSink*) {}
+void handleModifyCommand(const std::string&, tundraux::frontend::ShellUser&, tundraux::frontend::BackendRuntime*, tundraux::frontend::FrontendAuditSink*) {}
 void renderShellHeader() {}
 void handleClearScreenCommand(const std::string&) {}
-void handleLogoutCommand(const std::string&, USER&, tundraux::frontend::BackendRuntime*, tundraux::frontend::FrontendAuditSink*) {}
+void handleLogoutCommand(const std::string&, tundraux::frontend::ShellUser&, tundraux::frontend::BackendRuntime*, tundraux::frontend::FrontendAuditSink*) {}
 void handleListUserCommand(const std::string&, tundraux::frontend::BackendRuntime*, tundraux::frontend::FrontendAuditSink*) {}
 void handleInfoCommand(const std::string&) {}
-void handleManageUsersCommand(const std::string&, USER&, tundraux::frontend::BackendRuntime*, tundraux::frontend::FrontendAuditSink*) {}
-void handleEditCommand(const std::string&, USER&, tundraux::frontend::BackendRuntime*, tundraux::frontend::FrontendAuditSink*) {}
-void handleExplorerCommand(const std::string&, USER&, tundraux::frontend::BackendRuntime*, tundraux::frontend::FrontendAuditSink*) {}
-void handleWhoamiCommand(USER&, tundraux::frontend::BackendRuntime*, tundraux::frontend::FrontendAuditSink*) {}
-void handleStrictCommand(const std::string&, USER&, tundraux::frontend::BackendRuntime*, tundraux::frontend::FrontendAuditSink*) {}
-void handleExportCommand(const std::string&, USER&, tundraux::frontend::BackendRuntime*, tundraux::frontend::FrontendAuditSink*) {}
+void handleManageUsersCommand(const std::string&, tundraux::frontend::ShellUser&, tundraux::frontend::BackendRuntime*, tundraux::frontend::FrontendAuditSink*) {}
+void handleEditCommand(const std::string&, tundraux::frontend::ShellUser&, tundraux::frontend::BackendRuntime*, tundraux::frontend::FrontendAuditSink*) {}
+void handleExplorerCommand(const std::string&, tundraux::frontend::ShellUser&, tundraux::frontend::BackendRuntime*, tundraux::frontend::FrontendAuditSink*) {}
+void handleWhoamiCommand(tundraux::frontend::ShellUser&, tundraux::frontend::BackendRuntime*, tundraux::frontend::FrontendAuditSink*) {}
+void handleStrictCommand(const std::string&, tundraux::frontend::ShellUser&, tundraux::frontend::BackendRuntime*, tundraux::frontend::FrontendAuditSink*) {}
+void handleExportCommand(const std::string&, tundraux::frontend::ShellUser&, tundraux::frontend::BackendRuntime*, tundraux::frontend::FrontendAuditSink*) {}
 void handleLicenseCommand(const std::string&) {}
 void handleDisplayTestCommand(const std::string&) {}
 void handleDebugEditorCommand(const std::string&) {}
@@ -68,7 +68,7 @@ void handleDebugStructFileCommand(const std::string&, bool backendMode) {
     g_structfileBackendMode = backendMode;
 }
 
-void handleDebugForceLoginCommand(const std::string&, USER&, bool backendMode) {
+void handleDebugForceLoginCommand(const std::string&, tundraux::frontend::ShellUser&, bool backendMode) {
     g_forceloginBackendMode = backendMode;
 }
 
@@ -84,7 +84,7 @@ bool hasCommandNamed(const std::vector<RegisteredCommand>& commands, const std::
 }
 
 bool commandRegistryDropsRemovedCommands() {
-    USER user;
+    tundraux::frontend::ShellUser user;
     user.name = "debug";
     user.type = "debug";
 
@@ -128,7 +128,7 @@ struct FakeFrontendAuditSink final : tundraux::frontend::FrontendAuditSink {
 };
 
 bool commandRegistryLogsDeniedCommandsInNonBackendMode() {
-    USER user;
+    tundraux::frontend::ShellUser user;
     user.type = "guest";
     user.name = "visitor";
 
@@ -265,7 +265,7 @@ bool commandKeyAuditMappingRoundTrip() {
 }
 
 bool commandRegistryRoutesBackendModeToDebugCommands() {
-    USER user;
+    tundraux::frontend::ShellUser user;
     user.type = "debug";
     user.name = "debugger";
 

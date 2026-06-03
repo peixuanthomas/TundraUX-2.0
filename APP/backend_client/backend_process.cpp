@@ -379,10 +379,11 @@ bool BackendProcessTransport::start(
     ) != FALSE;
 
     PROCESS_INFORMATION processInfo{};
-    std::wstring commandLine =
-        quoteWindowsArg(executablePathW) +
-        L" --user-data " + quoteWindowsArg(widenString(userDataPath)) +
-        L" --files-root " + quoteWindowsArg(widenString(filesRoot));
+    std::wstring commandLine = quoteWindowsArg(executablePathW);
+    if (!userDataPath.empty()) {
+        commandLine += L" --user-data " + quoteWindowsArg(widenString(userDataPath));
+    }
+    commandLine += L" --files-root " + quoteWindowsArg(widenString(filesRoot));
     if (!debugSessionToken.empty()) {
         commandLine += L" --debug-session-token " + quoteWindowsArg(widenString(debugSessionToken));
     }

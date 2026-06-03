@@ -125,15 +125,6 @@ bool replaceFileAtomically(const std::string& from, const std::string& to, std::
 }
 }
 
-std::string encryptDecrypt(const std::string& input) {
-    const char key = 0x55;  // Fixed key
-    std::string output = input;
-    for (size_t i = 0; i < output.length(); ++i) {
-        output[i] ^= key;  // XOR operation
-    }
-    return output;
-}
-
 /*
 多用户数据存储/读取设计说明：
 1) 内存模型：

@@ -96,6 +96,12 @@ public:
         calls.push_back("writeTux:" + path + ":" + content);
         return {true, true, "", ""};
     }
+
+    tundraux::explorer::ExplorerBackendResult<std::vector<std::string>> readTlog(
+        const std::string&
+    ) override {
+        return {true, {}, "", ""};
+    }
 };
 
 bool writerCalled = false;

@@ -241,6 +241,17 @@ ServiceResult<BackendUser> AuditService::resolveSessionUser(const std::string& s
     return ServiceResult<BackendUser>::success(*found);
 }
 
+ServiceResult<BackendUser> AuditService::resolveAppendUser(const std::string& sessionId) const {
+    const auto session = sessions_.requireSession(sessionId);
+    if (!session.ok) {
+        return ServiceResult<BackendUser>::failure(session.error.code, session.error.message);
+    }
+    if (session.value.type == "guest" || session.value.name.empty()) {
+        return ServiceResult<BackendUser>::success(session.value);
+    }
+    return resolveSessionUser(sessionId);
+}
+
 ServiceResult<EmptyResult> AuditService::appendRecord(
     const BackendUser& user,
     const AuditRecord& record
@@ -379,7 +390,7 @@ ServiceResult<EmptyResult> AuditService::logEvent(
     const std::string& category,
     const std::string& detail
 ) {
-    const auto user = resolveSessionUser(sessionId);
+    const auto user = resolveAppendUser(sessionId);
     if (!user.ok) {
         return ServiceResult<EmptyResult>::failure(user.error.code, user.error.message);
     }

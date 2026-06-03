@@ -1,13 +1,16 @@
 #include <iostream>
 #include "backend_runtime.hpp"
+#include "backend_facade.hpp"
 #include "hello.hpp"
 #include "color.hpp"
-#include "udata.hpp"
 #include "command.hpp"
 #include <cstdlib>
-#include <filesystem>
 #include <string>
 #include <fstream>
+
+#ifdef TUNDRAUX_LEGACY_DIRECT_SETUP
+#include "legacy_direct.hpp"
+#endif
 
 #ifndef TUNDRAUX_DEFAULT_USER_TYPE
 #define TUNDRAUX_DEFAULT_USER_TYPE "guest"
@@ -67,6 +70,68 @@ int enterShell(tundraux::frontend::BackendRuntime& backendRuntime, const tundrau
     return 0;
 }
 
+void displayLicense(std::ifstream& licenseFile) {
+    std::string line;
+    while (std::getline(licenseFile, line)) {
+        colorcout("white", line + "\n");
+    }
+    licenseFile.close();
+    colorcout("yellow", "\nPress Enter to accept the license and continue...");
+    std::cin.get();
+    clear_screen();
+}
+
+void abortStartupWithMessage(tundraux::frontend::BackendRuntime& backendRuntime, const std::string& message) {
+    colorcout("red", message + "\n");
+    pause();
+    backendRuntime.shutdown();
+    backendRuntimeForExit = nullptr;
+}
+
+bool setupAlreadyInitialized(const tundraux::frontend::FacadeResult& result) {
+    return !result.ok &&
+        result.errorCode == "PermissionDenied" &&
+        result.message == "Setup already initialized.";
+}
+
+bool backendSetupRequired(tundraux::frontend::BackendFacade& facade, std::string& error) {
+    error.clear();
+    const auto result = facade.createInitialAdmin("null", "Secret1", "setup probe");
+    if (setupAlreadyInitialized(result)) {
+        return false;
+    }
+    if (!result.ok && result.errorCode == "InvalidParams") {
+        return true;
+    }
+
+    error = result.message.empty() ? "Failed to determine setup state." : result.message;
+    return false;
+}
+
+bool legacySetupRequired(std::string& error) {
+    error.clear();
+#ifdef TUNDRAUX_LEGACY_DIRECT_SETUP
+    std::string message;
+    const bool created = tundraux::legacy_direct::createInitialAdmin("null", "Secret1", "setup probe", message);
+    if (created) {
+        error = "Legacy setup probe unexpectedly created an admin account.";
+        return false;
+    }
+    if (message == "Setup already initialized.") {
+        return false;
+    }
+    if (message == "\"null\" is reserved for setup.") {
+        return true;
+    }
+
+    error = message.empty() ? "Failed to determine setup state." : message;
+    return false;
+#else
+    error = "Legacy direct setup is unavailable in this build.";
+    return false;
+#endif
+}
+
 } // namespace
 
 int main(int argc, char* argv[]) {
@@ -83,33 +148,50 @@ int main(int argc, char* argv[]) {
     backendRuntimeForExit = &backendRuntime;
     std::atexit(shutdownBackendRuntimeForExit);
 
-    std::ifstream licenseFile("license");
-    std::ifstream detectData("user_data.dat");
-    if (licenseFile && !detectData) {
-        std::string line;
-        while (std::getline(licenseFile, line)) {
-            colorcout("white", line + "\n");
-        }
-        licenseFile.close();
-        colorcout("yellow", "\nPress Enter to accept the license and continue...");
-        std::cin.get();
-        clear_screen();
-        hello();
-        return enterShell(backendRuntime, backendOptions);
-    } else if (detectData) {
-        detectData.close();
-        clear_screen();
-        set_title("TundraUX 2.0");
-        return enterShell(backendRuntime, backendOptions);
-    } else {
-        colorcout("red", "Critical files missing! Program aborted.\n");
+    std::string backendError;
+    if (!backendRuntime.initialize(backendOptions, backendError)) {
+        colorcout("red", backendError + "\n");
         pause();
         backendRuntimeForExit = nullptr;
         return 1;
     }
-    colorcout("red", "Program has run into an unexpected place. You may need to contact developer for assistance.\n");
+
+    std::ifstream licenseFile("license");
+    std::string setupError;
+    bool setupRequired = false;
+    if (backendRuntime.legacyDirect()) {
+        setupRequired = legacySetupRequired(setupError);
+    } else {
+        tundraux::frontend::BackendFacade facade(backendRuntime);
+        setupRequired = backendSetupRequired(facade, setupError);
+        if (setupRequired) {
+            if (!licenseFile) {
+                abortStartupWithMessage(backendRuntime, "Critical file missing: license");
+                return 1;
+            }
+            displayLicense(licenseFile);
+            hello(facade);
+        }
+    }
+
+    if (!setupError.empty()) {
+        abortStartupWithMessage(backendRuntime, setupError);
+        return 1;
+    }
+
+    if (backendRuntime.legacyDirect() && setupRequired) {
+        if (!licenseFile) {
+            abortStartupWithMessage(backendRuntime, "Critical file missing: license");
+            return 1;
+        }
+        displayLicense(licenseFile);
+        hello();
+    }
+
+    clear_screen();
+    set_title("TundraUX 2.0");
+    task_main(&backendRuntime);
     backendRuntime.shutdown();
     backendRuntimeForExit = nullptr;
-    pause();
-    return 1;
+    return 0;
 }

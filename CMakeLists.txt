@@ -286,7 +286,7 @@ set(TUNDRAUX_CORE_SOURCES
     CORE/startup/hello.cpp
 )
 
-set(TUNDRAUX_APP_SOURCES
+set(TUNDRAUX_APP_COMMON_SOURCES
     APP/account_settings/account_settings.cpp
     APP/backend_client/backend_client.cpp
     APP/backend_client/backend_facade.cpp
@@ -316,9 +316,13 @@ set(TUNDRAUX_APP_SOURCES
     APP/shell/commandRegistry.cpp
 )
 
+set(TUNDRAUX_APP_SOURCES
+    ${TUNDRAUX_APP_COMMON_SOURCES}
+    APP/legacy_direct/legacy_direct_stub.cpp
+)
+
 set(TUNDRAUX_USER_SOURCES
     USER/account/manageusers.cpp
-    USER/udata/udata.cpp
 )
 
 set(TUNDRAUX_SYSTEM_SOURCES
@@ -343,9 +347,9 @@ target_include_directories(${PROJECT_NAME}
         ${PROJECT_SOURCE_DIR}/APP/backend_client
         ${PROJECT_SOURCE_DIR}/APP/editor
         ${PROJECT_SOURCE_DIR}/APP/explorer
+        ${PROJECT_SOURCE_DIR}/APP/legacy_direct
         ${PROJECT_SOURCE_DIR}/APP/shell
         ${PROJECT_SOURCE_DIR}/USER/account
-        ${PROJECT_SOURCE_DIR}/USER/udata
         ${PROJECT_SOURCE_DIR}/SYSTEM/audit
         ${PROJECT_SOURCE_DIR}/SYSTEM/build_info
         ${PROJECT_SOURCE_DIR}/SYSTEM/console
@@ -375,6 +379,57 @@ add_custom_command(TARGET ${PROJECT_NAME} POST_BUILD
         $<TARGET_FILE_DIR:${PROJECT_NAME}>
 )
 
+add_executable(${PROJECT_NAME}_legacy_direct)
+
+target_sources(${PROJECT_NAME}_legacy_direct
+    PRIVATE
+        ${TUNDRAUX_CORE_SOURCES}
+        ${TUNDRAUX_APP_COMMON_SOURCES}
+        APP/legacy_direct/legacy_direct.cpp
+        ${TUNDRAUX_USER_SOURCES}
+        USER/udata/udata.cpp
+        ${TUNDRAUX_SYSTEM_SOURCES}
+)
+
+target_include_directories(${PROJECT_NAME}_legacy_direct
+    PRIVATE
+        ${PROJECT_SOURCE_DIR}/CORE/startup
+        ${PROJECT_SOURCE_DIR}/APP/account_settings
+        ${PROJECT_SOURCE_DIR}/APP/backend_client
+        ${PROJECT_SOURCE_DIR}/APP/editor
+        ${PROJECT_SOURCE_DIR}/APP/explorer
+        ${PROJECT_SOURCE_DIR}/APP/legacy_direct
+        ${PROJECT_SOURCE_DIR}/APP/shell
+        ${PROJECT_SOURCE_DIR}/USER/account
+        ${PROJECT_SOURCE_DIR}/USER/udata
+        ${PROJECT_SOURCE_DIR}/SYSTEM/audit
+        ${PROJECT_SOURCE_DIR}/SYSTEM/build_info
+        ${PROJECT_SOURCE_DIR}/SYSTEM/console
+        ${PROJECT_SOURCE_DIR}/SYSTEM/crypto
+        ${PROJECT_SOURCE_DIR}/SYSTEM/debug
+        ${PROJECT_SOURCE_DIR}/BACKEND/core
+        ${TUNDRAUX_GENERATED_DIR}
+)
+
+target_link_libraries(${PROJECT_NAME}_legacy_direct
+    PRIVATE
+        TundraTUI::TundraTUI
+        tundraux_backend_core
+        tundraux_protocol
+)
+
+target_compile_features(${PROJECT_NAME}_legacy_direct
+    PRIVATE
+        cxx_std_17
+)
+
+target_compile_definitions(${PROJECT_NAME}_legacy_direct
+    PRIVATE
+        TUNDRAUX_LEGACY_DIRECT_SETUP
+)
+
+add_dependencies(${PROJECT_NAME}_legacy_direct tundraux_backend_stdio tundraux_generate_build_info)
+
 add_executable(audit_log_tests
     tests/audit_log_tests.cpp
     SYSTEM/audit/audit_log.cpp
@@ -402,6 +457,36 @@ target_compile_features(audit_log_tests
 )
 
 add_test(NAME audit_log_tests COMMAND audit_log_tests)
+
+add_executable(legacy_direct_tests
+    tests/legacy_direct_tests.cpp
+    APP/legacy_direct/legacy_direct.cpp
+    USER/udata/udata.cpp
+    SYSTEM/crypto/crypto.cpp
+)
+
+target_include_directories(legacy_direct_tests
+    PRIVATE
+        ${PROJECT_SOURCE_DIR}/APP/backend_client
+        ${PROJECT_SOURCE_DIR}/APP/legacy_direct
+        ${PROJECT_SOURCE_DIR}/BACKEND/core
+        ${PROJECT_SOURCE_DIR}/SYSTEM/console
+        ${PROJECT_SOURCE_DIR}/SYSTEM/crypto
+        ${PROJECT_SOURCE_DIR}/USER/udata
+)
+
+target_link_libraries(legacy_direct_tests
+    PRIVATE
+        TundraTUI::TundraTUI
+        tundraux_backend_core
+)
+
+target_compile_features(legacy_direct_tests
+    PRIVATE
+        cxx_std_17
+)
+
+add_test(NAME legacy_direct_tests COMMAND legacy_direct_tests)
 
 add_executable(build_info_tests
     tests/build_info_tests.cpp
@@ -554,9 +639,9 @@ add_test(NAME command_registry_tests COMMAND command_registry_tests)
 add_executable(debug_structfile_tests
     tests/debug_structfile_tests.cpp
     SYSTEM/debug/debug.cpp
-    USER/udata/udata.cpp
     SYSTEM/crypto/crypto.cpp
     SYSTEM/build_info/build_info.cpp
+    APP/legacy_direct/legacy_direct_stub.cpp
 )
 
 target_include_directories(debug_structfile_tests
@@ -566,7 +651,8 @@ target_include_directories(debug_structfile_tests
         ${PROJECT_SOURCE_DIR}/SYSTEM/crypto
         ${PROJECT_SOURCE_DIR}/SYSTEM/debug
         ${PROJECT_SOURCE_DIR}/CORE/startup
-        ${PROJECT_SOURCE_DIR}/USER/udata
+        ${PROJECT_SOURCE_DIR}/APP/backend_client
+        ${PROJECT_SOURCE_DIR}/APP/legacy_direct
         ${CMAKE_CURRENT_BINARY_DIR}/generated
 )
 

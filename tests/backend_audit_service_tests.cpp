@@ -27,6 +27,10 @@ public:
         return users;
     }
 
+    bool isStoreEmpty() const override {
+        return users.empty();
+    }
+
     bool addUser(const tundraux::backend::BackendUser& user) override {
         users.push_back(user);
         return true;
@@ -201,6 +205,56 @@ bool guestAndUserCannotReadOrExportTlog() {
     return true;
 }
 
+bool guestCanAppendAuditButCannotReadOrExportTlog() {
+    TempDirectory temp(uniqueTempPath("guestAppend"));
+    InMemoryUserStore users;
+    users.strictMode = true;
+    tundraux::backend::SessionService sessions(users);
+    tundraux::backend::AuditService audit(users, sessions, temp.path().string());
+
+    const auto guest = sessions.startGuestSession();
+    const auto event = audit.logEvent(guest.sessionId, "login", "backend attempt");
+    if (!expect(event.ok, "guest logEvent should append pre-login audit event")) return false;
+
+    const auto key = audit.logKeyPress(guest.sessionId, "x", true);
+    if (!expect(key.ok, "guest logKeyPress should append pre-login key audit event")) return false;
+
+    const auto adminGuest = sessions.startGuestSession();
+    const auto adminLogin = sessions.login(adminGuest.sessionId, "alice", "Secret1");
+    if (!expect(adminLogin.ok, "admin login should succeed for guest append readback")) return false;
+    const auto read = audit.readTlog(adminLogin.value.sessionId, "audit.tlog");
+    if (!expect(read.ok, "admin should read guest audit records")) return false;
+    if (!expect(read.value.lines.size() == 2, "expected guest event and key audit records")) return false;
+
+    bool hasGuestEvent = false;
+    bool hasRedactedKey = false;
+    for (const auto& line : read.value.lines) {
+        if (line.find("user=(none)") != std::string::npos &&
+            line.find("type=guest") != std::string::npos &&
+            line.find("login") != std::string::npos) {
+            hasGuestEvent = true;
+        }
+        if (line.find("Character [redacted]") != std::string::npos) {
+            hasRedactedKey = true;
+        }
+    }
+    if (!expect(hasGuestEvent, "guest append should record guest identity")) return false;
+    if (!expect(hasRedactedKey, "guest key append should preserve redacted key detail")) return false;
+
+    const auto guestRead = audit.readTlog(guest.sessionId, "audit.tlog");
+    if (!expect(!guestRead.ok, "guest still should not read tlog")) return false;
+    if (!expect(
+            guestRead.error.code == tundraux::backend::ErrorCode::PermissionDenied,
+            "guest read should remain denied after guest append")) return false;
+    const auto guestExport = audit.exportTlog(guest.sessionId, "audit.tlog");
+    if (!expect(!guestExport.ok, "guest still should not export tlog")) return false;
+    if (!expect(
+            guestExport.error.code == tundraux::backend::ErrorCode::PermissionDenied,
+            "guest export should remain denied after guest append")) return false;
+
+    return true;
+}
+
 bool adminAndDebugCanReadPlaintext() {
     TempDirectory temp(uniqueTempPath("admin"));
     InMemoryUserStore users;
@@ -358,6 +412,9 @@ int main() {
         return 1;
     }
     if (!guestAndUserCannotReadOrExportTlog()) {
+        return 1;
+    }
+    if (!guestCanAppendAuditButCannotReadOrExportTlog()) {
         return 1;
     }
     if (!adminAndDebugCanReadPlaintext()) {

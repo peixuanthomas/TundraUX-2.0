@@ -130,7 +130,7 @@ bool BackendRuntime::initialize(const BackendRuntimeOptions& options, std::strin
 
     const std::string debugSessionToken = isDebugStartup(options) ? randomToken() : std::string{};
     auto transport = std::make_unique<BackendProcessTransport>();
-    if (!transport->start(backendPath, options.userDataPath, filesRoot, debugSessionToken)) {
+    if (!transport->start(backendPath, "", filesRoot, debugSessionToken)) {
         error = "Failed to start backend stdio process: " + backendPath;
         legacyDirect_ = false;
         return false;

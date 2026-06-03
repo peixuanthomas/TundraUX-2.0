@@ -199,6 +199,35 @@ FacadeResult BackendFacade::setStrictMode(bool enabled) {
     };
 }
 
+FacadeResult BackendFacade::createInitialAdmin(
+    const std::string& username,
+    const std::string& password,
+    const std::string& passwordHint
+) {
+    std::string message;
+    if (!ensureSession(message)) {
+        return FacadeResult{false, message, "TransportError"};
+    }
+
+    auto* client = runtime_.client();
+    if (client == nullptr) {
+        return FacadeResult{false, "Backend unavailable.", "TransportError"};
+    }
+
+    const auto result = client->createInitialAdmin(runtime_.sessionId(), username, password, passwordHint);
+    if (!result.ok && result.errorCode == "SessionExpired") {
+        std::string ignored;
+        (void)recoverGuestSession(runtime_, ignored);
+        return FacadeResult{false, defaultFailureMessage("Backend session expired.", result.message), result.errorCode};
+    }
+
+    return FacadeResult{
+        result.ok,
+        result.message,
+        result.errorCode
+    };
+}
+
 ClientResult<std::vector<std::string>> BackendFacade::readTlog(const std::string& path) {
     std::string message;
     if (!ensureSession(message)) {

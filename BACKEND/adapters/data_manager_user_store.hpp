@@ -12,6 +12,7 @@ public:
     explicit DataManagerUserStore(std::string filename);
 
     std::vector<BackendUser> listUsers() const override;
+    bool isStoreEmpty() const override;
     bool addUser(const BackendUser& user) override;
     bool updateUser(const std::string& name, const BackendUser& user) override;
     bool removeUser(const std::string& name) override;

@@ -222,6 +222,46 @@ ServiceResult<BackendUser> UserService::currentProfile(const std::string& sessio
     return ServiceResult<BackendUser>::success(withoutPassword(currentUser.value));
 }
 
+ServiceResult<EmptyResult> UserService::createInitialAdmin(
+    const std::string& sessionId,
+    const std::string& username,
+    const std::string& password,
+    const std::string& passwordHint
+) {
+    (void)sessionId;
+
+    bool empty = false;
+    try {
+        empty = users_.isStoreEmpty();
+    } catch (const std::exception&) {
+        return ServiceResult<EmptyResult>::failure(ErrorCode::StorageError, kReadUserDataError);
+    }
+    if (!empty) {
+        return ServiceResult<EmptyResult>::failure(ErrorCode::PermissionDenied, "Setup already initialized.");
+    }
+
+    BackendUser admin;
+    admin.type = "admin";
+    admin.name = trimCopy(username);
+    admin.password = password;
+    admin.passwordHint = trimCopy(passwordHint);
+    admin.failedCount = 0;
+
+    const std::string validationError = validateManagedUser(admin, {}, "", false, true);
+    if (!validationError.empty()) {
+        return validationFailure(validationError);
+    }
+
+    try {
+        if (!users_.addUser(admin)) {
+            return ServiceResult<EmptyResult>::failure(ErrorCode::Conflict, "Unable to create initial admin.");
+        }
+    } catch (const std::exception&) {
+        return ServiceResult<EmptyResult>::failure(ErrorCode::StorageError, kUpdateUserDataError);
+    }
+    return ServiceResult<EmptyResult>::success(EmptyResult{});
+}
+
 ServiceResult<EmptyResult> UserService::createUser(const std::string& sessionId, const BackendUser& user) {
     const auto manager = requireUserManager(sessionId);
     if (!manager.ok) {

@@ -12,7 +12,6 @@ class BackendProcessTransport;
 struct BackendRuntimeOptions {
     bool legacyDirect = false;
     std::string backendStdioPath;
-    std::string userDataPath = "user_data.dat";
     std::string filesRoot;
     std::string startupUserType = "guest";
     std::string startupUserName;

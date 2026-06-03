@@ -12,21 +12,14 @@
 
 #include <TundraTUI/input.hpp>
 
+#include "audit_log.hpp"
 #include "backend_facade.hpp"
-#include "user_conversion_compat.hpp"
 #include "backend_runtime.hpp"
 #include "color.hpp"
 #include "commandHandlers.hpp"
 #include "commandReg.hpp"
 #include "command_key_audit.hpp"
-#include "udata.hpp"
-
-namespace tundraux::audit {
-void initialize();
-void setCurrentUser(const USER& user);
-void logEvent(const std::string& category, const std::string& detail);
-void logKeyPress(const tundra_tui::KeyPress& key, bool sensitive);
-}
+#include "legacy_direct.hpp"
 
 #ifndef TUNDRAUX_DEFAULT_USER_TYPE                    //This default type is set in cmakelists.txt.
 #define TUNDRAUX_DEFAULT_USER_TYPE "guest"
@@ -39,19 +32,31 @@ void logKeyPress(const tundra_tui::KeyPress& key, bool sensitive);
 std::string guessSimilarCommand(
     const std::string& input,
     const std::vector<RegisteredCommand>& commands,
-    const USER& currentUser
+    const tundraux::frontend::ShellUser& currentUser
 );
 bool isLikelyCmd(const std::string& input);
 
-bool canRunSystemCommand(const USER& currentUser) {
+bool canRunSystemCommand(const tundraux::frontend::ShellUser& currentUser) {
     return currentUser.type == "admin" || currentUser.type == "debug";
 }
 
 namespace {
 class LegacyAuditSink : public tundraux::frontend::FrontendAuditSink {
 public:
+    LegacyAuditSink() {
+        tundraux::audit::initialize();
+        syncStrictModeFromLegacyStore();
+    }
+
     void setCurrentUser(const tundraux::frontend::ShellUser& user) override {
-        tundraux::audit::setCurrentUser(tundraux::frontend::toLegacyUser(user));
+        currentUser_ = user;
+        tundraux::audit::setCurrentUser(USER{
+            currentUser_.type,
+            currentUser_.name,
+            "",
+            currentUser_.passwordHint,
+            currentUser_.failedCount
+        });
     }
 
     tundraux::frontend::FacadeResult logEvent(
@@ -66,10 +71,23 @@ public:
         const std::string& key,
         bool sensitive
     ) override {
-        tundra_tui::KeyPress keyPress = tundraux::frontend::keyPressFromFrontendAuditText(key);
-        tundraux::audit::logKeyPress(keyPress, sensitive);
+        tundraux::audit::logKeyPress(
+            tundraux::frontend::keyPressFromFrontendAuditText(key),
+            sensitive
+        );
         return {true, "", ""};
     }
+
+private:
+    void syncStrictModeFromLegacyStore() {
+        bool enabled = false;
+        std::string message;
+        if (tundraux::legacy_direct::getStrictMode(enabled, message)) {
+            tundraux::audit::setStrictModeEnabled(enabled);
+        }
+    }
+
+    tundraux::frontend::ShellUser currentUser_;
 };
 
 tundraux::frontend::FrontendAuditSink* g_commandKeyAuditSink = nullptr;
@@ -90,10 +108,9 @@ bool usesBackendRuntime(tundraux::frontend::BackendRuntime* backendRuntime) {
     return backendRuntime != nullptr && !backendRuntime->legacyDirect();
 }
 
-USER guestShellUser() {
+tundraux::frontend::ShellUser guestShellUser() {
     return {
         "guest",
-        "",
         "",
         "",
         0
@@ -102,17 +119,17 @@ USER guestShellUser() {
 
 void setAuditCurrentUser(
     tundraux::frontend::FrontendAuditSink* auditSink,
-    const USER& currentUser
+    const tundraux::frontend::ShellUser& currentUser
 ) {
     if (auditSink == nullptr) {
         return;
     }
-    auditSink->setCurrentUser(tundraux::frontend::toShellUser(currentUser));
+    auditSink->setCurrentUser(currentUser);
 }
 
 void logAuditEvent(
     tundraux::frontend::FrontendAuditSink* auditSink,
-    const USER& currentUser,
+    const tundraux::frontend::ShellUser& currentUser,
     const std::string& category,
     const std::string& detail
 ) {
@@ -124,7 +141,7 @@ void logAuditEvent(
 }
 
 bool syncSystemCommandUserFromBackend(
-    USER& currentUser,
+    tundraux::frontend::ShellUser& currentUser,
     tundraux::frontend::BackendRuntime& backendRuntime,
     tundraux::frontend::BackendFacade* facade,
     tundraux::frontend::FrontendAuditSink* auditSink,
@@ -140,7 +157,7 @@ bool syncSystemCommandUserFromBackend(
 
     const auto profileResult = facade->refreshProfile();
     if (profileResult.ok) {
-        currentUser = tundraux::frontend::toLegacyUser(profileResult.value);
+        currentUser = profileResult.value;
         setAuditCurrentUser(auditSink, currentUser);
         denyMessage = "Access Denied.";
         return canRunSystemCommand(currentUser);
@@ -181,12 +198,10 @@ void task_main(tundraux::frontend::BackendRuntime* backendRuntime) {
         } else {
             legacyAuditSink = std::make_unique<LegacyAuditSink>();
             auditSink = legacyAuditSink.get();
-            tundraux::audit::initialize();
         }
     } else {
         legacyAuditSink = std::make_unique<LegacyAuditSink>();
         auditSink = legacyAuditSink.get();
-        tundraux::audit::initialize();
     }
 
     renderShellHeader();
@@ -197,13 +212,12 @@ void task_main(tundraux::frontend::BackendRuntime* backendRuntime) {
         });
     } else {
         g_commandKeyAuditSink = nullptr;
-        tundra_tui::setKeyAuditSink(tundraux::audit::logKeyPress);
+        tundra_tui::setKeyAuditSink(nullptr);
     }
 
-    USER currentUser = {
+    tundraux::frontend::ShellUser currentUser = {
         TUNDRAUX_DEFAULT_USER_TYPE,
         TUNDRAUX_DEFAULT_USER_NAME,
-        "",
         "",
         0
     };
@@ -325,7 +339,7 @@ int boundedLevenshtein(const std::string& a, const std::string& b, int maxDist) 
 std::string guessSimilarCommand(
     const std::string& input,
     const std::vector<RegisteredCommand>& commands,
-    const USER& currentUser
+    const tundraux::frontend::ShellUser& currentUser
 ) {
     std::istringstream iss(input);
     std::string token;

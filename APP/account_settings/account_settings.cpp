@@ -3,11 +3,10 @@
 #include "backend_facade.hpp"
 #include "backend_client.hpp"
 #include "backend_runtime.hpp"
-#include "user_conversion_compat.hpp"
+#include "legacy_direct.hpp"
 
 #include <algorithm>
 #include <cctype>
-#include <fstream>
 #include <iostream>
 #include <string>
 #include <vector>
@@ -33,17 +32,16 @@ using tundra_tui::set_title;
 
 void setAuditCurrentUser(
     tundraux::frontend::FrontendAuditSink* auditSink,
-    const USER& currentUser
+    const tundraux::frontend::ShellUser& currentUser
 ) {
     if (auditSink == nullptr) {
         return;
     }
-    auditSink->setCurrentUser(tundraux::frontend::toShellUser(currentUser));
+    auditSink->setCurrentUser(currentUser);
 }
-
 void logAuditEvent(
     tundraux::frontend::FrontendAuditSink* auditSink,
-    const USER& currentUser,
+    const tundraux::frontend::ShellUser& currentUser,
     const std::string& category,
     const std::string& detail
 ) {
@@ -68,11 +66,12 @@ struct DetailLine {
 };
 
 struct AccountSettingsState {
-    USER original;
+    tundraux::frontend::ShellUser original;
+    std::string originalPassword;
     std::string newPassword;
     std::string confirmPassword;
     std::string passwordHint;
-    std::string sourceLabel = "user_data.dat";
+    std::string sourceLabel = "legacy direct user store";
     std::size_t field = 0;
     bool showPassword = false;
     bool showHelp = false;
@@ -84,12 +83,12 @@ bool usesBackendMode(tundraux::frontend::BackendRuntime* backendRuntime) {
     return backendRuntime != nullptr && !backendRuntime->legacyDirect();
 }
 
-USER guestUser() {
-    return tundraux::frontend::toLegacyUser(tundraux::frontend::ShellUser{"guest", "", "", 0});
+tundraux::frontend::ShellUser guestUser() {
+    return tundraux::frontend::ShellUser{"guest", "", "", 0};
 }
 
 void syncCurrentUserToGuest(
-    USER& currentUser,
+    tundraux::frontend::ShellUser& currentUser,
     tundraux::frontend::FrontendAuditSink* auditSink
 ) {
     currentUser = guestUser();
@@ -220,7 +219,7 @@ bool passwordWillChange(const AccountSettingsState& state) {
 }
 
 bool hintWillChange(const AccountSettingsState& state) {
-    return trimCopy(state.passwordHint) != state.original.password_hint;
+    return trimCopy(state.passwordHint) != state.original.passwordHint;
 }
 
 bool hasAnyChange(const AccountSettingsState& state) {
@@ -228,7 +227,7 @@ bool hasAnyChange(const AccountSettingsState& state) {
 }
 
 std::string effectivePassword(const AccountSettingsState& state) {
-    return passwordWillChange(state) ? state.newPassword : state.original.password;
+    return passwordWillChange(state) ? state.newPassword : state.originalPassword;
 }
 
 std::string validateSettings(const AccountSettingsState& state) {
@@ -268,8 +267,8 @@ std::vector<DetailLine> buildDetailLines(const AccountSettingsState& state) {
         {"Account", "", true},
         {"Name", state.original.name, false},
         {"Role", state.original.type, false},
-        {"Failed attempts", std::to_string(state.original.count), false},
-        {"Current hint", state.original.password_hint.empty() ? "(none)" : state.original.password_hint, false},
+        {"Failed attempts", std::to_string(state.original.failedCount), false},
+        {"Current hint", state.original.passwordHint.empty() ? "(none)" : state.original.passwordHint, false},
         {"Changes", "", true},
         {"Password", changingPassword ? "Will update" : "Unchanged", false},
         {"New password", passwordSummary(state.newPassword, state.showPassword), false},
@@ -442,7 +441,7 @@ std::string& activeField(AccountSettingsState& state) {
 
 bool saveSettings(
     AccountSettingsState& state,
-    USER& currentUser,
+    tundraux::frontend::ShellUser& currentUser,
     tundraux::frontend::BackendRuntime* backendRuntime,
     tundraux::frontend::FrontendAuditSink* auditSink
 ) {
@@ -459,7 +458,7 @@ bool saveSettings(
         return false;
     }
 
-    USER updated = state.original;
+    tundraux::frontend::ShellUser updated = state.original;
     bool degradedProfileRefresh = false;
     bool profileExpired = false;
     std::string degradedProfileReason;
@@ -510,44 +509,44 @@ bool saveSettings(
                 profileResult.errorCode,
                 profileResult.message
             );
-            updated.password.clear();
             if (passwordHintProvided) {
-                updated.password_hint = trimmedHint;
+                updated.passwordHint = trimmedHint;
             }
             if (profileResult.errorCode == "SessionExpired") {
                 profileExpired = true;
                 syncCurrentUserToGuest(currentUser, auditSink);
             }
         } else {
-            updated = tundraux::frontend::toLegacyUser(profileResult.value);
+            updated = profileResult.value;
         }
     } else {
-        if (passwordWillChange(state)) {
-            updated.password = state.newPassword;
-        }
-        updated.password_hint = trimmedHint;
-
-        DataManager dataManager("user_data.dat");
-        if (!dataManager.UpdateUser(state.original.name, updated)) {
-            state.message = "Failed to update user info.";
+        tundraux::legacy_direct::AccountRecord record{updated, state.originalPassword};
+        if (!tundraux::legacy_direct::saveAccount(
+                state.original.name,
+                passwordWillChange(state),
+                state.newPassword,
+                trimmedHint,
+                record,
+                state.message)) {
             logAuditEvent(
                 auditSink,
                 currentUser,
                 "manage",
-                "account settings update failure user=" + currentUser.name + " reason=update user_data.dat failed"
+                "account settings update failure user=" + currentUser.name + " reason=" + state.message
             );
             return false;
         }
+        updated = record.user;
+        state.originalPassword = record.password;
     }
 
     if (!profileExpired) {
         currentUser = updated;
-        currentUser.password.clear();
     }
     state.original = updated;
     state.newPassword.clear();
     state.confirmPassword.clear();
-    state.passwordHint = updated.password_hint;
+    state.passwordHint = updated.passwordHint;
     state.saved = true;
     state.message = degradedProfileRefresh
         ? "Settings saved, but profile refresh failed. Press Enter or Esc to return."
@@ -568,7 +567,7 @@ bool saveSettings(
 
 bool handleSettingsKey(
     AccountSettingsState& state,
-    USER& currentUser,
+    tundraux::frontend::ShellUser& currentUser,
     tundraux::frontend::BackendRuntime* backendRuntime,
     tundraux::frontend::FrontendAuditSink* auditSink,
     const KeyPress& key
@@ -639,19 +638,10 @@ bool handleSettingsKey(
     return true;
 }
 
-const USER* findCurrentUser(const DataManager& dataManager, const USER& currentUser) {
-    for (const auto& user : dataManager.GetAllUsers()) {
-        if (user.name == currentUser.name) {
-            return &user;
-        }
-    }
-    return nullptr;
-}
-
 } // namespace
 
 void open_account_settings(
-    USER& currentUser,
+    tundraux::frontend::ShellUser& currentUser,
     tundraux::frontend::BackendRuntime* backendRuntime,
     tundraux::frontend::FrontendAuditSink* auditSink
 ) {
@@ -705,29 +695,22 @@ void open_account_settings(
             return;
         }
 
-        state.original = tundraux::frontend::toLegacyUser(profileResult.value);
-        state.passwordHint = state.original.password_hint;
+        state.original = profileResult.value;
+        state.passwordHint = state.original.passwordHint;
         state.sourceLabel = "backend current profile";
         currentUser = state.original;
-        currentUser.password.clear();
     } else {
-        std::ifstream check("user_data.dat");
-        if (!check.good()) {
-            colorcout("red", "Error: user_data.dat not found.\n");
-            return;
-        }
-        check.close();
-
-        DataManager dataManager("user_data.dat");
-        const USER* storedUser = findCurrentUser(dataManager, currentUser);
-        if (storedUser == nullptr) {
-            colorcout("red", "Current user is not stored in user_data.dat.\n");
+        tundraux::legacy_direct::AccountRecord record;
+        std::string message;
+        if (!tundraux::legacy_direct::loadAccount(currentUser, record, message)) {
+            colorcout("red", message + "\n");
             return;
         }
 
-        state.original = *storedUser;
-        state.passwordHint = storedUser->password_hint;
-        state.sourceLabel = "user_data.dat";
+        state.original = record.user;
+        state.originalPassword = record.password;
+        state.passwordHint = record.user.passwordHint;
+        state.sourceLabel = "legacy direct user store";
     }
 
     set_title("Account Settings");

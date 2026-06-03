@@ -286,6 +286,19 @@ protocol::JsonValue JsonRpcDispatcher::dispatch(const std::string& method, const
         return protocol::JsonValue::object({{"user", userToJson(result.value)}});
     }
 
+    if (method == "setup.createInitialAdmin") {
+        const auto result = users_.createInitialAdmin(
+            requiredStringParam(params, "sessionId"),
+            requiredStringParam(params, "username"),
+            requiredStringParam(params, "password"),
+            optionalStringParam(params, "passwordHint")
+        );
+        if (!result.ok) {
+            throwIfFailed(result.error);
+        }
+        return protocol::JsonValue::object({{"ok", protocol::JsonValue::boolean(true)}});
+    }
+
     if (method == "user.createUser") {
         const auto& user = requiredObjectParam(params, "user");
         const auto result = users_.createUser(

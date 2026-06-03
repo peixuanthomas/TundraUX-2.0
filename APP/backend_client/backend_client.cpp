@@ -476,6 +476,25 @@ ClientResult<FrontendUser> BackendClient::currentProfile(const std::string& sess
     );
 }
 
+ClientResult<bool> BackendClient::createInitialAdmin(
+    const std::string& sessionId,
+    const std::string& username,
+    const std::string& password,
+    const std::string& passwordHint
+) {
+    JsonValue::Object params = paramsWithSession(sessionId);
+    params.emplace("username", JsonValue::string(username));
+    params.emplace("password", JsonValue::string(password));
+    params.emplace("passwordHint", JsonValue::string(passwordHint));
+    return sendRequest<bool>(
+        transport_,
+        nextRequestId(),
+        "setup.createInitialAdmin",
+        std::move(params),
+        [](const JsonValue& result) { return parseOkResult(result); }
+    );
+}
+
 ClientResult<bool> BackendClient::createUser(
     const std::string& sessionId,
     const FrontendUser& user,

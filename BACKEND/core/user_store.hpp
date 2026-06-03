@@ -17,6 +17,7 @@ class UserStore {
 public:
     virtual ~UserStore() = default;
     virtual std::vector<BackendUser> listUsers() const = 0;
+    virtual bool isStoreEmpty() const = 0;
     virtual bool addUser(const BackendUser& user) = 0;
     virtual bool updateUser(const std::string& name, const BackendUser& user) = 0;
     virtual bool removeUser(const std::string& name) = 0;
