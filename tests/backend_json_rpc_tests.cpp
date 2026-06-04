@@ -324,6 +324,30 @@ private:
     std::filesystem::path path_;
 };
 
+std::string onlyTlogFileName(const std::filesystem::path& root) {
+    std::vector<std::filesystem::path> files;
+    std::error_code error;
+    if (!std::filesystem::exists(root, error) || error) {
+        (void)expect(false, "expected log directory to exist");
+        return {};
+    }
+
+    for (const auto& entry : std::filesystem::directory_iterator(root, error)) {
+        if (error) {
+            (void)expect(false, "failed to enumerate log directory");
+            return {};
+        }
+        if (entry.is_regular_file(error) && entry.path().extension() == ".tlog") {
+            files.push_back(entry.path());
+        }
+    }
+
+    if (!expect(files.size() == 1, "expected exactly one tlog file")) {
+        return {};
+    }
+    return files.front().filename().string();
+}
+
 bool runCommaLocaleNumberTest() {
     using tundraux::backend::JsonValue;
     using tundraux::backend::parseJson;
@@ -1063,10 +1087,12 @@ bool runDispatcherAuditMethodsTest() {
         R"(","key":"x","sensitive":true}})"
     );
     if (!expectNoErrorResponse(keyResponse, "4", "audit.logKeyPress")) return false;
+    const std::string logName = onlyTlogFileName(logs.path());
+    if (logName.empty()) return false;
 
     const std::string readResponse = dispatcher.handleLine(
         R"({"id":"5","method":"audit.readTlog","params":{"sessionId":")" + adminSessionId +
-        R"(","path":"audit.tlog"}})"
+        R"(","path":")" + logName + R"("}})"
     );
     const auto read = parseJson(readResponse);
     if (!expect(read.ok, "audit.readTlog response should parse: " + readResponse)) return false;
@@ -1094,7 +1120,7 @@ bool runDispatcherAuditMethodsTest() {
 
     const std::string exportResponse = dispatcher.handleLine(
         R"({"id":"6","method":"audit.exportTlog","params":{"sessionId":")" + adminSessionId +
-        R"(","path":"audit.tlog"}})"
+        R"(","path":")" + logName + R"("}})"
     );
     const auto exported = parseJson(exportResponse);
     if (!expect(exported.ok, "audit.exportTlog response should parse: " + exportResponse)) return false;
@@ -1121,7 +1147,7 @@ bool runDispatcherAuditMethodsTest() {
 
     const std::string deniedResponse = dispatcher.handleLine(
         R"({"id":"8","method":"audit.readTlog","params":{"sessionId":")" + deniedGuestSessionId +
-        R"(","path":"audit.tlog"}})"
+        R"(","path":")" + logName + R"("}})"
     );
     const auto denied = parseJson(deniedResponse);
     if (!expect(denied.ok, "guest audit.readTlog should parse: " + deniedResponse)) return false;

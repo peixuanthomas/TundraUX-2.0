@@ -64,6 +64,7 @@ private:
     UserStore& users_;
     const SessionService& sessions_;
     std::string logsRoot_;
+    std::filesystem::path startupLogPath_;
 };
 
 } // namespace tundraux::backend

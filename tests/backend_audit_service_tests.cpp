@@ -4,10 +4,12 @@
 #include "user_store.hpp"
 
 #include <chrono>
+#include <cctype>
 #include <filesystem>
 #include <fstream>
 #include <functional>
 #include <iostream>
+#include <optional>
 #include <stdexcept>
 #include <string>
 #include <thread>
@@ -118,6 +120,52 @@ std::string fileContents(const std::filesystem::path& path) {
     return content;
 }
 
+std::vector<std::filesystem::path> tlogFilesIn(const std::filesystem::path& root) {
+    std::vector<std::filesystem::path> files;
+    std::error_code error;
+    if (!std::filesystem::exists(root, error) || error) {
+        return files;
+    }
+
+    for (const auto& entry : std::filesystem::directory_iterator(root, error)) {
+        if (error) {
+            return {};
+        }
+        if (entry.is_regular_file(error) && entry.path().extension() == ".tlog") {
+            files.push_back(entry.path());
+        }
+    }
+    return files;
+}
+
+bool isTimestampedAuditFilename(const std::string& name) {
+    if (name.size() != std::string("audit-YYYYMMDD-HHMMSS.tlog").size()) {
+        return false;
+    }
+    if (name.rfind("audit-", 0) != 0 || name[14] != '-' || name.substr(21) != ".tlog") {
+        return false;
+    }
+    for (std::size_t i = 6; i < 14; ++i) {
+        if (!std::isdigit(static_cast<unsigned char>(name[i]))) {
+            return false;
+        }
+    }
+    for (std::size_t i = 15; i < 21; ++i) {
+        if (!std::isdigit(static_cast<unsigned char>(name[i]))) {
+            return false;
+        }
+    }
+    return true;
+}
+
+std::optional<std::filesystem::path> onlyTlogFile(const std::filesystem::path& root) {
+    const auto files = tlogFilesIn(root);
+    if (!expect(files.size() == 1, "expected exactly one tlog file")) {
+        return std::nullopt;
+    }
+    return files.front();
+}
+
 std::string legacyObfuscate(std::string value) {
     for (char& ch : value) {
         ch ^= 0x55;
@@ -150,8 +198,7 @@ bool writesNothingWhenStrictModeOff() {
     const auto result = audit.logEvent(login.value.sessionId, "shell", "should not persist");
     if (!expect(result.ok, "logEvent should still return ok when strict mode is off")) return false;
 
-    const auto logPath = temp.path() / "audit.tlog";
-    return expect(!std::filesystem::exists(logPath), "audit log should not be created when strict mode is disabled");
+    return expect(tlogFilesIn(temp.path()).empty(), "audit log should not be created when strict mode is disabled");
 }
 
 bool writesEncryptedRecordWhenStrictModeOn() {
@@ -168,13 +215,17 @@ bool writesEncryptedRecordWhenStrictModeOn() {
     const auto result = audit.logEvent(login.value.sessionId, "shell", detail);
     if (!expect(result.ok, "logEvent should succeed in strict mode")) return false;
 
-    const auto logPath = temp.path() / "audit.tlog";
-    if (!expect(std::filesystem::exists(logPath), "audit log should be created when strict mode is enabled")) return false;
-    const std::string raw = fileContents(logPath);
+    const auto logPath = onlyTlogFile(temp.path());
+    if (!logPath.has_value()) return false;
+    const std::string logName = logPath->filename().string();
+    if (!expect(std::filesystem::exists(*logPath), "audit log should be created when strict mode is enabled")) return false;
+    if (!expect(isTimestampedAuditFilename(logName), "audit log filename should include creation timestamp")) return false;
+    if (!expect(!std::filesystem::exists(temp.path() / "audit.tlog"), "fixed audit.tlog should not be created")) return false;
+    const std::string raw = fileContents(*logPath);
     if (!expect(raw.rfind("TLOG1", 0) == 0, "audit log should have TLOG header")) return false;
     if (!expect(raw.find(detail) == std::string::npos, "audit log should not store plaintext detail")) return false;
 
-    const auto read = audit.readTlog(login.value.sessionId, "audit.tlog");
+    const auto read = audit.readTlog(login.value.sessionId, logName);
     if (!expect(read.ok, "admin can read back encrypted record as plaintext")) return false;
     if (!expect(read.value.lines.size() == 1, "expected one decrypted audit line")) return false;
     return expect(
@@ -217,14 +268,17 @@ bool guestAndUserCannotReadOrExportTlog() {
     if (!expect(adminLogin.ok, "admin login should succeed")) return false;
     const auto wrote = audit.logEvent(adminLogin.value.sessionId, "shell", "write for readers");
     if (!expect(wrote.ok, "admin should be able to create log entries")) return false;
+    const auto logPath = onlyTlogFile(temp.path());
+    if (!logPath.has_value()) return false;
+    const std::string logName = logPath->filename().string();
 
     const auto guest = sessions.startGuestSession();
-    const auto guestRead = audit.readTlog(guest.sessionId, "audit.tlog");
+    const auto guestRead = audit.readTlog(guest.sessionId, logName);
     if (!expect(!guestRead.ok, "guest should not read tlog")) return false;
     if (!expect(
             guestRead.error.code == tundraux::backend::ErrorCode::PermissionDenied,
             "guest read should be denied")) return false;
-    const auto guestExport = audit.exportTlog(guest.sessionId, "audit.tlog");
+    const auto guestExport = audit.exportTlog(guest.sessionId, logName);
     if (!expect(!guestExport.ok, "guest should not export tlog")) return false;
     if (!expect(
             guestExport.error.code == tundraux::backend::ErrorCode::PermissionDenied,
@@ -233,12 +287,12 @@ bool guestAndUserCannotReadOrExportTlog() {
     const auto userGuest = sessions.startGuestSession();
     const auto userLogin = sessions.login(userGuest.sessionId, "bob", "Secret2");
     if (!expect(userLogin.ok, "user login should succeed")) return false;
-    const auto userRead = audit.readTlog(userLogin.value.sessionId, "audit.tlog");
+    const auto userRead = audit.readTlog(userLogin.value.sessionId, logName);
     if (!expect(!userRead.ok, "non-privileged user should not read tlog")) return false;
     if (!expect(
             userRead.error.code == tundraux::backend::ErrorCode::PermissionDenied,
             "user read should be denied")) return false;
-    const auto userExport = audit.exportTlog(userLogin.value.sessionId, "audit.tlog");
+    const auto userExport = audit.exportTlog(userLogin.value.sessionId, logName);
     if (!expect(!userExport.ok, "non-privileged user should not export tlog")) return false;
     if (!expect(
             userExport.error.code == tundraux::backend::ErrorCode::PermissionDenied,
@@ -260,11 +314,14 @@ bool guestCanAppendAuditButCannotReadOrExportTlog() {
 
     const auto key = audit.logKeyPress(guest.sessionId, "x", true);
     if (!expect(key.ok, "guest logKeyPress should append pre-login key audit event")) return false;
+    const auto logPath = onlyTlogFile(temp.path());
+    if (!logPath.has_value()) return false;
+    const std::string logName = logPath->filename().string();
 
     const auto adminGuest = sessions.startGuestSession();
     const auto adminLogin = sessions.login(adminGuest.sessionId, "alice", "Secret1");
     if (!expect(adminLogin.ok, "admin login should succeed for guest append readback")) return false;
-    const auto read = audit.readTlog(adminLogin.value.sessionId, "audit.tlog");
+    const auto read = audit.readTlog(adminLogin.value.sessionId, logName);
     if (!expect(read.ok, "admin should read guest audit records")) return false;
     if (!expect(read.value.lines.size() == 2, "expected guest event and key audit records")) return false;
 
@@ -283,12 +340,12 @@ bool guestCanAppendAuditButCannotReadOrExportTlog() {
     if (!expect(hasGuestEvent, "guest append should record guest identity")) return false;
     if (!expect(hasRedactedKey, "guest key append should preserve redacted key detail")) return false;
 
-    const auto guestRead = audit.readTlog(guest.sessionId, "audit.tlog");
+    const auto guestRead = audit.readTlog(guest.sessionId, logName);
     if (!expect(!guestRead.ok, "guest still should not read tlog")) return false;
     if (!expect(
             guestRead.error.code == tundraux::backend::ErrorCode::PermissionDenied,
             "guest read should remain denied after guest append")) return false;
-    const auto guestExport = audit.exportTlog(guest.sessionId, "audit.tlog");
+    const auto guestExport = audit.exportTlog(guest.sessionId, logName);
     if (!expect(!guestExport.ok, "guest still should not export tlog")) return false;
     if (!expect(
             guestExport.error.code == tundraux::backend::ErrorCode::PermissionDenied,
@@ -310,19 +367,22 @@ bool adminAndDebugCanReadPlaintext() {
 
     const auto logged = audit.logKeyPress(adminLogin.value.sessionId, "a", false);
     if (!expect(logged.ok, "admin logKeyPress should succeed")) return false;
-    const auto adminRead = audit.readTlog(adminLogin.value.sessionId, "audit.tlog");
+    const auto logPath = onlyTlogFile(temp.path());
+    if (!logPath.has_value()) return false;
+    const std::string logName = logPath->filename().string();
+    const auto adminRead = audit.readTlog(adminLogin.value.sessionId, logName);
     if (!expect(adminRead.ok, "admin read should succeed")) return false;
     if (!expect(adminRead.value.lines.size() == 1, "admin should see one decrypted line")) return false;
     if (!expect(adminRead.value.lines[0].find("Character 'a'") != std::string::npos,
             "admin should see plaintext key detail")) return false;
 
-    const auto adminExport = audit.exportTlog(adminLogin.value.sessionId, "audit.tlog");
+    const auto adminExport = audit.exportTlog(adminLogin.value.sessionId, logName);
     if (!expect(adminExport.ok, "admin export should succeed")) return false;
     if (!expect(adminExport.value.content.find("Character 'a'") != std::string::npos,
             "admin export should include plaintext")) return false;
 
     const auto debugSession = sessions.startSession(tundraux::backend::BackendUser{"debug", "debug", "", "", 0});
-    const auto debugRead = audit.readTlog(debugSession.sessionId, "audit.tlog");
+    const auto debugRead = audit.readTlog(debugSession.sessionId, logName);
     if (!expect(debugRead.ok, "debug read should succeed")) return false;
     if (!expect(debugRead.value.lines.size() == 1, "debug should see one decrypted line")) return false;
     if (!expect(debugRead.value.lines[0].find("Character 'a'") != std::string::npos,
@@ -386,7 +446,10 @@ bool logsEscapeControlCharactersInCategoryAndDetail() {
     );
     if (!expect(result.ok, "logEvent should accept control characters")) return false;
 
-    const auto read = audit.readTlog(login.value.sessionId, "audit.tlog");
+    const auto logPath = onlyTlogFile(temp.path());
+    if (!logPath.has_value()) return false;
+    const std::string logName = logPath->filename().string();
+    const auto read = audit.readTlog(login.value.sessionId, logName);
     if (!expect(read.ok, "admin should read escaped record")) return false;
     if (!expect(read.value.lines.size() == 1, "expected exactly one logical line for escaped record")) return false;
     const auto& line = read.value.lines[0];
@@ -395,7 +458,7 @@ bool logsEscapeControlCharactersInCategoryAndDetail() {
     if (!expect(line.find("\\n") != std::string::npos, "escaped newline sequence should be visible")) return false;
     if (!expect(line.find("\\t") != std::string::npos, "escaped tab sequence should be visible")) return false;
 
-    const auto exported = audit.exportTlog(login.value.sessionId, "audit.tlog");
+    const auto exported = audit.exportTlog(login.value.sessionId, logName);
     if (!expect(exported.ok, "admin should export escaped record")) return false;
     if (!expect(exported.value.content.find('\n') == std::string::npos, "exported content should keep single-record line intact")) return false;
     if (!expect(exported.value.content.find("\\n") != std::string::npos, "exported content should preserve newline escapes")) return false;
@@ -416,8 +479,10 @@ bool rejectsInvalidReadExportPaths() {
     if (!expect(login.ok, "user should log in for path validation")) return false;
     const auto logged = audit.logEvent(login.value.sessionId, "shell", "path validation");
     if (!expect(logged.ok, "log should be created for path validation")) return false;
+    const auto logPath = onlyTlogFile(temp.path());
+    if (!logPath.has_value()) return false;
 
-    const auto absolutePath = (temp.path() / "audit.tlog").string();
+    const auto absolutePath = logPath->string();
     const auto badAbsoluteRead = audit.readTlog(login.value.sessionId, absolutePath);
     if (!expect(!badAbsoluteRead.ok, "absolute path should be rejected for readTlog")) return false;
     if (!expect(

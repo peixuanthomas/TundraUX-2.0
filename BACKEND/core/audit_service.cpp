@@ -20,7 +20,6 @@ constexpr std::size_t kTlogHeaderSize = 5;
 constexpr std::uint64_t kDefaultLogRecordLengthType = sizeof(std::uint64_t);
 constexpr std::uintmax_t kMaxTlogFileSize = 64ULL * 1024ULL * 1024ULL;
 constexpr std::size_t kMaxTlogRecordSize = 1024ULL * 1024ULL;
-constexpr const char* kLogFileName = "audit.tlog";
 constexpr const char* kAccessDeniedMessage = "Access denied.";
 constexpr const char* kStorageErrorMessage = "Storage error.";
 constexpr const char* kReadUserDataError = "Unable to read user data.";
@@ -53,6 +52,24 @@ std::string currentTimestamp() {
 #endif
     std::ostringstream out;
     out << std::put_time(&localTime, "%Y-%m-%d %H:%M:%S");
+    return out.str();
+}
+
+std::string currentTimestampForFilename() {
+    const auto now = std::chrono::system_clock::now();
+    const std::time_t value = std::chrono::system_clock::to_time_t(now);
+    std::tm localTime{};
+#ifdef _WIN32
+    if (localtime_s(&localTime, &value) != 0) {
+        return "19700101-000000";
+    }
+#else
+    if (localtime_r(&value, &localTime) == nullptr) {
+        return "19700101-000000";
+    }
+#endif
+    std::ostringstream out;
+    out << std::put_time(&localTime, "%Y%m%d-%H%M%S");
     return out.str();
 }
 
@@ -141,7 +158,10 @@ std::string escapeControlCharacters(std::string value) {
 } // namespace
 
 AuditService::AuditService(UserStore& users, const SessionService& sessions, std::string logsRoot)
-    : users_(users), sessions_(sessions), logsRoot_(std::move(logsRoot)) {}
+    : users_(users),
+      sessions_(sessions),
+      logsRoot_(std::move(logsRoot)),
+      startupLogPath_(std::filesystem::path(logsRoot_) / ("audit-" + currentTimestampForFilename() + ".tlog")) {}
 
 bool AuditService::isSyntheticDebug(const BackendUser& user) {
     return lowerCopy(user.type) == "debug" && user.name == "debug" && user.password.empty();
@@ -290,7 +310,7 @@ ServiceResult<EmptyResult> AuditService::appendRecord(
 ) {
     try {
         const std::filesystem::path logsRoot(logsRoot_);
-        const std::filesystem::path logsPath = logsRoot / kLogFileName;
+        const std::filesystem::path logsPath = startupLogPath_;
         std::error_code error;
         std::filesystem::create_directories(logsRoot, error);
         if (error) {
