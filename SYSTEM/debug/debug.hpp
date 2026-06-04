@@ -30,7 +30,7 @@ void handleDebugEnvCommand(const std::string& input);
 void handleDebugForceLoginCommand(
     const std::string& input,
     tundraux::frontend::ShellUser& currentUser,
-    bool backendMode = false
+    tundraux::frontend::BackendRuntime* backendRuntime
 );
 void dbg_env();
 void dbg_hexdump();

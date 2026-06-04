@@ -55,6 +55,7 @@ public:
         const std::string& username,
         const std::string& password
     );
+    ClientResult<FrontendSession> debugForceLogin(const std::string& sessionId, const std::string& username);
     ClientResult<bool> logout(const std::string& sessionId);
     ClientResult<FrontendUser> whoami(const std::string& sessionId);
     ClientResult<std::vector<FrontendUser>> listUsers(const std::string& sessionId);

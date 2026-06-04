@@ -64,6 +64,174 @@ bool BackendFacade::ensureSession(std::string& message) {
     return startGuestSession(runtime_, message);
 }
 
+ClientResult<ShellUser> BackendFacade::login(const std::string& username, const std::string& password) {
+    std::string message;
+    if (!ensureSession(message)) {
+        return ClientResult<ShellUser>{false, {}, "TransportError", message};
+    }
+
+    auto* client = runtime_.client();
+    if (client == nullptr) {
+        return ClientResult<ShellUser>{false, {}, "TransportError", "Backend unavailable."};
+    }
+
+    const auto result = client->login(runtime_.sessionId(), username, password);
+    if (!result.ok) {
+        if (result.errorCode == "SessionExpired") {
+            std::string recoveryMessage;
+            (void)recoverGuestSession(runtime_, recoveryMessage);
+        }
+        return ClientResult<ShellUser>{
+            false,
+            {},
+            result.errorCode,
+            defaultFailureMessage("Unable to login.", result.message)
+        };
+    }
+
+    runtime_.setSessionId(result.value.sessionId);
+    return ClientResult<ShellUser>{
+        true,
+        shellUserFromFrontendUser(result.value.user),
+        {},
+        {}
+    };
+}
+
+FacadeResult BackendFacade::logout() {
+    std::string message;
+    if (!ensureSession(message)) {
+        return FacadeResult{false, message, "TransportError"};
+    }
+
+    auto* client = runtime_.client();
+    if (client == nullptr) {
+        return FacadeResult{false, "Backend unavailable.", "TransportError"};
+    }
+
+    const auto result = client->logout(runtime_.sessionId());
+    if (result.ok) {
+        runtime_.setSessionId("");
+    } else if (result.errorCode == "SessionExpired") {
+        std::string recoveryMessage;
+        (void)recoverGuestSession(runtime_, recoveryMessage);
+    }
+
+    return FacadeResult{
+        result.ok,
+        result.message,
+        result.errorCode
+    };
+}
+
+ClientResult<std::vector<ShellUser>> BackendFacade::listUsers() {
+    std::string message;
+    if (!ensureSession(message)) {
+        return ClientResult<std::vector<ShellUser>>{false, {}, "TransportError", message};
+    }
+
+    auto* client = runtime_.client();
+    if (client == nullptr) {
+        return ClientResult<std::vector<ShellUser>>{false, {}, "TransportError", "Backend unavailable."};
+    }
+
+    const auto result = client->listUsers(runtime_.sessionId());
+    if (!result.ok) {
+        if (result.errorCode == "SessionExpired") {
+            std::string recoveryMessage;
+            (void)recoverGuestSession(runtime_, recoveryMessage);
+        }
+        return ClientResult<std::vector<ShellUser>>{
+            false,
+            {},
+            result.errorCode,
+            defaultFailureMessage("Unable to list users.", result.message)
+        };
+    }
+
+    std::vector<ShellUser> users;
+    users.reserve(result.value.size());
+    for (const auto& user : result.value) {
+        users.push_back(shellUserFromFrontendUser(user));
+    }
+
+    return ClientResult<std::vector<ShellUser>>{
+        true,
+        std::move(users),
+        {},
+        {}
+    };
+}
+
+FacadeResult BackendFacade::updateOwnAccount(
+    bool passwordProvided,
+    const std::string& password,
+    bool passwordHintProvided,
+    const std::string& passwordHint
+) {
+    std::string message;
+    if (!ensureSession(message)) {
+        return FacadeResult{false, message, "TransportError"};
+    }
+
+    auto* client = runtime_.client();
+    if (client == nullptr) {
+        return FacadeResult{false, "Backend unavailable.", "TransportError"};
+    }
+
+    const auto result = client->updateOwnAccount(
+        runtime_.sessionId(),
+        passwordProvided,
+        password,
+        passwordHintProvided,
+        passwordHint
+    );
+    if (!result.ok && result.errorCode == "SessionExpired") {
+        std::string recoveryMessage;
+        (void)recoverGuestSession(runtime_, recoveryMessage);
+    }
+
+    return FacadeResult{
+        result.ok,
+        result.message,
+        result.errorCode
+    };
+}
+
+ClientResult<ShellUser> BackendFacade::debugForceLogin(const std::string& username) {
+    std::string message;
+    if (!ensureSession(message)) {
+        return ClientResult<ShellUser>{false, {}, "TransportError", message};
+    }
+
+    auto* client = runtime_.client();
+    if (client == nullptr) {
+        return ClientResult<ShellUser>{false, {}, "TransportError", "Backend unavailable."};
+    }
+
+    const auto result = client->debugForceLogin(runtime_.sessionId(), username);
+    if (!result.ok) {
+        if (result.errorCode == "SessionExpired") {
+            std::string recoveryMessage;
+            (void)recoverGuestSession(runtime_, recoveryMessage);
+        }
+        return ClientResult<ShellUser>{
+            false,
+            {},
+            result.errorCode,
+            defaultFailureMessage("Debug force-login failed.", result.message)
+        };
+    }
+
+    runtime_.setSessionId(result.value.sessionId);
+    return ClientResult<ShellUser>{
+        true,
+        shellUserFromFrontendUser(result.value.user),
+        {},
+        {}
+    };
+}
+
 ClientResult<ShellUser> BackendFacade::refreshProfile() {
     std::string message;
     if (!ensureSession(message)) {

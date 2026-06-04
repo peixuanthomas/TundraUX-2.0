@@ -13,7 +13,7 @@ endif()
 
 option(TUNDRAUX_BUILD_FRONTEND "Build the Windows console frontend and frontend tests." ${TUNDRAUX_BUILD_FRONTEND_DEFAULT})
 
-option(TUNDRAUX_DEBUG_STARTUP "Start TundraUX2 in debug mode without logging in." ON)
+option(TUNDRAUX_DEBUG_STARTUP "Start TundraUX2 in debug mode without logging in." OFF)
 
 set(TUNDRATUI_BUILD_EXAMPLES ON CACHE BOOL "Build TundraTUI example programs.")
 add_subdirectory(TundraTUI)
@@ -274,6 +274,19 @@ add_dependencies(backend_stdio_tests tundraux_backend_stdio)
 
 add_test(NAME backend_stdio_tests COMMAND backend_stdio_tests $<TARGET_FILE:tundraux_backend_stdio>)
 
+add_executable(frontend_backend_separation_tests
+    tests/frontend_backend_separation_tests.cpp
+)
+
+target_compile_features(frontend_backend_separation_tests
+    PRIVATE
+        cxx_std_17
+)
+
+add_test(NAME frontend_backend_separation_tests COMMAND frontend_backend_separation_tests ${PROJECT_SOURCE_DIR})
+
+option(TUNDRAUX_BUILD_LEGACY_DIRECT "Build legacy direct compatibility executable." OFF)
+
 if(TUNDRAUX_BUILD_FRONTEND)
 if(NOT WIN32)
     message(FATAL_ERROR "TUNDRAUX_BUILD_FRONTEND requires Windows-specific console APIs.")
@@ -318,7 +331,6 @@ set(TUNDRAUX_APP_COMMON_SOURCES
 
 set(TUNDRAUX_APP_SOURCES
     ${TUNDRAUX_APP_COMMON_SOURCES}
-    APP/legacy_direct/legacy_direct_stub.cpp
 )
 
 set(TUNDRAUX_USER_SOURCES
@@ -347,7 +359,6 @@ target_include_directories(${PROJECT_NAME}
         ${PROJECT_SOURCE_DIR}/APP/backend_client
         ${PROJECT_SOURCE_DIR}/APP/editor
         ${PROJECT_SOURCE_DIR}/APP/explorer
-        ${PROJECT_SOURCE_DIR}/APP/legacy_direct
         ${PROJECT_SOURCE_DIR}/APP/shell
         ${PROJECT_SOURCE_DIR}/USER/account
         ${PROJECT_SOURCE_DIR}/SYSTEM/audit
@@ -355,14 +366,12 @@ target_include_directories(${PROJECT_NAME}
         ${PROJECT_SOURCE_DIR}/SYSTEM/console
         ${PROJECT_SOURCE_DIR}/SYSTEM/crypto
         ${PROJECT_SOURCE_DIR}/SYSTEM/debug
-        ${PROJECT_SOURCE_DIR}/BACKEND/core
         ${TUNDRAUX_GENERATED_DIR}
 )
 
 target_link_libraries(${PROJECT_NAME}
     PRIVATE
         TundraTUI::TundraTUI
-        tundraux_backend_core
         tundraux_protocol
 )
 
@@ -379,6 +388,7 @@ add_custom_command(TARGET ${PROJECT_NAME} POST_BUILD
         $<TARGET_FILE_DIR:${PROJECT_NAME}>
 )
 
+if(TUNDRAUX_BUILD_LEGACY_DIRECT)
 add_executable(${PROJECT_NAME}_legacy_direct)
 
 target_sources(${PROJECT_NAME}_legacy_direct
@@ -429,6 +439,7 @@ target_compile_definitions(${PROJECT_NAME}_legacy_direct
 )
 
 add_dependencies(${PROJECT_NAME}_legacy_direct tundraux_backend_stdio tundraux_generate_build_info)
+endif()
 
 add_executable(audit_log_tests
     tests/audit_log_tests.cpp
@@ -638,6 +649,10 @@ add_test(NAME command_registry_tests COMMAND command_registry_tests)
 
 add_executable(debug_structfile_tests
     tests/debug_structfile_tests.cpp
+    APP/backend_client/backend_client.cpp
+    APP/backend_client/backend_facade.cpp
+    APP/backend_client/backend_process.cpp
+    APP/backend_client/backend_runtime.cpp
     SYSTEM/debug/debug.cpp
     SYSTEM/crypto/crypto.cpp
     SYSTEM/build_info/build_info.cpp
@@ -659,6 +674,7 @@ target_include_directories(debug_structfile_tests
 target_link_libraries(debug_structfile_tests
     PRIVATE
         TundraTUI::TundraTUI
+        tundraux_protocol
 )
 
 target_compile_features(debug_structfile_tests

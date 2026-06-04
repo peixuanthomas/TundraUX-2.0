@@ -8,6 +8,7 @@
 #include "audit_service.hpp"
 
 #include <string>
+#include <unordered_set>
 
 namespace tundraux::backend {
 
@@ -44,6 +45,7 @@ private:
     TuxService* tux_ = nullptr;
     AuditService* audit_ = nullptr;
     std::string debugSessionToken_;
+    std::unordered_set<std::string> debugSessionIds_;
 
     JsonValue dispatch(const std::string& method, const JsonValue::Object& params);
     JsonValue errorResponse(const JsonValue& id, ErrorCode code, const std::string& message) const;

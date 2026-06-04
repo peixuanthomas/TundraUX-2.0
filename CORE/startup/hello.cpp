@@ -15,10 +15,6 @@
 #include "TundraTUI/style.hpp"
 #include "TundraTUI/text.hpp"
 
-#ifdef TUNDRAUX_LEGACY_DIRECT_SETUP
-#include "legacy_direct.hpp"
-#endif
-
 namespace {
 
 namespace tui = tundra_tui;
@@ -460,41 +456,7 @@ void handleSetupKey(SetupState& state, const KeyPress& key, const std::function<
 } // namespace
 
 void hello() {
-#ifdef TUNDRAUX_LEGACY_DIRECT_SETUP
-    set_title("TundraUX 2.0 init");
-    ConsoleScreenGuard screenGuard;
-
-    SetupState state;
-
-    while (true) {
-        if (state.showHelp) {
-            renderHelp();
-        } else {
-            renderSetup(state);
-        }
-
-        const KeyPress key = readKey();
-        if (state.created &&
-            (key.key == Key::Enter || key.key == Key::Escape ||
-             (key.key == Key::Character && (key.character == 'q' || key.character == 'Q')))) {
-            break;
-        }
-
-        handleSetupKey(state, key, [](const std::string& username, const std::string& password, const std::string& passwordHint) {
-            std::string message;
-            const bool ok = tundraux::legacy_direct::createInitialAdmin(username, password, passwordHint, message);
-            tundraux::frontend::FacadeResult result;
-            result.ok = ok;
-            result.message = message;
-            if (!ok && message == "Setup already initialized.") {
-                result.errorCode = "PermissionDenied";
-            }
-            return result;
-        });
-    }
-#else
     tundra_tui::colorcout("red", "First-time setup requires backend mode.\n");
-#endif
 }
 
 void hello(tundraux::frontend::BackendFacade& facade) {

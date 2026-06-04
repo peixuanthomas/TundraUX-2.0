@@ -20,7 +20,6 @@
 #include "color.hpp"
 #include "editor.hpp"
 #include "explorer.hpp"
-#include "legacy_direct.hpp"
 #include "manageusers.hpp"
 
 namespace tundraux::audit {
@@ -420,12 +419,9 @@ void handleLoginCommand(
 
     if (usesBackend(backendRuntime)) {
         logAuditEvent(auditSink, currentUser, "login", "backend attempt");
-        if (!ensureBackendSession(*backendRuntime)) {
-            return;
-        }
-
         const std::string password = getHiddenInput("Please enter password: ", '*');
-        const auto result = backendRuntime->client()->login(backendRuntime->sessionId(), username, password);
+        tundraux::frontend::BackendFacade facade(*backendRuntime);
+        const auto result = facade.login(username, password);
         if (!result.ok) {
             logAuditEvent(auditSink, currentUser, "login", "backend failure " + result.errorCode);
             colorcout(
@@ -435,44 +431,14 @@ void handleLoginCommand(
             return;
         }
 
-        backendRuntime->setSessionId(result.value.sessionId);
-        currentUser = tundraux::frontend::shellUserFromFrontendUser(result.value.user);
+        currentUser = result.value;
         setAuditCurrentUser(auditSink, currentUser);
         logAuditEvent(auditSink, currentUser, "login", "backend success");
         rollcout("green", "Welcome, " + currentUser.name + "!");
         return;
     }
 
-    logAuditEvent(auditSink, currentUser, "login", "attempt " + username);
-    std::string password = getHiddenInput("Please enter password for user " + username + ": ", '*');
-    tundraux::legacy_direct::LoginResult legacyResult;
-    if (tundraux::legacy_direct::login(username, password, legacyResult)) {
-        currentUser = legacyResult.user;
-        setAuditCurrentUser(auditSink, currentUser);
-        logAuditEvent(auditSink, currentUser, "login", "success " + username);
-        rollcout("green", "Welcome, " + currentUser.name + "!");
-        return;
-    }
-
-    if (legacyResult.message == "User disabled due to too many failed attempts.") {
-        logAuditEvent(auditSink, currentUser, "login", "locked " + username);
-        colorcout("red", legacyResult.message + "\n");
-    } else if (legacyResult.message.rfind("User not found:", 0) == 0) {
-        logAuditEvent(auditSink, currentUser, "login", "not-found " + username);
-        colorcout("red", legacyResult.message + "\n");
-    } else {
-        logAuditEvent(
-            auditSink,
-            currentUser,
-            "login",
-            "failure " + username + " count=" + std::to_string(legacyResult.failedCount)
-        );
-        colorcout("red", legacyResult.message + "\n");
-        if (legacyResult.failedCount > 0) {
-            colorcout("red", "Failed attempts: " + std::to_string(legacyResult.failedCount) + "\n");
-        }
-        colorcout("blue", "Password Hint: " + (legacyResult.passwordHint.empty() ? "(none)" : legacyResult.passwordHint) + "\n");
-    }
+    colorcout("red", "Backend unavailable. Login requires the backend runtime.\n");
 }
 
 void handleExitCommand(const std::string&) {
@@ -525,22 +491,19 @@ void handleLogoutCommand(
 
     if (usesBackend(backendRuntime)) {
         logAuditEvent(auditSink, currentUser, "logout", "backend");
-        auto* client = backendRuntime->client();
-        if (client == nullptr) {
-            colorcout("red", "Backend unavailable.\n");
-            return;
-        }
-        if (backendRuntime->sessionId().empty()) {
-            colorcout("yellow", "No backend session is active.\n");
-            return;
-        }
-
-        const auto result = client->logout(backendRuntime->sessionId());
+        tundraux::frontend::BackendFacade facade(*backendRuntime);
+        const auto result = facade.logout();
         if (!result.ok) {
+            if (result.errorCode == "SessionExpired") {
+                currentUser = guestUser();
+                setAuditCurrentUser(auditSink, currentUser);
+                colorcout("yellow", "Backend session expired. Logged out locally.\n");
+                return;
+            }
             colorcout("yellow", backendFailureMessage("Logout request failed.", result.errorCode) + "\n");
             return;
         }
-        backendRuntime->setSessionId("");
+
         currentUser = guestUser();
         setAuditCurrentUser(auditSink, currentUser);
         if (!ensureBackendSession(*backendRuntime)) {
@@ -563,17 +526,8 @@ void handleListUserCommand(
     tundraux::frontend::FrontendAuditSink* auditSink
 ) {
     if (usesBackend(backendRuntime)) {
-        auto* client = backendRuntime->client();
-        if (client == nullptr) {
-            colorcout("red", "Backend unavailable.\n");
-            return;
-        }
-        if (backendRuntime->sessionId().empty()) {
-            colorcout("yellow", "No backend session is active.\n");
-            return;
-        }
-
-        const auto result = client->listUsers(backendRuntime->sessionId());
+        tundraux::frontend::BackendFacade facade(*backendRuntime);
+        const auto result = facade.listUsers();
         if (!result.ok) {
             colorcout(
                 result.errorCode == "PermissionDenied" ? "red" : "yellow",
@@ -594,20 +548,7 @@ void handleListUserCommand(
         return;
     }
 
-    std::vector<tundraux::frontend::ShellUser> legacyUsers;
-    std::string message;
-    if (!tundraux::legacy_direct::listUsers(legacyUsers, message)) {
-        colorcout("red", message + "\n");
-        return;
-    }
-    if (legacyUsers.empty()) {
-        colorcout("yellow", "No users found.\n");
-        return;
-    }
-    colorcout("cyan", "Current Users:\n");
-    for (const auto& user : legacyUsers) {
-        colorcout("white", "Username: " + user.name + " (" + user.type + ")\n");
-    }
+    colorcout("red", "Backend unavailable. User listing requires the backend runtime.\n");
 }
 
 void handleInfoCommand(const std::string&) {
@@ -828,33 +769,7 @@ void handleStrictCommand(
         return;
     }
 
-    if (action.empty() || action == "status") {
-        bool strictModeEnabled = false;
-        std::string message;
-        if (!tundraux::legacy_direct::getStrictMode(strictModeEnabled, message)) {
-            colorcout("red", message + "\n");
-            return;
-        }
-        colorcout("white", "Strict mode: " + std::string(strictModeEnabled ? "on" : "off") + "\n");
-        logAuditEvent(auditSink, currentUser, "strict", "status " + std::string(strictModeEnabled ? "on" : "off"));
-        return;
-    }
-
-    if (action != "on" && action != "off") {
-        colorcout("yellow", "Usage: strict <status|on|off>\n");
-        return;
-    }
-
-    const bool enabled = action == "on";
-    std::string message;
-    if (!tundraux::legacy_direct::setStrictMode(enabled, message)) {
-        colorcout("red", (message.empty() ? "Failed to update strict mode." : message) + "\n");
-        return;
-    }
-
-    setAuditCurrentUser(auditSink, currentUser);
-    logAuditEvent(auditSink, currentUser, "strict", enabled ? "enabled" : "disabled");
-    colorcout("green", enabled ? "Strict mode enabled.\n" : "Strict mode disabled.\n");
+    colorcout("red", "Backend unavailable. Strict mode requires the backend runtime.\n");
 }
 
 void handleExportCommand(

@@ -905,6 +905,84 @@ bool runDispatcherSetupCreateInitialAdminTest() {
     return true;
 }
 
+bool debugForceLoginRequiresSyntheticDebugSession() {
+    using tundraux::backend::JsonRpcDispatcher;
+    using tundraux::backend::SessionService;
+    using tundraux::backend::UserService;
+    using tundraux::backend::parseJson;
+
+    InMemoryUserStore users;
+    SessionService sessions(users);
+    UserService userService(users, sessions);
+    JsonRpcDispatcher dispatcher(sessions, userService, "debug-token", nullptr);
+
+    const std::string debugStartResponse = dispatcher.handleLine(
+        R"({"id":"debug-start","method":"session.startDebugSession","params":{"token":"debug-token"}})"
+    );
+    const auto debugStart = parseJson(debugStartResponse);
+    if (!expect(debugStart.ok, "debug start response should parse: " + debugStartResponse)) return false;
+    const std::string debugSessionId =
+        debugStart.value.asObject().at("result").asObject().at("sessionId").asString();
+
+    const std::string response = dispatcher.handleLine(
+        R"({"id":"1","method":"debug.forceLogin","params":{"sessionId":")" +
+        debugSessionId +
+        R"(","username":"alice"}})"
+    );
+
+    const auto parsed = parseJson(response);
+    if (!expect(parsed.ok, "debug.forceLogin response should parse: " + response)) return false;
+    const auto& object = parsed.value.asObject();
+    if (!expect(object.find("error") == object.end(), "debug.forceLogin should not return error: " + response)) return false;
+    const auto& user = object.at("result").asObject().at("session").asObject().at("user").asObject();
+    return expect(user.at("name").asString() == "alice", "debug.forceLogin user name mismatch") &&
+        expect(user.at("type").asString() == "admin", "debug.forceLogin user type mismatch");
+}
+
+bool debugForceLoginRejectsNonDebugSession() {
+    using tundraux::backend::BackendUser;
+    using tundraux::backend::JsonRpcDispatcher;
+    using tundraux::backend::SessionService;
+    using tundraux::backend::UserService;
+    using tundraux::backend::parseJson;
+
+    InMemoryUserStore users;
+    SessionService sessions(users);
+    UserService userService(users, sessions);
+    JsonRpcDispatcher dispatcher(sessions, userService, "", nullptr);
+
+    const auto guest = sessions.startGuestSession();
+    const std::string response = dispatcher.handleLine(
+        R"({"id":"2","method":"debug.forceLogin","params":{"sessionId":")" +
+        guest.sessionId +
+        R"(","username":"alice"}})"
+    );
+
+    const auto parsed = parseJson(response);
+    if (!expect(parsed.ok, "non-debug debug.forceLogin response should parse: " + response)) return false;
+    const auto& object = parsed.value.asObject();
+    if (!expect(object.find("error") != object.end(), "non-debug debug.forceLogin should return error")) return false;
+    return expect(
+        object.at("error").asObject().at("code").asString() == "PermissionDenied",
+        "non-debug debug.forceLogin should return PermissionDenied"
+    ) && [&] {
+        const auto forgedDebug = sessions.startSession(BackendUser{"debug", "debug", "", "", 0});
+        const std::string forgedResponse = dispatcher.handleLine(
+            R"({"id":"3","method":"debug.forceLogin","params":{"sessionId":")" +
+            forgedDebug.sessionId +
+            R"(","username":"alice"}})"
+        );
+        const auto forged = parseJson(forgedResponse);
+        if (!expect(forged.ok, "forged debug.forceLogin response should parse: " + forgedResponse)) return false;
+        const auto& forgedObject = forged.value.asObject();
+        if (!expect(forgedObject.find("error") != forgedObject.end(), "forged debug.forceLogin should return error")) return false;
+        return expect(
+            forgedObject.at("error").asObject().at("code").asString() == "PermissionDenied",
+            "forged debug.forceLogin should return PermissionDenied"
+        );
+    }();
+}
+
 bool runDispatcherAuditMethodsTest() {
     using tundraux::backend::AuditService;
     using tundraux::backend::FileService;
@@ -1128,6 +1206,8 @@ int main() {
     if (!expect(runDispatcherTuxMethodsTest(), "json rpc tux behavior failed")) return 1;
     if (!expect(runDispatcherWithoutFileServiceTest(), "json rpc dispatcher without file service behavior failed")) return 1;
     if (!expect(runDispatcherSetupCreateInitialAdminTest(), "json rpc setup behavior failed")) return 1;
+    if (!expect(debugForceLoginRequiresSyntheticDebugSession(), "json rpc debug force-login behavior failed")) return 1;
+    if (!expect(debugForceLoginRejectsNonDebugSession(), "json rpc debug force-login permission behavior failed")) return 1;
     if (!expect(runDispatcherAuditMethodsTest(), "json rpc audit methods behavior failed")) return 1;
 
     return 0;

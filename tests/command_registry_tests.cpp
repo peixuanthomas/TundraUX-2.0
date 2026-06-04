@@ -68,8 +68,12 @@ void handleDebugStructFileCommand(const std::string&, bool backendMode) {
     g_structfileBackendMode = backendMode;
 }
 
-void handleDebugForceLoginCommand(const std::string&, tundraux::frontend::ShellUser&, bool backendMode) {
-    g_forceloginBackendMode = backendMode;
+void handleDebugForceLoginCommand(
+    const std::string&,
+    tundraux::frontend::ShellUser&,
+    tundraux::frontend::BackendRuntime* backendRuntime
+) {
+    g_forceloginBackendMode = backendRuntime != nullptr && !backendRuntime->legacyDirect();
 }
 
 namespace {

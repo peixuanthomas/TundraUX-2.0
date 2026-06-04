@@ -119,6 +119,31 @@ int main() {
     tundraux::audit::logEvent("explorer", "open Logs/audit.tlog");
     tundraux::audit::logEvent("key", "Character 'z'");
 
+    std::string tlogReadError;
+    const std::vector<std::string> plaintext =
+        tundraux::audit::readTlogPlaintext(tundraux::audit::startupLogPath(), tlogReadError);
+    if (!tlogReadError.empty()) {
+        std::cerr << "legacy audit read should not error: " << tlogReadError << "\n";
+        return 1;
+    }
+    const std::string plaintextExplorerLine = lineContaining(plaintext, "open Logs/audit.tlog");
+    if (plaintextExplorerLine.empty()) {
+        std::cerr << "tlog explorer detail line missing\n";
+        return 1;
+    }
+    if (plaintextExplorerLine.find(" | user=") == std::string::npos) {
+        std::cerr << "tlog user field changed\n";
+        return 1;
+    }
+    if (plaintextExplorerLine.find(" | type=") == std::string::npos) {
+        std::cerr << "tlog type field changed\n";
+        return 1;
+    }
+    if (plaintextExplorerLine.find(" | explorer | open Logs/audit.tlog") == std::string::npos) {
+        std::cerr << "tlog detail content changed\n";
+        return 1;
+    }
+
     g_editorViewLines.clear();
     const int openResult = tundraux::audit::openTlogInEditor(
         tundraux::audit::startupLogPath().string(),

@@ -19,7 +19,6 @@
 #include "commandHandlers.hpp"
 #include "commandReg.hpp"
 #include "command_key_audit.hpp"
-#include "legacy_direct.hpp"
 
 #ifndef TUNDRAUX_DEFAULT_USER_TYPE                    //This default type is set in cmakelists.txt.
 #define TUNDRAUX_DEFAULT_USER_TYPE "guest"
@@ -45,7 +44,6 @@ class LegacyAuditSink : public tundraux::frontend::FrontendAuditSink {
 public:
     LegacyAuditSink() {
         tundraux::audit::initialize();
-        syncStrictModeFromLegacyStore();
     }
 
     void setCurrentUser(const tundraux::frontend::ShellUser& user) override {
@@ -79,14 +77,6 @@ public:
     }
 
 private:
-    void syncStrictModeFromLegacyStore() {
-        bool enabled = false;
-        std::string message;
-        if (tundraux::legacy_direct::getStrictMode(enabled, message)) {
-            tundraux::audit::setStrictModeEnabled(enabled);
-        }
-    }
-
     tundraux::frontend::ShellUser currentUser_;
 };
 
@@ -101,6 +91,13 @@ void dispatchCommandKeyAudit(
     }
     const std::string keyText = tundraux::frontend::toFrontendAuditKeyText(key);
     g_commandKeyAuditSink->logKeyPress(keyText, sensitive);
+}
+
+void syncStrictModeFromBackendFacade(tundraux::frontend::BackendFacade& facade) {
+    const auto result = facade.getStrictMode();
+    if (result.ok) {
+        tundraux::audit::setStrictModeEnabled(result.value);
+    }
 }
 } // namespace
 
@@ -193,6 +190,7 @@ void task_main(tundraux::frontend::BackendRuntime* backendRuntime) {
     if (backendRuntime != nullptr) {
         backendFacade = std::make_unique<tundraux::frontend::BackendFacade>(*backendRuntime);
         if (!backendRuntime->legacyDirect() && backendFacade->active()) {
+            syncStrictModeFromBackendFacade(*backendFacade);
             backendAuditSink = std::make_unique<tundraux::frontend::BackendAuditSink>(*backendFacade);
             auditSink = backendAuditSink.get();
         } else {

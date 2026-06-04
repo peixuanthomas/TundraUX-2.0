@@ -2,7 +2,6 @@
 #include "build_info.hpp"
 #include "color.hpp"
 #include "hello.hpp"
-#include "legacy_direct.hpp"
 #include <string>
 #include "crypto.hpp"
 #include <cstdio>
@@ -25,14 +24,6 @@ std::string legacyUserDataPath() {
 
 bool usesBackend(bool backendMode) {
     return backendMode;
-}
-
-void printBackendModeDisabledMessage(const char* command) {
-    colorcout(
-        "red",
-        std::string(command) +
-        " is unavailable in backend mode; use --legacy-direct for local file debugging.\n"
-    );
 }
 
 void print_display_test_line(const std::string& colorName) {
@@ -175,17 +166,12 @@ void handleDisplayTestCommand(const std::string& input) {
 }
 
 void handleDebugCreateFileCommand(const std::string&, bool backendMode) {
-    if (usesBackend(backendMode)) {
-        printBackendModeDisabledMessage("dbg:createfile");
-        return;
-    }
-
-    std::string message;
-    if (tundraux::legacy_direct::debugCreateFile(message)) {
-        colorcout("green", message + "\n");
-    } else {
-        colorcout("red", message + "\n");
-    }
+    colorcout(
+        backendMode ? "yellow" : "red",
+        backendMode
+            ? "dbg:createfile is not available in backend-separated mode. Use setup flow or user management.\n"
+            : "Backend unavailable. dbg:createfile cannot run in this build.\n"
+    );
 }
 
 void handleDebugHelloCommand(const std::string&) {
@@ -193,17 +179,20 @@ void handleDebugHelloCommand(const std::string&) {
 }
 
 void handleDebugDeleteFileCommand(const std::string&, bool backendMode) {
-    if (usesBackend(backendMode)) {
-        printBackendModeDisabledMessage("dbg:deletefile");
-        return;
-    }
-
-    delete_file();
+    colorcout(
+        backendMode ? "yellow" : "red",
+        backendMode
+            ? "dbg:deletefile is not available in backend-separated mode. Stop the backend and remove test data from the configured workspace.\n"
+            : "Backend unavailable. dbg:deletefile cannot run in this build.\n"
+    );
 }
 
 void handleDebugStructFileCommand(const std::string&, bool backendMode) {
     if (usesBackend(backendMode)) {
-        printBackendModeDisabledMessage("dbg:structfile");
+        colorcout(
+            "yellow",
+            "dbg:structfile is not available in backend-separated mode. Inspect backend storage outside the frontend.\n"
+        );
         return;
     }
 
@@ -217,13 +206,10 @@ void handleDebugEnvCommand(const std::string&) {
 void handleDebugForceLoginCommand(
     const std::string& input,
     tundraux::frontend::ShellUser& currentUser,
-    bool backendMode
+    tundraux::frontend::BackendRuntime* backendRuntime
 ) {
-    if (usesBackend(backendMode)) {
-        colorcout(
-            "red",
-            "dbg:forcelogin is unavailable in backend mode; use --legacy-direct for local file debugging.\n"
-        );
+    if (backendRuntime == nullptr || backendRuntime->legacyDirect()) {
+        colorcout("red", "Backend unavailable. Debug force-login requires backend mode.\n");
         return;
     }
 
@@ -234,12 +220,15 @@ void handleDebugForceLoginCommand(
         colorcout("red", "Usage: dbg:forcelogin <username>\n");
         return;
     }
-    std::string message;
-    if (!tundraux::legacy_direct::debugForceLogin(username, currentUser, message)) {
-        colorcout("red", message + "\n");
+
+    tundraux::frontend::BackendFacade facade(*backendRuntime);
+    const auto result = facade.debugForceLogin(username);
+    if (!result.ok) {
+        colorcout("red", (result.message.empty() ? "Debug force-login failed." : result.message) + "\n");
         return;
     }
-    colorcout("green", "[DBG] Force-logged in as: " + currentUser.name + " (" + currentUser.type + ")\n");
+    currentUser = result.value;
+    colorcout("green", "Debug force-login: " + currentUser.name + " (" + currentUser.type + ")\n");
 }
 
 void dbg_env() {

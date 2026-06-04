@@ -1,6 +1,7 @@
 #include <memory>
 #include <string>
 #include <vector>
+#include <iostream>
 
 #include "protocol_json.hpp"
 
@@ -35,6 +36,7 @@ private:
 
 bool expect(bool condition, const std::string& message) {
     if (!condition) {
+        std::cerr << message << "\n";
         return false;
     }
     return true;
@@ -292,6 +294,228 @@ bool runFacadeCreateInitialAdminSendsSetupRequest() {
         expect(params.at("passwordHint").asString() == "primary", "create initial admin password hint mismatch");
 }
 
+bool facadeLoginSendsSessionLoginAndStoresSession() {
+    FakeTransport transport;
+    transport.responses = {
+        R"({"id":"1","result":{"sessionId":"login-session","user":{"name":"alice","type":"admin","passwordHint":"alpha","failedCount":2}}})"
+    };
+
+    tundraux::frontend::BackendRuntime runtime;
+    configureFacadeRuntime(runtime, transport, "guest-session");
+    tundraux::frontend::BackendFacade facade(runtime);
+
+    const auto result = facade.login("alice", "Secret1");
+    tundraux::protocol::JsonValue request;
+    const auto* requestObject = parseRequestObject(transport, 0, request);
+    if (requestObject == nullptr) {
+        return false;
+    }
+    const auto& params = requestObject->at("params").asObject();
+
+    return expect(result.ok, "login should succeed") &&
+        expect(result.value.type == "admin", "login user type mismatch") &&
+        expect(result.value.name == "alice", "login username mismatch") &&
+        expect(result.value.passwordHint == "alpha", "login password hint mismatch") &&
+        expect(result.value.failedCount == 2, "login failed count mismatch") &&
+        expect(result.errorCode.empty(), "login error code should be empty on success") &&
+        expect(runtime.sessionId_ == "login-session", "login should store returned session id") &&
+        expect(requestObject->at("method").asString() == "session.login", "login method mismatch") &&
+        expect(params.at("sessionId").asString() == "guest-session", "login session id mismatch") &&
+        expect(params.at("username").asString() == "alice", "login username param mismatch") &&
+        expect(params.at("password").asString() == "Secret1", "login password param mismatch");
+}
+
+bool facadeListUsersUsesCurrentSession() {
+    FakeTransport transport;
+    transport.responses = {
+        R"({"id":"1","result":{"users":[{"name":"alice","type":"admin","passwordHint":"alpha","failedCount":0},{"name":"bob","type":"user","passwordHint":"beta","failedCount":4}]}})"
+    };
+
+    tundraux::frontend::BackendRuntime runtime;
+    configureFacadeRuntime(runtime, transport, "session-users");
+    tundraux::frontend::BackendFacade facade(runtime);
+
+    const auto result = facade.listUsers();
+    tundraux::protocol::JsonValue request;
+    const auto* requestObject = parseRequestObject(transport, 0, request);
+    if (requestObject == nullptr) {
+        return false;
+    }
+    const auto& params = requestObject->at("params").asObject();
+
+    return expect(result.ok, "list users should succeed") &&
+        expect(result.value.size() == 2, "list users count mismatch") &&
+        expect(result.value[0].name == "alice", "list users first name mismatch") &&
+        expect(result.value[0].type == "admin", "list users first type mismatch") &&
+        expect(result.value[0].passwordHint == "alpha", "list users first password hint mismatch") &&
+        expect(result.value[1].name == "bob", "list users second name mismatch") &&
+        expect(result.value[1].type == "user", "list users second type mismatch") &&
+        expect(result.value[1].passwordHint == "beta", "list users second password hint mismatch") &&
+        expect(result.value[1].failedCount == 4, "list users second failed count mismatch") &&
+        expect(requestObject->at("method").asString() == "user.listUsers", "list users method mismatch") &&
+        expect(params.at("sessionId").asString() == "session-users", "list users session mismatch");
+}
+
+bool facadeUpdateOwnAccountUsesCurrentSession() {
+    FakeTransport transport;
+    transport.responses = {R"({"id":"1","error":{"code":"ValidationError","message":"password too weak"}})"};
+
+    tundraux::frontend::BackendRuntime runtime;
+    configureFacadeRuntime(runtime, transport, "session-own");
+    tundraux::frontend::BackendFacade facade(runtime);
+
+    const auto result = facade.updateOwnAccount(true, "Secret2", true, "new hint");
+    tundraux::protocol::JsonValue request;
+    const auto* requestObject = parseRequestObject(transport, 0, request);
+    if (requestObject == nullptr) {
+        return false;
+    }
+    const auto& params = requestObject->at("params").asObject();
+
+    return expect(!result.ok, "update own account should preserve backend failure") &&
+        expect(result.errorCode == "ValidationError", "update own account error code mismatch") &&
+        expect(result.message == "password too weak", "update own account message mismatch") &&
+        expect(requestObject->at("method").asString() == "user.updateOwnAccount", "update own account method mismatch") &&
+        expect(params.at("sessionId").asString() == "session-own", "update own account session mismatch") &&
+        expect(params.at("passwordProvided").asBoolean(), "update own account passwordProvided mismatch") &&
+        expect(params.at("password").asString() == "Secret2", "update own account password mismatch") &&
+        expect(params.at("passwordHintProvided").asBoolean(), "update own account passwordHintProvided mismatch") &&
+        expect(params.at("passwordHint").asString() == "new hint", "update own account password hint mismatch");
+}
+
+bool facadeLogoutUsesCurrentSessionAndClearsRuntimeSession() {
+    FakeTransport transport;
+    transport.responses = {R"({"id":"1","result":{"ok":true}})"};
+
+    tundraux::frontend::BackendRuntime runtime;
+    configureFacadeRuntime(runtime, transport, "session-logout");
+    tundraux::frontend::BackendFacade facade(runtime);
+
+    const auto result = facade.logout();
+    tundraux::protocol::JsonValue request;
+    const auto* requestObject = parseRequestObject(transport, 0, request);
+    if (requestObject == nullptr) {
+        return false;
+    }
+    const auto& params = requestObject->at("params").asObject();
+
+    return expect(result.ok, "logout should succeed") &&
+        expect(result.errorCode.empty(), "logout error code should be empty on success") &&
+        expect(result.message.empty(), "logout message should be empty on success") &&
+        expect(runtime.sessionId_.empty(), "logout should clear runtime session id") &&
+        expect(requestObject->at("method").asString() == "session.logout", "logout method mismatch") &&
+        expect(params.at("sessionId").asString() == "session-logout", "logout session mismatch");
+}
+
+bool facadeNewSessionMethodsRecoverGuestOnSessionExpired() {
+    {
+        FakeTransport transport;
+        transport.responses = {
+            R"({"id":"1","error":{"code":"SessionExpired","message":"expired login"}})",
+            R"({"id":"2","result":{"sessionId":"guest-after-login","user":{"name":"","type":"guest"}}})"
+        };
+        tundraux::frontend::BackendRuntime runtime;
+        configureFacadeRuntime(runtime, transport, "expired-login");
+        tundraux::frontend::BackendFacade facade(runtime);
+
+        const auto result = facade.login("alice", "Secret1");
+        tundraux::protocol::JsonValue recoveryRequest;
+        const auto* requestObject = parseRequestObject(transport, 1, recoveryRequest);
+        if (requestObject == nullptr) {
+            return false;
+        }
+        if (!expect(!result.ok, "expired login should fail") ||
+            !expect(result.errorCode == "SessionExpired", "expired login code mismatch") ||
+            !expect(runtime.sessionId_ == "guest-after-login", "expired login should recover guest session") ||
+            !expect(requestObject->at("method").asString() == "session.startGuestSession", "expired login recovery method mismatch")) {
+            return false;
+        }
+    }
+
+    {
+        FakeTransport transport;
+        transport.responses = {
+            R"({"id":"1","error":{"code":"SessionExpired","message":"expired logout"}})",
+            R"({"id":"2","result":{"sessionId":"guest-after-logout","user":{"name":"","type":"guest"}}})"
+        };
+        tundraux::frontend::BackendRuntime runtime;
+        configureFacadeRuntime(runtime, transport, "expired-logout");
+        tundraux::frontend::BackendFacade facade(runtime);
+
+        const auto result = facade.logout();
+        if (!expect(!result.ok, "expired logout should fail") ||
+            !expect(result.errorCode == "SessionExpired", "expired logout code mismatch") ||
+            !expect(runtime.sessionId_ == "guest-after-logout", "expired logout should recover guest session")) {
+            return false;
+        }
+    }
+
+    {
+        FakeTransport transport;
+        transport.responses = {
+            R"({"id":"1","error":{"code":"SessionExpired","message":"expired list"}})",
+            R"({"id":"2","result":{"sessionId":"guest-after-list","user":{"name":"","type":"guest"}}})"
+        };
+        tundraux::frontend::BackendRuntime runtime;
+        configureFacadeRuntime(runtime, transport, "expired-list");
+        tundraux::frontend::BackendFacade facade(runtime);
+
+        const auto result = facade.listUsers();
+        if (!expect(!result.ok, "expired list users should fail") ||
+            !expect(result.errorCode == "SessionExpired", "expired list users code mismatch") ||
+            !expect(runtime.sessionId_ == "guest-after-list", "expired list users should recover guest session")) {
+            return false;
+        }
+    }
+
+    {
+        FakeTransport transport;
+        transport.responses = {
+            R"({"id":"1","error":{"code":"SessionExpired","message":"expired update"}})",
+            R"({"id":"2","result":{"sessionId":"guest-after-update","user":{"name":"","type":"guest"}}})"
+        };
+        tundraux::frontend::BackendRuntime runtime;
+        configureFacadeRuntime(runtime, transport, "expired-update");
+        tundraux::frontend::BackendFacade facade(runtime);
+
+        const auto result = facade.updateOwnAccount(false, "", false, "");
+        if (!expect(!result.ok, "expired update own account should fail") ||
+            !expect(result.errorCode == "SessionExpired", "expired update own account code mismatch") ||
+            !expect(runtime.sessionId_ == "guest-after-update", "expired update own account should recover guest session")) {
+            return false;
+        }
+    }
+
+    return true;
+}
+
+bool facadeDebugForceLoginStoresReturnedSession() {
+    FakeTransport transport;
+    transport.responses = {
+        R"({"id":"1","result":{"session":{"sessionId":"debug-login-session","user":{"name":"alice","type":"admin","passwordHint":"alpha","failedCount":0}}}})"
+    };
+
+    tundraux::frontend::BackendRuntime runtime;
+    configureFacadeRuntime(runtime, transport, "debug-session");
+    tundraux::frontend::BackendFacade facade(runtime);
+
+    const auto result = facade.debugForceLogin("alice");
+    tundraux::protocol::JsonValue request;
+    const auto* requestObject = parseRequestObject(transport, 0, request);
+    if (requestObject == nullptr) {
+        return false;
+    }
+    const auto& params = requestObject->at("params").asObject();
+
+    return expect(result.ok, "debug force-login should succeed") &&
+        expect(result.value.name == "alice", "debug force-login user mismatch") &&
+        expect(result.value.type == "admin", "debug force-login type mismatch") &&
+        expect(runtime.sessionId_ == "debug-login-session", "debug force-login should store returned session") &&
+        expect(requestObject->at("method").asString() == "debug.forceLogin", "debug force-login method mismatch") &&
+        expect(params.at("sessionId").asString() == "debug-session", "debug force-login session mismatch") &&
+        expect(params.at("username").asString() == "alice", "debug force-login username mismatch");
+}
+
 bool runFacadeReadTlogSendsRequest() {
     FakeTransport transport;
     transport.responses = {R"({"id":"1","result":{"lines":["a","b","c"]}})"};
@@ -396,6 +620,24 @@ int main() {
         return 1;
     }
     if (!runFacadeCreateInitialAdminSendsSetupRequest()) {
+        return 1;
+    }
+    if (!facadeLoginSendsSessionLoginAndStoresSession()) {
+        return 1;
+    }
+    if (!facadeListUsersUsesCurrentSession()) {
+        return 1;
+    }
+    if (!facadeUpdateOwnAccountUsesCurrentSession()) {
+        return 1;
+    }
+    if (!facadeLogoutUsesCurrentSessionAndClearsRuntimeSession()) {
+        return 1;
+    }
+    if (!facadeNewSessionMethodsRecoverGuestOnSessionExpired()) {
+        return 1;
+    }
+    if (!facadeDebugForceLoginStoresReturnedSession()) {
         return 1;
     }
     if (!runFacadeReadTlogSendsRequest()) {

@@ -109,7 +109,7 @@ bool structFileCommandIsDisabledInBackendMode() {
     std::cout.rdbuf(previousBuffer);
 
     const std::string output = captured.str();
-    if (output.find("dbg:structfile is unavailable in backend mode") == std::string::npos) {
+    if (output.find("dbg:structfile is not available in backend-separated mode") == std::string::npos) {
         std::cerr << "backend mode structfile message mismatch: " << output << "\n";
         return false;
     }

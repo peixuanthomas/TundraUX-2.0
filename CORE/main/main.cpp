@@ -8,10 +8,6 @@
 #include <string>
 #include <fstream>
 
-#ifdef TUNDRAUX_LEGACY_DIRECT_SETUP
-#include "legacy_direct.hpp"
-#endif
-
 #ifndef TUNDRAUX_DEFAULT_USER_TYPE
 #define TUNDRAUX_DEFAULT_USER_TYPE "guest"
 #endif
@@ -32,14 +28,14 @@ void shutdownBackendRuntimeForExit() {
 }
 
 void printUsage() {
-    colorcout("red", "Usage: TundraUX2 [--legacy-direct] [--backend-stdio <path>]\n");
+    colorcout("red", "Usage: TundraUX2 [--backend-stdio <path>]\n");
 }
 
 bool parseArgs(int argc, char* argv[], tundraux::frontend::BackendRuntimeOptions& options) {
     for (int i = 1; i < argc; ++i) {
         const std::string arg = argv[i];
         if (arg == "--legacy-direct") {
-            options.legacyDirect = true;
+            return false;
         } else if (arg == "--backend-stdio") {
             if (i + 1 >= argc) {
                 return false;
@@ -109,27 +105,8 @@ bool backendSetupRequired(tundraux::frontend::BackendFacade& facade, std::string
 }
 
 bool legacySetupRequired(std::string& error) {
-    error.clear();
-#ifdef TUNDRAUX_LEGACY_DIRECT_SETUP
-    std::string message;
-    const bool created = tundraux::legacy_direct::createInitialAdmin("null", "Secret1", "setup probe", message);
-    if (created) {
-        error = "Legacy setup probe unexpectedly created an admin account.";
-        return false;
-    }
-    if (message == "Setup already initialized.") {
-        return false;
-    }
-    if (message == "\"null\" is reserved for setup.") {
-        return true;
-    }
-
-    error = message.empty() ? "Failed to determine setup state." : message;
+    error = "Legacy direct setup is not available in the backend-separated frontend.";
     return false;
-#else
-    error = "Legacy direct setup is unavailable in this build.";
-    return false;
-#endif
 }
 
 } // namespace
@@ -159,33 +136,20 @@ int main(int argc, char* argv[]) {
     std::ifstream licenseFile("license");
     std::string setupError;
     bool setupRequired = false;
-    if (backendRuntime.legacyDirect()) {
-        setupRequired = legacySetupRequired(setupError);
-    } else {
-        tundraux::frontend::BackendFacade facade(backendRuntime);
-        setupRequired = backendSetupRequired(facade, setupError);
-        if (setupRequired) {
-            if (!licenseFile) {
-                abortStartupWithMessage(backendRuntime, "Critical file missing: license");
-                return 1;
-            }
-            displayLicense(licenseFile);
-            hello(facade);
-        }
-    }
-
-    if (!setupError.empty()) {
-        abortStartupWithMessage(backendRuntime, setupError);
-        return 1;
-    }
-
-    if (backendRuntime.legacyDirect() && setupRequired) {
+    tundraux::frontend::BackendFacade facade(backendRuntime);
+    setupRequired = backendSetupRequired(facade, setupError);
+    if (setupRequired) {
         if (!licenseFile) {
             abortStartupWithMessage(backendRuntime, "Critical file missing: license");
             return 1;
         }
         displayLicense(licenseFile);
-        hello();
+        hello(facade);
+    }
+
+    if (!setupError.empty()) {
+        abortStartupWithMessage(backendRuntime, setupError);
+        return 1;
     }
 
     clear_screen();

@@ -244,8 +244,8 @@ std::vector<RegisteredCommand> buildNewCommandRegistry(
             "dbg:forcelogin <username>",
             "Force login as a user",
             {},
-            [&currentUser, backendMode](const std::string& input) {
-                handleDebugForceLoginCommand(input, currentUser, backendMode);
+            [&currentUser, backendRuntime](const std::string& input) {
+                handleDebugForceLoginCommand(input, currentUser, backendRuntime);
             },
             "debug",
             true,

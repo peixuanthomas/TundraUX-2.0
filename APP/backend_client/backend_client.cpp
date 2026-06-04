@@ -346,6 +346,26 @@ ClientResult<FrontendSession> BackendClient::login(
     );
 }
 
+ClientResult<FrontendSession> BackendClient::debugForceLogin(
+    const std::string& sessionId,
+    const std::string& username
+) {
+    JsonValue::Object params = paramsWithSession(sessionId);
+    params.emplace("username", JsonValue::string(username));
+    return sendRequest<FrontendSession>(
+        transport_,
+        nextRequestId(),
+        "debug.forceLogin",
+        std::move(params),
+        [](const JsonValue& result) {
+            if (result.type() != JsonValue::Type::Object) {
+                throw std::logic_error("expected debug force login result object");
+            }
+            return parseSession(requiredObjectField(result.asObject(), "session"));
+        }
+    );
+}
+
 ClientResult<bool> BackendClient::logout(const std::string& sessionId) {
     return sendRequest<bool>(
         transport_,

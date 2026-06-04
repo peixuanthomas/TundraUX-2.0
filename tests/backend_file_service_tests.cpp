@@ -36,6 +36,10 @@ public:
         return users;
     }
 
+    bool isStoreEmpty() const override {
+        return users.empty();
+    }
+
     bool addUser(const tundraux::backend::BackendUser& user) override {
         users.push_back(user);
         return true;

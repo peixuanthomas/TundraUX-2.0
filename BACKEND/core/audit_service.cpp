@@ -66,6 +66,38 @@ std::string obfuscateCopy(std::string value) {
     return value;
 }
 
+std::string legacyObfuscateCopy(std::string value) {
+    for (char& ch : value) {
+        ch ^= 0x55;
+    }
+    return value;
+}
+
+bool looksLikeAuditLine(const std::string& value) {
+    return value.size() >= 19 &&
+        value[4] == '-' &&
+        value[7] == '-' &&
+        value[10] == ' ' &&
+        value[13] == ':' &&
+        value[16] == ':' &&
+        value.find(" | user=") != std::string::npos &&
+        value.find(" | type=") != std::string::npos;
+}
+
+std::string decodeAuditPayload(const std::string& payload) {
+    const std::string current = obfuscateCopy(payload);
+    if (looksLikeAuditLine(current)) {
+        return current;
+    }
+
+    const std::string legacy = legacyObfuscateCopy(payload);
+    if (looksLikeAuditLine(legacy)) {
+        return legacy;
+    }
+
+    return current;
+}
+
 std::string trimCopy(std::string value) {
     while (!value.empty() && (value.back() == '\n' || value.back() == '\r')) {
         value.pop_back();
@@ -375,7 +407,7 @@ ServiceResult<AuditReadResult> AuditService::readRecords(const std::filesystem::
                     return ServiceResult<AuditReadResult>::failure(ErrorCode::StorageError, kStorageErrorMessage);
                 }
             }
-            lines.lines.push_back(trimCopy(deobfuscate(payload)));
+            lines.lines.push_back(trimCopy(decodeAuditPayload(payload)));
         }
         return ServiceResult<AuditReadResult>::success(std::move(lines));
     } catch (const std::exception&) {

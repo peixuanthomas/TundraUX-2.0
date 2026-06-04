@@ -3,7 +3,6 @@
 #include "backend_facade.hpp"
 #include "backend_client.hpp"
 #include "backend_runtime.hpp"
-#include "legacy_direct.hpp"
 
 #include <algorithm>
 #include <cctype>
@@ -71,7 +70,7 @@ struct AccountSettingsState {
     std::string newPassword;
     std::string confirmPassword;
     std::string passwordHint;
-    std::string sourceLabel = "legacy direct user store";
+    std::string sourceLabel = "backend current profile";
     std::size_t field = 0;
     bool showPassword = false;
     bool showHelp = false;
@@ -459,38 +458,17 @@ bool saveSettings(
     }
 
     tundraux::frontend::ShellUser updated = state.original;
-    bool degradedProfileRefresh = false;
-    bool profileExpired = false;
-    std::string degradedProfileReason;
     const std::string trimmedHint = trimCopy(state.passwordHint);
     if (usesBackendMode(backendRuntime)) {
-        if (backendRuntime == nullptr || backendRuntime->client() == nullptr) {
-            state.message = "No backend session is active.";
-            logAuditEvent(
-                auditSink,
-                currentUser,
-                "manage",
-                "account settings update failure user=" + currentUser.name + " reason=backend unavailable"
-            );
-            return false;
-        }
-
-        auto* client = backendRuntime->client();
-        const bool passwordProvided = passwordWillChange(state);
-        const bool passwordHintProvided = hintWillChange(state);
-        const auto updateResult = client->updateOwnAccount(
-            backendRuntime->sessionId(),
-            passwordProvided,
+        tundraux::frontend::BackendFacade facade(*backendRuntime);
+        const auto updateResult = facade.updateOwnAccount(
+            passwordWillChange(state),
             state.newPassword,
-            passwordHintProvided,
+            hintWillChange(state),
             trimmedHint
         );
-        if (!updateResult.ok || !updateResult.value) {
-            state.message = backendErrorMessage(
-                "Failed to update account settings.",
-                updateResult.errorCode,
-                updateResult.message
-            );
+        if (!updateResult.ok) {
+            state.message = updateResult.message.empty() ? "Unable to update account." : updateResult.message;
             logAuditEvent(
                 auditSink,
                 currentUser,
@@ -500,68 +478,39 @@ bool saveSettings(
             return false;
         }
 
-        tundraux::frontend::BackendFacade facade(*backendRuntime);
         const auto profileResult = facade.refreshProfile();
         if (!profileResult.ok) {
-            degradedProfileRefresh = true;
-            degradedProfileReason = backendErrorMessage(
-                "Failed to refresh account profile.",
-                profileResult.errorCode,
-                profileResult.message
+            state.message = profileResult.message.empty() ? "Unable to refresh account." : profileResult.message;
+            logAuditEvent(
+                auditSink,
+                currentUser,
+                "manage",
+                "account settings update failure user=" + currentUser.name + " reason=" + state.message
             );
-            if (passwordHintProvided) {
-                updated.passwordHint = trimmedHint;
-            }
-            if (profileResult.errorCode == "SessionExpired") {
-                profileExpired = true;
-                syncCurrentUserToGuest(currentUser, auditSink);
-            }
+            return false;
         } else {
             updated = profileResult.value;
         }
     } else {
-        tundraux::legacy_direct::AccountRecord record{updated, state.originalPassword};
-        if (!tundraux::legacy_direct::saveAccount(
-                state.original.name,
-                passwordWillChange(state),
-                state.newPassword,
-                trimmedHint,
-                record,
-                state.message)) {
-            logAuditEvent(
-                auditSink,
-                currentUser,
-                "manage",
-                "account settings update failure user=" + currentUser.name + " reason=" + state.message
-            );
-            return false;
-        }
-        updated = record.user;
-        state.originalPassword = record.password;
+        state.message = "Backend unavailable. Account settings require the backend runtime.";
+        logAuditEvent(
+            auditSink,
+            currentUser,
+            "manage",
+            "account settings update failure user=" + currentUser.name + " reason=backend unavailable"
+        );
+        return false;
     }
 
-    if (!profileExpired) {
-        currentUser = updated;
-    }
+    currentUser = updated;
     state.original = updated;
     state.newPassword.clear();
     state.confirmPassword.clear();
     state.passwordHint = updated.passwordHint;
     state.saved = true;
-    state.message = degradedProfileRefresh
-        ? "Settings saved, but profile refresh failed. Press Enter or Esc to return."
-        : "Settings saved. Press Enter or Esc to return.";
-    setAuditCurrentUser(auditSink, profileExpired ? currentUser : updated);
-    if (degradedProfileRefresh) {
-        logAuditEvent(
-            auditSink,
-            currentUser,
-            "manage",
-            "account settings update success/degraded user=" + updated.name + " reason=" + degradedProfileReason
-        );
-    } else {
-        logAuditEvent(auditSink, currentUser, "manage", "account settings update success user=" + updated.name);
-    }
+    state.message = "Settings saved. Press Enter or Esc to return.";
+    setAuditCurrentUser(auditSink, updated);
+    logAuditEvent(auditSink, currentUser, "manage", "account settings update success user=" + updated.name);
     return true;
 }
 
@@ -651,67 +600,36 @@ void open_account_settings(
         colorcout("yellow", "Cannot open account settings as debug user.\n");
         return;
     }
-    if (backendMode) {
-        if (currentUser.type == "guest") {
-            colorcout("yellow", "Cannot open account settings as guest user.\n");
-            return;
-        }
-    } else {
-        if (currentUser.type == "guest") {
-            colorcout("yellow", "Cannot open account settings as guest user.\n");
-            return;
-        }
-        if (currentUser.name.empty()) {
-            colorcout("yellow", "No user is currently logged in.\n");
-            return;
-        }
+    if (!backendMode) {
+        colorcout("red", "Backend unavailable. Account settings require the backend runtime.\n");
+        return;
+    }
+    if (currentUser.type == "guest") {
+        colorcout("yellow", "Cannot open account settings as guest user.\n");
+        return;
     }
 
     AccountSettingsState state;
-    if (backendMode) {
-        if (backendRuntime == nullptr || backendRuntime->client() == nullptr) {
-            colorcout("red", "Backend unavailable.\n");
-            return;
+    tundraux::frontend::BackendFacade facade(*backendRuntime);
+    const auto profileResult = facade.refreshProfile();
+    if (!profileResult.ok) {
+        if (profileResult.errorCode == "SessionExpired") {
+            syncCurrentUserToGuest(currentUser, auditSink);
         }
-        if (backendRuntime->sessionId().empty()) {
-            colorcout("yellow", "No backend session is active.\n");
-            return;
-        }
-
-        tundraux::frontend::BackendFacade facade(*backendRuntime);
-        const auto profileResult = facade.refreshProfile();
-        if (!profileResult.ok) {
-            if (profileResult.errorCode == "SessionExpired") {
-                syncCurrentUserToGuest(currentUser, auditSink);
-            }
-            colorcout(
-                "red",
-                backendErrorMessage(
-                    "Unable to load account profile.",
-                    profileResult.errorCode,
-                    profileResult.message
-                ) + "\n"
-            );
-            return;
-        }
-
-        state.original = profileResult.value;
-        state.passwordHint = state.original.passwordHint;
-        state.sourceLabel = "backend current profile";
-        currentUser = state.original;
-    } else {
-        tundraux::legacy_direct::AccountRecord record;
-        std::string message;
-        if (!tundraux::legacy_direct::loadAccount(currentUser, record, message)) {
-            colorcout("red", message + "\n");
-            return;
-        }
-
-        state.original = record.user;
-        state.originalPassword = record.password;
-        state.passwordHint = record.user.passwordHint;
-        state.sourceLabel = "legacy direct user store";
+        colorcout(
+            "red",
+            backendErrorMessage(
+                "Unable to load account.",
+                profileResult.errorCode,
+                profileResult.message
+            ) + "\n"
+        );
+        return;
     }
+    state.original = profileResult.value;
+    state.passwordHint = state.original.passwordHint;
+    state.sourceLabel = "backend current profile";
+    currentUser = state.original;
 
     set_title("Account Settings");
     ConsoleScreenGuard screenGuard;

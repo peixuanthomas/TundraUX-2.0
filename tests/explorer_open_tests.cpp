@@ -13,9 +13,16 @@ namespace tundraux::frontend {
 class FrontendAuditSink;
 }
 
+namespace {
+int g_localTlogOpenCalls = 0;
+std::string g_localTlogOpenPath;
+}
+
 namespace tundraux::audit {
 void logEvent(const std::string&, const std::string&) {}
-int openTlogInEditor(const std::string&, const std::string&, const std::string&, const std::string&) {
+int openTlogInEditor(const std::string& path, const std::string&, const std::string&, const std::string&) {
+    ++g_localTlogOpenCalls;
+    g_localTlogOpenPath = path;
     return 0;
 }
 }
@@ -323,6 +330,37 @@ bool backendTlogOpenDoesNotUseLocalBackendBlock() {
     return true;
 }
 
+bool localTlogOpenStillUsesLocalViewerWhenNoBackend() {
+    namespace fs = std::filesystem;
+
+    g_localTlogOpenCalls = 0;
+    g_localTlogOpenPath.clear();
+    tundraux::explorer::ExplorerState state;
+    state.backend = nullptr;
+    state.rootPath = fs::u8path("C:/root");
+    state.currentPath = state.rootPath;
+    state.username = "alice";
+    state.usertype = "admin";
+    state.entries.push_back({"audit.tlog", state.rootPath / "Logs" / "audit.tlog", false, false, 12});
+
+    tundraux::explorer::openSelected(state);
+
+    if (g_localTlogOpenCalls != 1) {
+        std::cerr << "local tlog viewer should be called once\n";
+        return false;
+    }
+    if (g_localTlogOpenPath.find("audit.tlog") == std::string::npos) {
+        std::cerr << "local tlog path mismatch: " << g_localTlogOpenPath << "\n";
+        return false;
+    }
+    if (state.message != "Opened audit log audit.tlog") {
+        std::cerr << "local tlog open message mismatch: " << state.message << "\n";
+        return false;
+    }
+
+    return true;
+}
+
 int main() {
     if (!backendTuxOpenUsesBackendReadWrite()) return 1;
     if (!backendPlainFileOpenUsesBackendReadWrite()) return 1;
@@ -330,5 +368,6 @@ int main() {
     if (!backendPlainFileUnchangedDoesNotWrite()) return 1;
     if (!backendExternalOpenUsesBackendReadForPermissionBoundary()) return 1;
     if (!backendTlogOpenDoesNotUseLocalBackendBlock()) return 1;
+    if (!localTlogOpenStillUsesLocalViewerWhenNoBackend()) return 1;
     return 0;
 }

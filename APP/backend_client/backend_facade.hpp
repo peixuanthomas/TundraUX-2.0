@@ -36,6 +36,16 @@ public:
 
     bool active() const;
     bool ensureSession(std::string& message);
+    ClientResult<ShellUser> login(const std::string& username, const std::string& password);
+    FacadeResult logout();
+    ClientResult<std::vector<ShellUser>> listUsers();
+    FacadeResult updateOwnAccount(
+        bool passwordProvided,
+        const std::string& password,
+        bool passwordHintProvided,
+        const std::string& passwordHint
+    );
+    ClientResult<ShellUser> debugForceLogin(const std::string& username);
     ClientResult<ShellUser> refreshProfile();
     FacadeResult logEvent(const std::string& category, const std::string& detail);
     FacadeResult logKeyPress(const std::string& key, bool sensitive);

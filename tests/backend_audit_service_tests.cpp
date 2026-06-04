@@ -118,6 +118,26 @@ std::string fileContents(const std::filesystem::path& path) {
     return content;
 }
 
+std::string legacyObfuscate(std::string value) {
+    for (char& ch : value) {
+        ch ^= 0x55;
+    }
+    return value;
+}
+
+bool writeLegacyTlogRecord(const std::filesystem::path& path, const std::string& line) {
+    std::ofstream out(path, std::ios::binary | std::ios::trunc);
+    if (!out) {
+        return false;
+    }
+    out.write("TLOG1", 5);
+    const std::string payload = legacyObfuscate(line);
+    const std::size_t length = payload.size();
+    out.write(reinterpret_cast<const char*>(&length), sizeof(length));
+    out.write(payload.data(), static_cast<std::streamsize>(payload.size()));
+    return static_cast<bool>(out);
+}
+
 bool writesNothingWhenStrictModeOff() {
     TempDirectory temp(uniqueTempPath("off"));
     InMemoryUserStore users;
@@ -161,6 +181,28 @@ bool writesEncryptedRecordWhenStrictModeOn() {
         read.value.lines[0].find("secret") != std::string::npos && read.value.lines[0].find("shell") != std::string::npos,
         "decrypted audit line should include category and detail context"
     );
+}
+
+bool readsLegacyDirectTlogAsPlaintext() {
+    TempDirectory temp(uniqueTempPath("legacyRead"));
+    InMemoryUserStore users;
+    users.strictMode = true;
+    tundraux::backend::SessionService sessions(users);
+    tundraux::backend::AuditService audit(users, sessions, temp.path().string());
+
+    const std::string line = "2026-06-04 16:00:00 | user=alice | type=admin | shell | legacy direct log";
+    if (!expect(writeLegacyTlogRecord(temp.path() / "legacy.tlog", line), "legacy tlog fixture should be written")) {
+        return false;
+    }
+
+    const auto guestSession = sessions.startGuestSession();
+    const auto login = sessions.login(guestSession.sessionId, "alice", "Secret1");
+    if (!expect(login.ok, "admin login should succeed for legacy tlog read")) return false;
+
+    const auto read = audit.readTlog(login.value.sessionId, "legacy.tlog");
+    if (!expect(read.ok, "admin should read legacy direct tlog")) return false;
+    if (!expect(read.value.lines.size() == 1, "expected one legacy tlog line")) return false;
+    return expect(read.value.lines[0] == line, "legacy tlog line should decrypt as plaintext");
 }
 
 bool guestAndUserCannotReadOrExportTlog() {
@@ -409,6 +451,9 @@ int main() {
         return 1;
     }
     if (!writesEncryptedRecordWhenStrictModeOn()) {
+        return 1;
+    }
+    if (!readsLegacyDirectTlogAsPlaintext()) {
         return 1;
     }
     if (!guestAndUserCannotReadOrExportTlog()) {

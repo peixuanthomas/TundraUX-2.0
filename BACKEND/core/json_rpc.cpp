@@ -47,6 +47,10 @@ protocol::JsonValue sessionToJson(const SessionInfo& session) {
     });
 }
 
+bool isSyntheticDebugSessionUser(const BackendUser& user) {
+    return user.type == "debug" && user.name == "debug" && user.password.empty();
+}
+
 protocol::JsonValue fileEntryToJson(const FileEntry& entry) {
     return protocol::JsonValue::object({
         {"name", protocol::JsonValue::string(entry.name)},
@@ -235,7 +239,9 @@ protocol::JsonValue JsonRpcDispatcher::dispatch(const std::string& method, const
         if (debugSessionToken_.empty() || token != debugSessionToken_) {
             throw RpcError(ErrorCode::PermissionDenied, "Access Denied.");
         }
-        return sessionToJson(sessions_.startSession(BackendUser{"debug", "debug", "", "", 0}));
+        const auto session = sessions_.startSession(BackendUser{"debug", "debug", "", "", 0});
+        debugSessionIds_.insert(session.sessionId);
+        return sessionToJson(session);
     }
 
     if (method == "session.login") {
@@ -392,6 +398,30 @@ protocol::JsonValue JsonRpcDispatcher::dispatch(const std::string& method, const
             throwIfFailed(result.error);
         }
         return protocol::JsonValue::object({{"ok", protocol::JsonValue::boolean(true)}});
+    }
+
+    if (method == "debug.forceLogin") {
+        const std::string sessionId = requiredStringParam(params, "sessionId");
+        const std::string username = requiredStringParam(params, "username");
+        const auto requester = sessions_.requireSession(sessionId);
+        if (!requester.ok) {
+            throwIfFailed(requester.error);
+        }
+        if (debugSessionIds_.find(sessionId) == debugSessionIds_.end() ||
+            !isSyntheticDebugSessionUser(requester.value)) {
+            throw RpcError(ErrorCode::PermissionDenied, "Access denied.");
+        }
+
+        const auto users = users_.listUsers(sessionId);
+        if (!users.ok) {
+            throwIfFailed(users.error);
+        }
+        for (const auto& user : users.value) {
+            if (user.name == username) {
+                return protocol::JsonValue::object({{"session", sessionToJson(sessions_.startSession(user))}});
+            }
+        }
+        throw RpcError(ErrorCode::NotFound, "User not found.");
     }
 
     if (files_ != nullptr && method == "file.listDirectory") {

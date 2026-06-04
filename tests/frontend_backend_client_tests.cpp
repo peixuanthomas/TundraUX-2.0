@@ -402,6 +402,30 @@ bool runLoginErrorMessageTest() {
         expect(result.message == "Incorrect password for user alice.", "login error message mismatch");
 }
 
+bool runDebugForceLoginTest() {
+    FakeTransport transport;
+    transport.nextResponse = R"({"id":"1","result":{"session":{"sessionId":"session-debug","user":{"name":"alice","type":"admin","passwordHint":"alpha","failedCount":1}}}})";
+    tundraux::frontend::BackendClient client(transport);
+
+    const auto result = client.debugForceLogin("debug-session", "alice");
+    tundraux::protocol::JsonValue parsed;
+    const auto* request = parseRequestObject(transport, "debug force login", parsed);
+    if (request == nullptr) {
+        return false;
+    }
+    const auto& params = request->at("params").asObject();
+
+    return expect(result.ok, "debug force login should succeed") &&
+        expect(result.value.sessionId == "session-debug", "debug force login session mismatch") &&
+        expect(result.value.user.name == "alice", "debug force login user name mismatch") &&
+        expect(result.value.user.type == "admin", "debug force login user type mismatch") &&
+        expect(result.value.user.passwordHint == "alpha", "debug force login password hint mismatch") &&
+        expect(result.value.user.failedCount == 1, "debug force login failed count mismatch") &&
+        expect(request->at("method").asString() == "debug.forceLogin", "debug force login method mismatch") &&
+        expect(params.at("sessionId").asString() == "debug-session", "debug force login sessionId param mismatch") &&
+        expect(params.at("username").asString() == "alice", "debug force login username param mismatch");
+}
+
 bool runLogoutTest() {
     FakeTransport transport;
     transport.nextResponse = R"({"id":"1","result":{"ok":true}})";
@@ -867,6 +891,7 @@ int main(int argc, char* argv[]) {
     if (!runListDirectoryNegativeSizeTest()) return 1;
     if (!runLoginTest()) return 1;
     if (!runLoginErrorMessageTest()) return 1;
+    if (!runDebugForceLoginTest()) return 1;
     if (!runLogoutTest()) return 1;
     if (!runCurrentProfileTest()) return 1;
     if (!runUpdateOwnAccountTest()) return 1;
