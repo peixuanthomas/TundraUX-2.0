@@ -31,6 +31,14 @@ bool BackendRuntime::legacyDirect() const {
     return g_backendRuntimeLegacyDirect;
 }
 
+FacadeResult BackendFacade::logEvent(const std::string&, const std::string&) {
+    return {true, "", ""};
+}
+
+FacadeResult BackendFacade::logKeyPress(const std::string&, bool) {
+    return {true, "", ""};
+}
+
 class FrontendAuditSink;
 }
 
