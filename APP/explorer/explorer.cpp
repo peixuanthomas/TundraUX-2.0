@@ -34,7 +34,6 @@ void open(
     }
 
     if (backendRuntime != nullptr &&
-        !backendRuntime->legacyDirect() &&
         backendRuntime->client() != nullptr &&
         !backendRuntime->sessionId().empty()) {
         backend = std::make_unique<BackendClientExplorerBackend>(

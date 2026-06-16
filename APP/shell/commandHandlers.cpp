@@ -286,7 +286,7 @@ bool writeBackendExportedTlog(
 }
 
 bool usesBackend(tundraux::frontend::BackendRuntime* backendRuntime) {
-    return backendRuntime != nullptr && !backendRuntime->legacyDirect();
+    return backendRuntime != nullptr && backendRuntime->client() != nullptr;
 }
 
 void setAuditCurrentUser(

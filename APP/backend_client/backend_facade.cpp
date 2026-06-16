@@ -48,7 +48,7 @@ bool recoverGuestSession(BackendRuntime& runtime, std::string& message) {
 BackendFacade::BackendFacade(BackendRuntime& runtime) : runtime_(runtime) {}
 
 bool BackendFacade::active() const {
-    return !runtime_.legacyDirect() && runtime_.client() != nullptr;
+    return runtime_.client() != nullptr;
 }
 
 bool BackendFacade::ensureSession(std::string& message) {

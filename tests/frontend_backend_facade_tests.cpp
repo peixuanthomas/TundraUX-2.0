@@ -64,36 +64,17 @@ void configureFacadeRuntime(
     const std::string& sessionId = ""
 ) {
     runtime.client_ = std::make_unique<tundraux::frontend::BackendClient>(transport);
-    runtime.legacyDirect_ = false;
     runtime.sessionId_ = sessionId;
     runtime.filesRoot_ = "test-files-root";
 }
 
 bool runFacadeActiveModeChecks() {
-    const bool inactiveWorks = [] {
-        tundraux::frontend::BackendRuntime runtime;
-        tundraux::frontend::BackendFacade facade(runtime);
-        std::string message;
-        return expect(!facade.active(), "inactive runtime should not be active") &&
-            expect(!facade.ensureSession(message), "inactive runtime should fail ensureSession") &&
-            expect(message == "Backend unavailable.", "inactive runtime should set backend unavailable message");
-    }();
-
-    const bool legacyDirectWorks = [] {
-        FakeTransport transport;
-        transport.responses = {R"({"id":"1","result":{"sessionId":"guest-1","user":{"name":"","type":"guest"}}})"};
-        tundraux::frontend::BackendRuntime runtime;
-        runtime.legacyDirect_ = true;
-        runtime.client_ = std::make_unique<tundraux::frontend::BackendClient>(transport);
-        runtime.sessionId_ = "";
-        tundraux::frontend::BackendFacade facade(runtime);
-        std::string message;
-        return expect(!facade.active(), "legacy-direct runtime should not be active") &&
-            expect(!facade.ensureSession(message), "legacy-direct runtime should fail ensureSession") &&
-            expect(message == "Backend unavailable.", "legacy-direct runtime should set backend unavailable message");
-    }();
-
-    return inactiveWorks && legacyDirectWorks;
+    tundraux::frontend::BackendRuntime runtime;
+    tundraux::frontend::BackendFacade facade(runtime);
+    std::string message;
+    return expect(!facade.active(), "inactive runtime should not be active") &&
+        expect(!facade.ensureSession(message), "inactive runtime should fail ensureSession") &&
+        expect(message == "Backend unavailable.", "inactive runtime should set backend unavailable message");
 }
 
 bool runFacadeEnsureSessionStartsGuestSession() {

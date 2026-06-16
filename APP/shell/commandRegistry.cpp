@@ -9,7 +9,7 @@ std::vector<RegisteredCommand> buildNewCommandRegistry(
     tundraux::frontend::BackendRuntime* backendRuntime,
     tundraux::frontend::FrontendAuditSink* auditSink
 ) {
-    const bool backendMode = backendRuntime != nullptr && !backendRuntime->legacyDirect();
+    const bool backendMode = backendRuntime != nullptr;
 
     return {
         {
@@ -70,7 +70,7 @@ std::vector<RegisteredCommand> buildNewCommandRegistry(
             [auditSink, backendRuntime](const std::string& input) {
                 handleListUserCommand(input, backendRuntime, auditSink);
             },
-            backendRuntime != nullptr && !backendRuntime->legacyDirect() ? "admin,debug" : "",
+            backendMode ? "admin,debug" : "",
             false
         },
         {

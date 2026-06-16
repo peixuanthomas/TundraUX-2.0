@@ -7,7 +7,6 @@
 #include <string>
 #include <vector>
 
-bool g_backendRuntimeLegacyDirect = false;
 bool g_createfileBackendMode = false;
 bool g_deletefileBackendMode = false;
 bool g_structfileBackendMode = false;
@@ -26,10 +25,6 @@ class BackendProcessTransport {
 
 BackendRuntime::BackendRuntime() {}
 BackendRuntime::~BackendRuntime() {}
-
-bool BackendRuntime::legacyDirect() const {
-    return g_backendRuntimeLegacyDirect;
-}
 
 FacadeResult BackendFacade::logEvent(const std::string&, const std::string&) {
     return {true, "", ""};
@@ -81,7 +76,7 @@ void handleDebugForceLoginCommand(
     tundraux::frontend::ShellUser&,
     tundraux::frontend::BackendRuntime* backendRuntime
 ) {
-    g_forceloginBackendMode = backendRuntime != nullptr && !backendRuntime->legacyDirect();
+    g_forceloginBackendMode = backendRuntime != nullptr;
 }
 
 namespace {
@@ -281,23 +276,9 @@ bool commandRegistryRoutesBackendModeToDebugCommands() {
     user.type = "debug";
     user.name = "debugger";
 
-    struct LegacyModeGuard {
-        bool previousValue;
-
-        explicit LegacyModeGuard(bool nextValue)
-            : previousValue(g_backendRuntimeLegacyDirect) {
-            g_backendRuntimeLegacyDirect = nextValue;
-        }
-
-        ~LegacyModeGuard() {
-            g_backendRuntimeLegacyDirect = previousValue;
-        }
-    };
-
     tundraux::frontend::BackendRuntime runtime;
 
     {
-        LegacyModeGuard backendGuard(false);
         resetDebugCommandModeFlags();
 
         auto backendModeCommands = buildNewCommandRegistry(user, &runtime);
@@ -336,82 +317,42 @@ bool commandRegistryRoutesBackendModeToDebugCommands() {
     }
 
     {
-        LegacyModeGuard legacyDirectGuard(true);
         resetDebugCommandModeFlags();
 
-        auto legacyDirectCommands = buildNewCommandRegistry(user, &runtime);
-        if (!tryExecuteRegisteredCommand("dbg:createfile", legacyDirectCommands, user, nullptr)) {
-            std::cerr << "dbg:createfile command was not found in legacy-direct-mode registry\n";
+        auto nonBackendCommands = buildNewCommandRegistry(user, nullptr);
+        if (!tryExecuteRegisteredCommand("dbg:createfile", nonBackendCommands, user, nullptr)) {
+            std::cerr << "dbg:createfile command was not found in non-backend registry\n";
             return false;
         }
         if (g_createfileBackendMode) {
-            std::cerr << "expected dbg:createfile backend mode flag false for legacy-direct mode\n";
+            std::cerr << "expected dbg:createfile backend mode flag false without backend runtime\n";
             return false;
         }
-        if (!tryExecuteRegisteredCommand("dbg:deletefile", legacyDirectCommands, user, nullptr)) {
-            std::cerr << "dbg:deletefile command was not found in legacy-direct-mode registry\n";
+
+        if (!tryExecuteRegisteredCommand("dbg:deletefile", nonBackendCommands, user, nullptr)) {
+            std::cerr << "dbg:deletefile command was not found in non-backend registry\n";
             return false;
         }
         if (g_deletefileBackendMode) {
-            std::cerr << "expected dbg:deletefile backend mode flag false for legacy-direct mode\n";
+            std::cerr << "expected dbg:deletefile backend mode flag false without backend runtime\n";
             return false;
         }
-        if (!tryExecuteRegisteredCommand("dbg:structfile", legacyDirectCommands, user, nullptr)) {
-            std::cerr << "dbg:structfile command was not found in legacy-direct-mode registry\n";
+
+        if (!tryExecuteRegisteredCommand("dbg:structfile", nonBackendCommands, user, nullptr)) {
+            std::cerr << "dbg:structfile command was not found in non-backend registry\n";
             return false;
         }
         if (g_structfileBackendMode) {
-            std::cerr << "expected dbg:structfile backend mode flag false for legacy-direct mode\n";
+            std::cerr << "expected dbg:structfile backend mode flag false without backend runtime\n";
             return false;
         }
-        if (!tryExecuteRegisteredCommand("dbg:forcelogin test_user", legacyDirectCommands, user, nullptr)) {
-            std::cerr << "dbg:forcelogin command was not found in legacy-direct-mode registry\n";
+
+        if (!tryExecuteRegisteredCommand("dbg:forcelogin test_user", nonBackendCommands, user, nullptr)) {
+            std::cerr << "dbg:forcelogin command was not found in non-backend registry\n";
             return false;
         }
         if (g_forceloginBackendMode) {
-            std::cerr << "expected dbg:forcelogin backend mode flag false for legacy-direct mode\n";
-            return false;
-        }
-    }
-
-    {
-        LegacyModeGuard legacyNullGuard(false);
-        resetDebugCommandModeFlags();
-
-        auto legacyCommands = buildNewCommandRegistry(user, nullptr);
-        if (!tryExecuteRegisteredCommand("dbg:createfile", legacyCommands, user, nullptr)) {
-            std::cerr << "dbg:createfile command was not found in legacy-mode registry\n";
-            return false;
-        }
-        if (g_createfileBackendMode) {
-            std::cerr << "expected dbg:createfile backend mode flag false for legacy mode\n";
-            return false;
-        }
-
-        if (!tryExecuteRegisteredCommand("dbg:deletefile", legacyCommands, user, nullptr)) {
-            std::cerr << "dbg:deletefile command was not found in legacy-mode registry\n";
-            return false;
-        }
-        if (g_deletefileBackendMode) {
-            std::cerr << "expected dbg:deletefile backend mode flag false for legacy mode\n";
-            return false;
-        }
-
-        if (!tryExecuteRegisteredCommand("dbg:structfile", legacyCommands, user, nullptr)) {
-            std::cerr << "dbg:structfile command was not found in legacy-mode registry\n";
-            return false;
-        }
-        if (g_structfileBackendMode) {
-            std::cerr << "expected dbg:structfile backend mode flag false for legacy mode\n";
-            return false;
-        }
-
-        if (!tryExecuteRegisteredCommand("dbg:forcelogin test_user", legacyCommands, user, nullptr)) {
-            std::cerr << "dbg:forcelogin command was not found in legacy-mode registry\n";
-            return false;
-        }
-        if (g_forceloginBackendMode) {
-            std::cerr << "expected dbg:forcelogin backend mode flag false for legacy mode\n";
+            std::cerr << "expected dbg:forcelogin backend mode flag false without backend runtime\n";
             return false;
         }
 

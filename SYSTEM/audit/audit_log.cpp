@@ -314,7 +314,7 @@ void initialize() {
 }
 
 void refreshStrictMode() {
-    // Strict mode is supplied by the backend service or legacy-direct adapter.
+    // Strict mode is supplied by the backend service.
     // Do not reset an already-synchronized value during lazy audit initialization.
 }
 
