@@ -676,22 +676,6 @@ bool runExportTlogRequestTest() {
         expect(params.at("path").asString() == "audit.tlog", "export tlog path mismatch");
 }
 
-bool runRuntimeLegacyDirectTest(const std::string& selfPath) {
-    tundraux::frontend::BackendRuntime runtime;
-    tundraux::frontend::BackendRuntimeOptions options;
-    options.legacyDirect = true;
-    std::string error;
-
-    const bool initialized = runtime.initialize(options, error);
-
-    return expect(initialized, "legacy-direct runtime should initialize") &&
-        expect(error.empty(), "legacy-direct runtime should not set error") &&
-        expect(runtime.legacyDirect(), "legacy-direct runtime flag mismatch") &&
-        expect(runtime.client() == nullptr, "legacy-direct runtime should not create client") &&
-        expect(std::filesystem::path(runtime.filesRoot()) == currentExecutableDirectory(selfPath), "legacy-direct runtime files root mismatch") &&
-        expect(runtime.sessionId().empty(), "legacy-direct runtime should not set session id");
-}
-
 bool runRuntimeMissingBackendPathTest() {
     tundraux::frontend::BackendRuntime runtime;
     tundraux::frontend::BackendRuntimeOptions options;
@@ -705,7 +689,6 @@ bool runRuntimeMissingBackendPathTest() {
 
     return expect(!initialized, "missing backend runtime should fail") &&
         expect(!error.empty(), "missing backend runtime should set error") &&
-        expect(!runtime.legacyDirect(), "missing backend runtime should not be legacy-direct") &&
         expect(runtime.client() == nullptr, "missing backend runtime should not create client") &&
         expect(runtime.filesRoot().empty(), "missing backend runtime should not keep files root") &&
         expect(runtime.sessionId().empty(), "missing backend runtime should not set session id");
@@ -902,7 +885,6 @@ int main(int argc, char* argv[]) {
     if (!runAuditKeyPressRequestTest()) return 1;
     if (!runReadTlogRequestTest()) return 1;
     if (!runExportTlogRequestTest()) return 1;
-    if (!runRuntimeLegacyDirectTest(argv[0])) return 1;
     if (!runRuntimeMissingBackendPathTest()) return 1;
     if (!runProcessResponseLineTooLongTest(argv[0])) return 1;
     if (!runRuntimeDefaultFilesRootIsExecutableDirectoryTest(argv[0])) return 1;

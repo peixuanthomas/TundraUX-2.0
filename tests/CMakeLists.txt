@@ -187,30 +187,6 @@ if(TUNDRAUX_BUILD_ALL_TESTS)
             TundraTUI::TundraTUI
     )
 
-    tundraux_add_test_executable(legacy_direct_tests
-        SOURCES
-            ${CMAKE_CURRENT_SOURCE_DIR}/legacy_direct_tests.cpp
-            ${PROJECT_SOURCE_DIR}/APP/legacy_direct/legacy_direct.cpp
-            ${PROJECT_SOURCE_DIR}/USER/udata/udata.cpp
-            ${PROJECT_SOURCE_DIR}/SYSTEM/crypto/crypto.cpp
-    )
-
-    target_include_directories(legacy_direct_tests
-        PRIVATE
-            ${PROJECT_SOURCE_DIR}/APP/backend_client
-            ${PROJECT_SOURCE_DIR}/APP/legacy_direct
-            ${PROJECT_SOURCE_DIR}/BACKEND/core
-            ${PROJECT_SOURCE_DIR}/SYSTEM/console
-            ${PROJECT_SOURCE_DIR}/SYSTEM/crypto
-            ${PROJECT_SOURCE_DIR}/USER/udata
-    )
-
-    target_link_libraries(legacy_direct_tests
-        PRIVATE
-            TundraTUI::TundraTUI
-            tundraux_backend_core
-    )
-
     tundraux_add_test_executable(build_info_tests
         SOURCES
             ${CMAKE_CURRENT_SOURCE_DIR}/build_info_tests.cpp
@@ -317,7 +293,6 @@ if(TUNDRAUX_BUILD_ALL_TESTS)
             ${PROJECT_SOURCE_DIR}/SYSTEM/debug/debug.cpp
             ${PROJECT_SOURCE_DIR}/SYSTEM/crypto/crypto.cpp
             ${PROJECT_SOURCE_DIR}/SYSTEM/build_info/build_info.cpp
-            ${PROJECT_SOURCE_DIR}/APP/legacy_direct/legacy_direct_stub.cpp
     )
 
     target_include_directories(debug_structfile_tests
@@ -328,7 +303,6 @@ if(TUNDRAUX_BUILD_ALL_TESTS)
             ${PROJECT_SOURCE_DIR}/SYSTEM/debug
             ${PROJECT_SOURCE_DIR}/CORE/startup
             ${PROJECT_SOURCE_DIR}/APP/backend_client
-            ${PROJECT_SOURCE_DIR}/APP/legacy_direct
             ${TUNDRAUX_GENERATED_DIR}
     )
 

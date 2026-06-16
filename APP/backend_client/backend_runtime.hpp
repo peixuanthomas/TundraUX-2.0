@@ -10,7 +10,6 @@ namespace tundraux::frontend {
 class BackendProcessTransport;
 
 struct BackendRuntimeOptions {
-    bool legacyDirect = false;
     std::string backendStdioPath;
     std::string filesRoot;
     std::string startupUserType = "guest";
@@ -31,7 +30,6 @@ public:
     const std::string& sessionId() const;
     const std::string& filesRoot() const;
     void setSessionId(std::string sessionId);
-    bool legacyDirect() const;
     void shutdown();
 
 private:
@@ -39,7 +37,6 @@ private:
     std::unique_ptr<BackendClient> client_;
     std::string sessionId_;
     std::string filesRoot_;
-    bool legacyDirect_ = false;
 };
 
 } // namespace tundraux::frontend

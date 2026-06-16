@@ -79,7 +79,7 @@ struct AccountSettingsState {
 };
 
 bool usesBackendMode(tundraux::frontend::BackendRuntime* backendRuntime) {
-    return backendRuntime != nullptr && !backendRuntime->legacyDirect();
+    return backendRuntime != nullptr && backendRuntime->client() != nullptr;
 }
 
 tundraux::frontend::ShellUser guestUser() {

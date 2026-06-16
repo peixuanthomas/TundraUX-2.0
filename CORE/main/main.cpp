@@ -34,9 +34,7 @@ void printUsage() {
 bool parseArgs(int argc, char* argv[], tundraux::frontend::BackendRuntimeOptions& options) {
     for (int i = 1; i < argc; ++i) {
         const std::string arg = argv[i];
-        if (arg == "--legacy-direct") {
-            return false;
-        } else if (arg == "--backend-stdio") {
+        if (arg == "--backend-stdio") {
             if (i + 1 >= argc) {
                 return false;
             }
@@ -101,11 +99,6 @@ bool backendSetupRequired(tundraux::frontend::BackendFacade& facade, std::string
     }
 
     error = result.message.empty() ? "Failed to determine setup state." : result.message;
-    return false;
-}
-
-bool legacySetupRequired(std::string& error) {
-    error = "Legacy direct setup is not available in the backend-separated frontend.";
     return false;
 }
 

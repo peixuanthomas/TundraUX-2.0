@@ -234,26 +234,26 @@ bool writesEncryptedRecordWhenStrictModeOn() {
     );
 }
 
-bool readsLegacyDirectTlogAsPlaintext() {
-    TempDirectory temp(uniqueTempPath("legacyRead"));
+bool readsObfuscatedTlogAsPlaintext() {
+    TempDirectory temp(uniqueTempPath("obfuscatedRead"));
     InMemoryUserStore users;
     users.strictMode = true;
     tundraux::backend::SessionService sessions(users);
     tundraux::backend::AuditService audit(users, sessions, temp.path().string());
 
-    const std::string line = "2026-06-04 16:00:00 | user=alice | type=admin | shell | legacy direct log";
-    if (!expect(writeLegacyTlogRecord(temp.path() / "legacy.tlog", line), "legacy tlog fixture should be written")) {
+    const std::string line = "2026-06-04 16:00:00 | user=alice | type=admin | shell | obfuscated log";
+    if (!expect(writeLegacyTlogRecord(temp.path() / "obfuscated.tlog", line), "obfuscated tlog fixture should be written")) {
         return false;
     }
 
     const auto guestSession = sessions.startGuestSession();
     const auto login = sessions.login(guestSession.sessionId, "alice", "Secret1");
-    if (!expect(login.ok, "admin login should succeed for legacy tlog read")) return false;
+    if (!expect(login.ok, "admin login should succeed for obfuscated tlog read")) return false;
 
-    const auto read = audit.readTlog(login.value.sessionId, "legacy.tlog");
-    if (!expect(read.ok, "admin should read legacy direct tlog")) return false;
-    if (!expect(read.value.lines.size() == 1, "expected one legacy tlog line")) return false;
-    return expect(read.value.lines[0] == line, "legacy tlog line should decrypt as plaintext");
+    const auto read = audit.readTlog(login.value.sessionId, "obfuscated.tlog");
+    if (!expect(read.ok, "admin should read obfuscated tlog")) return false;
+    if (!expect(read.value.lines.size() == 1, "expected one obfuscated tlog line")) return false;
+    return expect(read.value.lines[0] == line, "obfuscated tlog line should decrypt as plaintext");
 }
 
 bool guestAndUserCannotReadOrExportTlog() {
@@ -518,7 +518,7 @@ int main() {
     if (!writesEncryptedRecordWhenStrictModeOn()) {
         return 1;
     }
-    if (!readsLegacyDirectTlogAsPlaintext()) {
+    if (!readsObfuscatedTlogAsPlaintext()) {
         return 1;
     }
     if (!guestAndUserCannotReadOrExportTlog()) {

@@ -131,8 +131,6 @@ if(TUNDRAUX_BUILD_TESTS)
     add_subdirectory(tests)
 endif()
 
-option(TUNDRAUX_BUILD_LEGACY_DIRECT "Build legacy direct compatibility executable." OFF)
-
 if(TUNDRAUX_BUILD_FRONTEND)
 if(NOT WIN32)
     message(FATAL_ERROR "TUNDRAUX_BUILD_FRONTEND requires Windows-specific console APIs.")
@@ -233,59 +231,6 @@ add_custom_command(TARGET ${PROJECT_NAME} POST_BUILD
         $<TARGET_FILE:tundraux_backend_stdio>
         $<TARGET_FILE_DIR:${PROJECT_NAME}>
 )
-
-if(TUNDRAUX_BUILD_LEGACY_DIRECT)
-add_executable(${PROJECT_NAME}_legacy_direct)
-
-target_sources(${PROJECT_NAME}_legacy_direct
-    PRIVATE
-        ${TUNDRAUX_CORE_SOURCES}
-        ${TUNDRAUX_APP_COMMON_SOURCES}
-        APP/legacy_direct/legacy_direct.cpp
-        ${TUNDRAUX_USER_SOURCES}
-        USER/udata/udata.cpp
-        ${TUNDRAUX_SYSTEM_SOURCES}
-)
-
-target_include_directories(${PROJECT_NAME}_legacy_direct
-    PRIVATE
-        ${PROJECT_SOURCE_DIR}/CORE/startup
-        ${PROJECT_SOURCE_DIR}/APP/account_settings
-        ${PROJECT_SOURCE_DIR}/APP/backend_client
-        ${PROJECT_SOURCE_DIR}/APP/editor
-        ${PROJECT_SOURCE_DIR}/APP/explorer
-        ${PROJECT_SOURCE_DIR}/APP/legacy_direct
-        ${PROJECT_SOURCE_DIR}/APP/shell
-        ${PROJECT_SOURCE_DIR}/USER/account
-        ${PROJECT_SOURCE_DIR}/USER/udata
-        ${PROJECT_SOURCE_DIR}/SYSTEM/audit
-        ${PROJECT_SOURCE_DIR}/SYSTEM/build_info
-        ${PROJECT_SOURCE_DIR}/SYSTEM/console
-        ${PROJECT_SOURCE_DIR}/SYSTEM/crypto
-        ${PROJECT_SOURCE_DIR}/SYSTEM/debug
-        ${PROJECT_SOURCE_DIR}/BACKEND/core
-        ${TUNDRAUX_GENERATED_DIR}
-)
-
-target_link_libraries(${PROJECT_NAME}_legacy_direct
-    PRIVATE
-        TundraTUI::TundraTUI
-        tundraux_backend_core
-        tundraux_protocol
-)
-
-target_compile_features(${PROJECT_NAME}_legacy_direct
-    PRIVATE
-        cxx_std_17
-)
-
-target_compile_definitions(${PROJECT_NAME}_legacy_direct
-    PRIVATE
-        TUNDRAUX_LEGACY_DIRECT_SETUP
-)
-
-add_dependencies(${PROJECT_NAME}_legacy_direct tundraux_backend_stdio tundraux_generate_build_info)
-endif()
 
 target_compile_definitions(${PROJECT_NAME}
     PRIVATE

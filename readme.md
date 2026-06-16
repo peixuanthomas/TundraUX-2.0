@@ -43,7 +43,7 @@ cmake --build build-backend
 
 The project also builds `tundraux_backend_stdio`, the local backend process boundary for the frontend/backend split. It exposes line-delimited JSON-RPC over stdin/stdout and supports sessions, login/logout, current-profile lookup, user listing and account mutations, strict-mode state, plain file operations, and TUX file operations.
 
-`TundraUX2` now starts the local stdio backend by default. In default backend mode, `login`, `logout`, `whoami`, `listuser`, `modify`, `strict`, `edit <filename>`, system command authorization for `/<cmd>`, and Explorer first-batch file operations are served through `tundraux_backend_stdio`. Use `--legacy-direct` to run the previous direct frontend logic for debugging.
+`TundraUX2` now starts the local stdio backend by default. In default backend mode, `login`, `logout`, `whoami`, `listuser`, `modify`, `strict`, `edit <filename>`, system command authorization for `/<cmd>`, and Explorer first-batch file operations are served through `tundraux_backend_stdio`.
 
 Phase 3 first-batch file migration moves Explorer file operations through the local backend. Explorer refresh, folder creation, delete, copy/move paste, search, and file open/edit use backend APIs.
 
@@ -107,7 +107,7 @@ The main shell prompt changes according to the current session:
 
 Debug-only commands are hidden from normal help output and include forced login, display color testing, and diagnostic utilities.
 
-In the default backend mode, `login`, `logout`, `whoami`, `listuser`, `modify`, `strict`, `edit <filename>`, and Explorer first-batch file operations are served through `tundraux_backend_stdio`. `listuser` is available only to admin/debug users in backend mode. Legacy direct mode is available with `--legacy-direct`.
+In the default backend mode, `login`, `logout`, `whoami`, `listuser`, `modify`, `strict`, `edit <filename>`, and Explorer first-batch file operations are served through `tundraux_backend_stdio`. `listuser` is available only to admin/debug users in backend mode.
 
 ## User Roles
 

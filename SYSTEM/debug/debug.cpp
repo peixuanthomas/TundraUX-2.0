@@ -208,7 +208,7 @@ void handleDebugForceLoginCommand(
     tundraux::frontend::ShellUser& currentUser,
     tundraux::frontend::BackendRuntime* backendRuntime
 ) {
-    if (backendRuntime == nullptr || backendRuntime->legacyDirect()) {
+    if (backendRuntime == nullptr || backendRuntime->client() == nullptr) {
         colorcout("red", "Backend unavailable. Debug force-login requires backend mode.\n");
         return;
     }

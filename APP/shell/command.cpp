@@ -40,9 +40,9 @@ bool canRunSystemCommand(const tundraux::frontend::ShellUser& currentUser) {
 }
 
 namespace {
-class LegacyAuditSink : public tundraux::frontend::FrontendAuditSink {
+class LocalAuditSink : public tundraux::frontend::FrontendAuditSink {
 public:
-    LegacyAuditSink() {
+    LocalAuditSink() {
         tundraux::audit::initialize();
     }
 
@@ -102,7 +102,7 @@ void syncStrictModeFromBackendFacade(tundraux::frontend::BackendFacade& facade) 
 } // namespace
 
 bool usesBackendRuntime(tundraux::frontend::BackendRuntime* backendRuntime) {
-    return backendRuntime != nullptr && !backendRuntime->legacyDirect();
+    return backendRuntime != nullptr && backendRuntime->client() != nullptr;
 }
 
 tundraux::frontend::ShellUser guestShellUser() {
@@ -185,21 +185,21 @@ bool redrawsShellHeader(const std::string& input) {
 void task_main(tundraux::frontend::BackendRuntime* backendRuntime) {
     std::unique_ptr<tundraux::frontend::BackendFacade> backendFacade;
     std::unique_ptr<tundraux::frontend::BackendAuditSink> backendAuditSink;
-    std::unique_ptr<LegacyAuditSink> legacyAuditSink;
+    std::unique_ptr<LocalAuditSink> localAuditSink;
     tundraux::frontend::FrontendAuditSink* auditSink = nullptr;
     if (backendRuntime != nullptr) {
         backendFacade = std::make_unique<tundraux::frontend::BackendFacade>(*backendRuntime);
-        if (!backendRuntime->legacyDirect() && backendFacade->active()) {
+        if (backendFacade->active()) {
             syncStrictModeFromBackendFacade(*backendFacade);
             backendAuditSink = std::make_unique<tundraux::frontend::BackendAuditSink>(*backendFacade);
             auditSink = backendAuditSink.get();
         } else {
-            legacyAuditSink = std::make_unique<LegacyAuditSink>();
-            auditSink = legacyAuditSink.get();
+            localAuditSink = std::make_unique<LocalAuditSink>();
+            auditSink = localAuditSink.get();
         }
     } else {
-        legacyAuditSink = std::make_unique<LegacyAuditSink>();
-        auditSink = legacyAuditSink.get();
+        localAuditSink = std::make_unique<LocalAuditSink>();
+        auditSink = localAuditSink.get();
     }
 
     renderShellHeader();

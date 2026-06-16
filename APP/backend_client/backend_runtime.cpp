@@ -109,22 +109,14 @@ BackendRuntime::~BackendRuntime() {
 bool BackendRuntime::initialize(const BackendRuntimeOptions& options, std::string& error) {
     shutdown();
     error.clear();
-    legacyDirect_ = options.legacyDirect;
 
     const std::string filesRoot = resolveFilesRootPath(options.filesRoot, error);
     if (filesRoot.empty()) {
-        legacyDirect_ = false;
         return false;
-    }
-
-    if (legacyDirect_) {
-        filesRoot_ = filesRoot;
-        return true;
     }
 
     const std::string backendPath = resolveBackendStdioPath(options.backendStdioPath, error);
     if (backendPath.empty()) {
-        legacyDirect_ = false;
         return false;
     }
 
@@ -132,7 +124,6 @@ bool BackendRuntime::initialize(const BackendRuntimeOptions& options, std::strin
     auto transport = std::make_unique<BackendProcessTransport>();
     if (!transport->start(backendPath, "", filesRoot, debugSessionToken)) {
         error = "Failed to start backend stdio process: " + backendPath;
-        legacyDirect_ = false;
         return false;
     }
 
@@ -143,7 +134,6 @@ bool BackendRuntime::initialize(const BackendRuntimeOptions& options, std::strin
     if (!session.ok) {
         error = "Failed to start backend session: " + session.message;
         transport->stop();
-        legacyDirect_ = false;
         return false;
     }
 
@@ -174,10 +164,6 @@ void BackendRuntime::setSessionId(std::string sessionId) {
     sessionId_ = std::move(sessionId);
 }
 
-bool BackendRuntime::legacyDirect() const {
-    return legacyDirect_;
-}
-
 void BackendRuntime::shutdown() {
     client_.reset();
     if (transport_) {
@@ -186,7 +172,6 @@ void BackendRuntime::shutdown() {
     }
     sessionId_.clear();
     filesRoot_.clear();
-    legacyDirect_ = false;
 }
 
 } // namespace tundraux::frontend

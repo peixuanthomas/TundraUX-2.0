@@ -1088,7 +1088,7 @@ void manage_users(
 ) {
     tundra_tui::set_title("User management");
 
-    if (backendRuntime == nullptr || backendRuntime->legacyDirect() ||
+    if (backendRuntime == nullptr ||
         backendRuntime->client() == nullptr || backendRuntime->sessionId().empty()) {
         renderBackendUnavailable("User management requires an active backend session.");
         if (auditSink != nullptr) {
