@@ -46,7 +46,8 @@ DirectoryStats scanDirectoryStats(const fs::path& path) {
     DirectoryStats stats;
     std::error_code error;
 
-    for (const auto& item : fs::directory_iterator(path, fs::directory_options::skip_permission_denied, error)) {
+    for ([[maybe_unused]] const auto& item :
+         fs::directory_iterator(path, fs::directory_options::skip_permission_denied, error)) {
         if (error) {
             ++stats.scanErrors;
             error.clear();

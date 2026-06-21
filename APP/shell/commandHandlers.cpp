@@ -523,7 +523,7 @@ void handleLogoutCommand(
 void handleListUserCommand(
     const std::string&,
     tundraux::frontend::BackendRuntime* backendRuntime,
-    tundraux::frontend::FrontendAuditSink* auditSink
+    tundraux::frontend::FrontendAuditSink*
 ) {
     if (usesBackend(backendRuntime)) {
         tundraux::frontend::BackendFacade facade(*backendRuntime);

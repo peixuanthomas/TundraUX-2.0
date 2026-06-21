@@ -31,15 +31,6 @@ void print_display_test_line(const std::string& colorName) {
 }
 }
 
-void delete_file() {
-    const std::string path = legacyUserDataPath();
-    if(std::remove(path.c_str()) == 0) {
-        colorcout("green", "User data file deleted successfully.\n");
-    } else {
-        colorcout("red", "Error deleting user data file or file does not exist.\n");
-    }
-}
-
 // List the whole structure of the legacy user data file for debugging.
 void struct_file() {
     std::ifstream in(legacyUserDataPath(), std::ios::binary);

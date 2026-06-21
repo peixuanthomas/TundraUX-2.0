@@ -156,9 +156,7 @@ bool replaceFileAtomically(const std::string& from, const std::string& to, std::
     - AddUser(const USER& user)：添加新用户，检查重名。
     - UpdateUser(const std::string& name, const USER& updatedUser)：更新指定用户信息。
     - RemoveUser(const std::string& name)：删除指定用户。
-    - ComparePassword(const std::string& name, const std::string& password)：验证用户名密码。
     - GetAllUsers()：返回用户列表引用（只读）。
-    - GetAllUsernames()：返回用户名列表（只读）。
 */
 DataManager::DataManager(const std::string& filename) : filename_(filename) {
     LoadUsersFromFile();
@@ -211,27 +209,8 @@ bool DataManager::RemoveUser(const std::string& name) {
     return true;
 }
 
-bool DataManager::ComparePassword(const std::string& name, const std::string& password) {
-    const std::string encryptedInput = encrypt(password);
-    for (const auto& u : userDataList) {
-        if (u.name == name) {
-            const std::string encryptedStored = encrypt(u.password); // Avoid decrypting stored password
-            return encryptedInput == encryptedStored;
-        }
-    }
-    return false;
-}
-
 const std::vector<USER>& DataManager::GetAllUsers() const {
     return userDataList;
-}
-
-const std::vector<std::string> DataManager::GetAllUsernames() const {
-    std::vector<std::string> usernames;
-    for (const auto& u : userDataList) {
-        usernames.push_back(u.name);
-    }
-    return usernames;
 }
 
 bool DataManager::GetStrictMode() const {
@@ -417,51 +396,3 @@ bool DataManager::SaveUsersToFile() {
     return true;
 }
 
-void createfile() {
-    std::ofstream file("user_data.dat", std::ios::binary);
-    if (!file) {
-        colorcout("red", "Error: Unable to create user data file.\n");
-        return;
-    }
-
-    int version = USER_DATA_VERSION_2_1;
-    const std::uint8_t strictValue = 0;
-    file.write(reinterpret_cast<const char*>(&version), sizeof(version));
-    file.write(reinterpret_cast<const char*>(&strictValue), sizeof(strictValue));
-    size_t userCount = 1;
-    file.write(reinterpret_cast<const char*>(&userCount), sizeof(userCount));
-    USER placeholder = {
-        "admin",
-        "null",
-        "null",
-        "Default placeholder user, should not appear in normal usage.",
-        0
-    };
-    auto writeString = [&file](const std::string& str) {
-        size_t length = str.size();
-        file.write(reinterpret_cast<const char*>(&length), sizeof(length));
-        file.write(str.data(), length);
-    };
-
-    writeString(placeholder.type);
-    writeString(placeholder.name);
-    writeString(placeholder.password);
-    writeString(placeholder.password_hint);
-    file.write(reinterpret_cast<const char*>(&placeholder.count), sizeof(placeholder.count));
-
-    file.close();
-    colorcout("green", "Data file created successfully.\n");
-}
-
-void listUser() {
-    DataManager dataManager("user_data.dat");
-    const auto& users = dataManager.GetAllUsers();
-    if (users.empty()) {
-        colorcout("yellow", "No users found.\n");
-        return;
-    }
-    colorcout("cyan", "Current Users:\n");
-    for (const auto& user : users) {
-        colorcout("white", "Username: " + user.name + "\n");
-    }
-}

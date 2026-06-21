@@ -49,21 +49,6 @@ bool parseArgs(int argc, char* argv[], tundraux::frontend::BackendRuntimeOptions
     return true;
 }
 
-int enterShell(tundraux::frontend::BackendRuntime& backendRuntime, const tundraux::frontend::BackendRuntimeOptions& options) {
-    std::string error;
-    if (!backendRuntime.initialize(options, error)) {
-        colorcout("red", error + "\n");
-        pause();
-        backendRuntimeForExit = nullptr;
-        return 1;
-    }
-
-    task_main(&backendRuntime);
-    backendRuntime.shutdown();
-    backendRuntimeForExit = nullptr;
-    return 0;
-}
-
 void displayLicense(std::ifstream& licenseFile) {
     std::string line;
     while (std::getline(licenseFile, line)) {

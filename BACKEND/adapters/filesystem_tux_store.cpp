@@ -284,23 +284,6 @@ void replaceFile(const std::filesystem::path& from, const std::filesystem::path&
 #endif
 }
 
-void moveFileReplacingDestination(const std::filesystem::path& from, const std::filesystem::path& to) {
-#ifdef _WIN32
-    if (!MoveFileExW(
-            from.wstring().c_str(),
-            to.wstring().c_str(),
-            MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH)) {
-        throw storageError();
-    }
-#else
-    std::error_code error;
-    std::filesystem::rename(from, to, error);
-    if (error) {
-        throw storageError();
-    }
-#endif
-}
-
 std::filesystem::path tempPathFor(const std::filesystem::path& destination) {
     const auto ticks = std::chrono::steady_clock::now().time_since_epoch().count();
     const auto threadId = std::hash<std::thread::id>{}(std::this_thread::get_id());
@@ -558,7 +541,7 @@ void FilesystemTuxStore::moveFile(const std::string& from, const std::string& to
             throw storageError();
         }
         if (overwrite) {
-            moveFileReplacingDestination(source, destination);
+            replaceFile(source, destination);
         } else {
             std::filesystem::rename(source, destination, error);
             if (error) {

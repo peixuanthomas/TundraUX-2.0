@@ -11,17 +11,13 @@ struct USER {
     int count;
 };
 
-void createfile();
-
 class DataManager {
     public:
         DataManager(const std::string& filename);
         bool AddUser(const USER& user);
         bool UpdateUser(const std::string& name, const USER& updatedUser);
         bool RemoveUser(const std::string& name);
-        bool ComparePassword(const std::string& name, const std::string& password);
         const std::vector<USER>& GetAllUsers() const;
-        const std::vector<std::string> GetAllUsernames() const;
         bool GetStrictMode() const;
         bool SetStrictMode(bool enabled);
     private:
@@ -31,4 +27,3 @@ class DataManager {
         void LoadUsersFromFile();
         bool SaveUsersToFile();
 };
-void listUser();

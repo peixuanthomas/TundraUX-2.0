@@ -4,7 +4,6 @@
 
 #include "backend_facade.hpp"
 
-void delete_file();
 void struct_file();
 void display_test(const std::string& colorName = "");
 void license();
@@ -33,5 +32,3 @@ void handleDebugForceLoginCommand(
     tundraux::frontend::BackendRuntime* backendRuntime
 );
 void dbg_env();
-void dbg_hexdump();
-void dbg_resetfail(const std::string& username);
